@@ -2,7 +2,6 @@ package exec
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,75 +85,40 @@ func setupCommitAndMergeTest(t *testing.T) (*TaskExecutor, string, string, strin
 	return te, repoDir, projectID, wtPath
 }
 
-// TestCommitAndMerge_AutoMergeFalse_SkipsMerge verifies that when auto_merge
-// is false, CommitAndMerge commits the changes but does NOT merge into the
-// target branch. The changes remain only on the task branch.
-func TestCommitAndMerge_AutoMergeFalse_SkipsMerge(t *testing.T) {
+// TestCommitAndMerge_LandsWhereAutoMergeSays: the flag is the only thing that decides whether the
+// commit also reaches the target branch. Committed stays local when it is off; on, the same commit
+// reaches master.
+func TestCommitAndMerge_LandsWhereAutoMergeSays(t *testing.T) {
 	t.Parallel()
-	te, repoDir, projectID, wtPath := setupCommitAndMergeTest(t)
+	for _, autoMerge := range []bool{false, true} {
+		name := "auto_merge_off_stays_on_the_task_branch"
+		if autoMerge {
+			name = "auto_merge_on_reaches_the_target_branch"
+		}
+		t.Run(name, func(t *testing.T) {
+			te, repoDir, projectID, wtPath := setupCommitAndMergeTest(t)
 
-	// feature.txt is unstaged on the task branch
-	err := te.merge.CommitAndMerge(projectID, "test-task", wtPath, "Test commit", false)
-	if err != nil {
-		t.Fatalf("CommitAndMerge failed: %v", err)
-	}
+			if err := te.merge.CommitAndMerge(projectID, "test-task", wtPath, "Test commit", autoMerge); err != nil {
+				t.Fatalf("CommitAndMerge failed: %v", err)
+			}
 
-	// Verify the commit happened on the task branch
-	cmd := exec.Command("git", "-C", wtPath, "log", "--oneline", "task/test-task")
-	out, _ := cmd.Output()
-	if !strings.Contains(string(out), "Test commit") {
-		t.Error("commit should exist on task branch")
-	}
+			// The commit is always on the task branch, merged or not.
+			if out := runGitCmd(wtPath, "log", "--oneline", "task/test-task"); !strings.Contains(out.output, "Test commit") {
+				t.Errorf("the commit is missing from the task branch:\n%s", out.output)
+			}
+			taskFile := runGitCmd(repoDir, "show", "task/test-task:feature.txt")
+			if taskFile.exitCode != 0 || !strings.Contains(taskFile.output, "feature content") {
+				t.Errorf("feature.txt on the task branch: %q (exit %d)", taskFile.output, taskFile.exitCode)
+			}
 
-	// Verify master does NOT have the commit (merge was skipped)
-	cmd = exec.Command("git", "-C", repoDir, "log", "--oneline", "master")
-	out, _ = cmd.Output()
-	if strings.Contains(string(out), "Test commit") {
-		t.Error("master should NOT contain the commit when auto_merge=false")
-	}
-
-	// Verify feature.txt exists on task branch but not on master
-	cmd = exec.Command("git", "-C", repoDir, "show", "task/test-task:feature.txt")
-	out, err = cmd.Output()
-	if err != nil {
-		t.Fatalf("feature.txt should exist on task branch: %v", err)
-	}
-	if !strings.Contains(string(out), "feature content") {
-		t.Error("feature.txt should have feature content on task branch")
-	}
-
-	cmd = exec.Command("git", "-C", repoDir, "show", "master:feature.txt")
-	_, err = cmd.Output()
-	if err == nil {
-		t.Error("feature.txt should NOT exist on master when auto_merge=false")
-	}
-}
-
-// TestCommitAndMerge_AutoMergeTrue_MergesIntoTarget verifies that when auto_merge
-// is true, CommitAndMerge commits AND merges the changes into the target branch.
-func TestCommitAndMerge_AutoMergeTrue_MergesIntoTarget(t *testing.T) {
-	t.Parallel()
-	te, repoDir, projectID, wtPath := setupCommitAndMergeTest(t)
-
-	err := te.merge.CommitAndMerge(projectID, "test-task", wtPath, "Test commit", true)
-	if err != nil {
-		t.Fatalf("CommitAndMerge failed: %v", err)
-	}
-
-	// Verify master HAS the commit (merge succeeded)
-	cmd := exec.Command("git", "-C", repoDir, "log", "--oneline", "master")
-	out, _ := cmd.Output()
-	if !strings.Contains(string(out), "Test commit") {
-		t.Errorf("master should contain the commit when auto_merge=true. Log: %s", string(out))
-	}
-
-	// Verify feature.txt exists on master
-	cmd = exec.Command("git", "-C", repoDir, "show", "master:feature.txt")
-	out, err = cmd.Output()
-	if err != nil {
-		t.Fatalf("feature.txt should exist on master after merge: %v", err)
-	}
-	if !strings.Contains(string(out), "feature content") {
-		t.Error("feature.txt should have feature content on master after merge")
+			// The point of the flag: whether the work reached the target branch.
+			masterHasIt := strings.Contains(runGitCmd(repoDir, "log", "--oneline", "master").output, "Test commit")
+			masterFile := runGitCmd(repoDir, "show", "master:feature.txt")
+			delivered := masterFile.exitCode == 0 && strings.Contains(masterFile.output, "feature content")
+			if masterHasIt != autoMerge || delivered != autoMerge {
+				t.Errorf("auto_merge=%v: master has the commit = %v, holds feature.txt = %v (show: %s)",
+					autoMerge, masterHasIt, delivered, masterFile.output)
+			}
+		})
 	}
 }

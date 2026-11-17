@@ -70,12 +70,29 @@ func TestHostWrite_LeavesNoTempAndMakesParents(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	got, err := os.ReadFile(filepath.Join(dir, "nested", "deep", "note.txt"))
+	full := filepath.Join(dir, "nested", "deep", "note.txt")
+	got, err := os.ReadFile(full)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(got) != "hello" {
 		t.Errorf("wrote %q, want %q", got, "hello")
+	}
+	// A file the agent writes is a file in the task's repository: its mode is the one git and the
+	// reviewer expect, not whatever the temporary the atomic write went through happened to have.
+	if info, err := os.Stat(full); err != nil {
+		t.Fatal(err)
+	} else if perm := info.Mode().Perm(); perm != 0o644 {
+		t.Errorf("written file mode = %o, want 0644", perm)
+	}
+	for _, d := range []string{"nested", filepath.Join("nested", "deep")} {
+		di, err := os.Stat(filepath.Join(dir, d))
+		if err != nil {
+			t.Fatalf("created dir %q missing: %v", d, err)
+		}
+		if !di.IsDir() {
+			t.Errorf("%q is not a directory", d)
+		}
 	}
 	assertNoAtomicTemps(t, dir, filepath.Join(dir, "nested"), filepath.Join(dir, "nested", "deep"))
 }

@@ -2,63 +2,42 @@ package exec
 
 import "testing"
 
-func TestCountEditLines_CompleteJSON(t *testing.T) {
+// TestCountEditLines counts what an edit_file call added and removed for the loop hint's wording. The
+// partial-JSON row is the reason it is tolerant: a streamed call is scored before its array is complete,
+// and a parse failure must count nothing rather than guess.
+func TestCountEditLines(t *testing.T) {
 	t.Parallel()
-	args := `{"path":"foo.go","edits":[{"oldText":"line1\nline2","newText":"line1\nline2\nline3"}]}`
-	added, removed := countEditLines(args)
-	if added != 2 {
-		t.Errorf("added = %d, want 2", added)
-	}
-	if removed != 1 {
-		t.Errorf("removed = %d, want 1", removed)
-	}
-}
-
-func TestCountEditLines_MultipleEdits(t *testing.T) {
-	t.Parallel()
-	args := `{"path":"foo.go","edits":[
-		{"oldText":"a\nb\nc","newText":"a\nb"},
-		{"oldText":"x\ny","newText":"x\ny\nz\nw"}
-	]}`
-	added, removed := countEditLines(args)
-	// edit1: newText "a\nb" has 1 newline; edit2: newText "x\ny\nz\nw" has 3 newlines => 4 total
-	// edit1: oldText "a\nb\nc" has 2 newlines; edit2: oldText "x\ny" has 1 newline => 3 total
-	if added != 4 {
-		t.Errorf("added = %d, want 4", added)
-	}
-	if removed != 3 {
-		t.Errorf("removed = %d, want 3", removed)
-	}
-}
-
-func TestCountEditLines_EmptyEdits(t *testing.T) {
-	t.Parallel()
-	args := `{"path":"foo.go","edits":[]}`
-	added, removed := countEditLines(args)
-	if added != 0 || removed != 0 {
-		t.Errorf("added = %d, removed = %d, want 0, 0", added, removed)
-	}
-}
-
-func TestCountEditLines_PartialJSON(t *testing.T) {
-	t.Parallel()
-	// Partial JSON — edits array not yet complete, parseToolArgs returns nil
-	args := `{"path":"foo.go","edits":[{"oldText":"line1`
-	added, removed := countEditLines(args)
-	if added != 0 || removed != 0 {
-		t.Errorf("added = %d, removed = %d, want 0, 0 (partial JSON)", added, removed)
-	}
-}
-
-func TestCountEditLines_SingleLineNoNewline(t *testing.T) {
-	t.Parallel()
-	args := `{"path":"foo.go","edits":[{"oldText":"single","newText":"replacement"}]}`
-	added, removed := countEditLines(args)
-	if added != 0 {
-		t.Errorf("added = %d, want 0 (no newlines in single line)", added)
-	}
-	if removed != 0 {
-		t.Errorf("removed = %d, want 0 (no newlines in single line)", removed)
+	for _, tc := range []struct {
+		name        string
+		args        string
+		wantAdded   int
+		wantRemoved int
+	}{
+		{
+			name:        "one edit that adds a line",
+			args:        `{"path":"foo.go","edits":[{"oldText":"line1\nline2","newText":"line1\nline2\nline3"}]}`,
+			wantAdded:   2,
+			wantRemoved: 1,
+		},
+		{
+			name: "every edit in the array counts",
+			args: `{"path":"foo.go","edits":[
+				{"oldText":"a\nb\nc","newText":"a\nb"},
+				{"oldText":"x\ny","newText":"x\ny\nz\nw"}
+			]}`,
+			wantAdded:   4,
+			wantRemoved: 3,
+		},
+		{name: "no edits", args: `{"path":"foo.go","edits":[]}`},
+		{name: "an array still being streamed", args: `{"path":"foo.go","edits":[{"oldText":"line1`},
+		{name: "a one-line replacement changes no line count", args: `{"path":"foo.go","edits":[{"oldText":"single","newText":"replacement"}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			added, removed := countEditLines(tc.args)
+			if added != tc.wantAdded || removed != tc.wantRemoved {
+				t.Errorf("countEditLines = (%d, %d), want (%d, %d)", added, removed, tc.wantAdded, tc.wantRemoved)
+			}
+		})
 	}
 }
 

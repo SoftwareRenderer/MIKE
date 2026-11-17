@@ -312,44 +312,37 @@ func TestAutoAnswer_TextStopContinuesFromParentContext(t *testing.T) {
 	}
 }
 
-// TestAutoAnswer_UserStartedSubtaskStillWaitsForTheUser pins the gate: a run begun by a click on
-// this very task is a run somebody is watching, so a text-only stop settles in review unanswered.
-func TestAutoAnswer_UserStartedSubtaskStillWaitsForTheUser(t *testing.T) {
-	m := newTextStopMock(false)
-	defer m.srv.Close()
-	run := startTextStopRun(t, m, func(task *types.Task) { task.Autostarted = false })
+// TestAutoAnswer_TextStopIsNotAnsweredWhenNobodyIsWatching pins both halves of the eligibility
+// gate: a run begun by a click on this very task is a run somebody is watching, and in plan mode a
+// text answer is the deliverable. Either way the stop settles in review unanswered, and the run waits
+// for the user.
+func TestAutoAnswer_TextStopIsNotAnsweredWhenNobodyIsWatching(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*types.Task)
+	}{
+		{"a user-started subtask waits for the user", func(task *types.Task) { task.Autostarted = false }},
+		{"a plan-mode answer is the deliverable", func(task *types.Task) { task.OperatingMode = types.ModePlan }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTextStopMock(false)
+			defer m.srv.Close()
+			run := startTextStopRun(t, m, tc.mutate)
 
-	if row := waitForStatus(t, run, types.StatusReview); row == nil {
-		t.Fatalf("task never reached review (streaming calls = %d)", m.streamCalls.Load())
-	}
-	time.Sleep(500 * time.Millisecond)
-	if got := m.streamCalls.Load(); got != 1 {
-		t.Errorf("streaming calls = %d, want 1: a user-started run must wait for the user after a text answer", got)
-	}
-	if got := m.answerCalls.Load(); got != 0 {
-		t.Errorf("answering calls = %d, want 0", got)
-	}
-	if rows := run.autoAnswerRows(t); len(rows) != 0 {
-		t.Errorf("advisory rows with kind %q = %d, want 0", advisoryAutoAnswer, len(rows))
-	}
-}
-
-// TestAutoAnswer_PlanModeStopIsTheDeliverable pins the other half of the gate: in plan mode a text
-// answer is what the task was asked for, so answering it from the parent would talk over it.
-func TestAutoAnswer_PlanModeStopIsTheDeliverable(t *testing.T) {
-	m := newTextStopMock(false)
-	defer m.srv.Close()
-	run := startTextStopRun(t, m, func(task *types.Task) { task.OperatingMode = types.ModePlan })
-
-	if row := waitForStatus(t, run, types.StatusReview); row == nil {
-		t.Fatalf("task never reached review (streaming calls = %d)", m.streamCalls.Load())
-	}
-	time.Sleep(500 * time.Millisecond)
-	if got := m.streamCalls.Load(); got != 1 {
-		t.Errorf("streaming calls = %d, want 1", got)
-	}
-	if got := m.answerCalls.Load(); got != 0 {
-		t.Errorf("answering calls = %d, want 0", got)
+			if row := waitForStatus(t, run, types.StatusReview); row == nil {
+				t.Fatalf("task never reached review (streaming calls = %d)", m.streamCalls.Load())
+			}
+			time.Sleep(500 * time.Millisecond)
+			if got := m.streamCalls.Load(); got != 1 {
+				t.Errorf("streaming calls = %d, want 1: an unanswered run must wait for the user after a text answer", got)
+			}
+			if got := m.answerCalls.Load(); got != 0 {
+				t.Errorf("answering calls = %d, want 0", got)
+			}
+			if rows := run.autoAnswerRows(t); len(rows) != 0 {
+				t.Errorf("advisory rows with kind %q = %d, want 0", advisoryAutoAnswer, len(rows))
+			}
+		})
 	}
 }
 

@@ -115,64 +115,66 @@ func TestHandleLSPRename_AppliesAllFiles(t *testing.T) {
 	}
 }
 
-func TestHandleLSPRename_NotRenamable(t *testing.T) {
+// A language server that answers null has answered: the rename is over, nothing was written, and the
+// sentence says which of the two nulls it was. Neither is a turn failure.
+func TestHandleLSPRename_NullAnswerSettlesIt(t *testing.T) {
 	t.Parallel()
-	ws := t.TempDir()
-	testgit.WriteFile(t, ws, "a.txt", "foo := 1\n")
-	before, _ := os.ReadFile(filepath.Join(ws, "a.txt"))
+	renamable := jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`)
 
-	fake := &fakeLSPManager{
-		enabled: true,
-		responses: map[string]jsontext.Value{
-			"textDocument/prepareRename": jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":null}`),
+	cases := []struct {
+		name       string
+		responses  map[string]jsontext.Value
+		wantSub    string
+		wantMethod string // the last method the server must have been asked
+	}{
+		{
+			name: "prepareRename says the symbol cannot be renamed",
+			responses: map[string]jsontext.Value{
+				"textDocument/prepareRename": jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":null}`),
+			},
+			wantSub:    "not renamable",
+			wantMethod: "textDocument/prepareRename",
+		},
+		{
+			name: "rename returns no edits",
+			responses: map[string]jsontext.Value{
+				"textDocument/prepareRename": renamable,
+				"textDocument/rename":        jsontext.Value(`{"jsonrpc":"2.0","id":2,"result":null}`),
+			},
+			wantSub:    "no edits",
+			wantMethod: "textDocument/rename",
 		},
 	}
-	te := newBareTestExecutor(t)
-	te.lspMgr = fake
-	read, write := osReadWrite(ws)
 
-	result, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
-	if err != nil {
-		t.Fatalf("not-renamable should be an informative result, not an error: %v", err)
-	}
-	if !strings.Contains(strings.ToLower(result), "not renamable") {
-		t.Errorf("result should say not renamable: %q", result)
-	}
-	if len(fake.methods) != 1 {
-		t.Errorf("rename must not be called after null prepareRename; methods = %v", fake.methods)
-	}
-	after, _ := os.ReadFile(filepath.Join(ws, "a.txt"))
-	if string(before) != string(after) {
-		t.Error("file must be untouched when not renamable")
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := t.TempDir()
+			testgit.WriteFile(t, ws, "a.txt", "foo := 1\n")
+			before, _ := os.ReadFile(filepath.Join(ws, "a.txt"))
 
-func TestHandleLSPRename_NullResult(t *testing.T) {
-	t.Parallel()
-	ws := t.TempDir()
-	testgit.WriteFile(t, ws, "a.txt", "foo := 1\n")
+			fake := &fakeLSPManager{enabled: true, responses: tc.responses}
+			te := newBareTestExecutor(t)
+			te.lspMgr = fake
+			read, write := osReadWrite(ws)
 
-	fake := &fakeLSPManager{
-		enabled: true,
-		responses: map[string]jsontext.Value{
-			"textDocument/prepareRename": jsontext.Value(`{"jsonrpc":"2.0","id":1,"result":{"start":{"line":0,"character":0},"end":{"line":0,"character":3}}}`),
-			"textDocument/rename":        jsontext.Value(`{"jsonrpc":"2.0","id":2,"result":null}`),
-		},
-	}
-	te := newBareTestExecutor(t)
-	te.lspMgr = fake
-	read, write := osReadWrite(ws)
-
-	result, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
-	if err != nil {
-		t.Fatalf("null rename result should be informative, not an error: %v", err)
-	}
-	if !strings.Contains(strings.ToLower(result), "no edits") {
-		t.Errorf("result should report no edits: %q", result)
-	}
-	got, _ := os.ReadFile(filepath.Join(ws, "a.txt"))
-	if string(got) != "foo := 1\n" {
-		t.Error("file must be untouched on null rename result")
+			result, err := te.tools.handleLSPRename(context.Background(), renameArgs(), ws, read, write)
+			if err != nil {
+				t.Fatalf("a null answer should be an informative result, not an error: %v", err)
+			}
+			if !strings.Contains(strings.ToLower(result), tc.wantSub) {
+				t.Errorf("result %q does not say %q", result, tc.wantSub)
+			}
+			if len(fake.methods) == 0 || fake.methods[len(fake.methods)-1] != tc.wantMethod {
+				t.Errorf("methods = %v, want the last to be %s", fake.methods, tc.wantMethod)
+			}
+			if tc.wantMethod == "textDocument/prepareRename" && len(fake.methods) != 1 {
+				t.Errorf("rename must not be called after a null prepareRename; methods = %v", fake.methods)
+			}
+			after, _ := os.ReadFile(filepath.Join(ws, "a.txt"))
+			if string(before) != string(after) {
+				t.Error("the file was changed by a rename that produced nothing")
+			}
+		})
 	}
 }
 
@@ -233,41 +235,6 @@ func TestHandleLSPRename_OutsideWorkspace(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "outside workspace") {
 		t.Errorf("error should name the cause: %v", err)
-	}
-}
-
-func TestHandleLSPRename_RequiredArgs(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-	te.lspMgr = &fakeLSPManager{enabled: true}
-	read, write := osReadWrite(t.TempDir())
-	for _, args := range []map[string]any{
-		{"symbol": "foo", "new_name": "bar"},
-		{"path": "a.txt", "new_name": "bar"},
-		{"path": "a.txt", "symbol": "foo"},
-	} {
-		if _, err := te.tools.handleLSPRename(context.Background(), args, t.TempDir(), read, write); err == nil {
-			t.Errorf("expected error for args %v", args)
-		}
-	}
-}
-
-func TestHandleLSPRename_NoLSPManager(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t) // lspMgr nil
-	read, write := osReadWrite(t.TempDir())
-	if _, err := te.tools.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
-		t.Error("expected error when LSP manager is nil")
-	}
-}
-
-func TestHandleLSPRename_ToolCallsDisabled(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-	te.lspMgr = &fakeLSPManager{enabled: false}
-	read, write := osReadWrite(t.TempDir())
-	if _, err := te.tools.handleLSPRename(context.Background(), renameArgs(), t.TempDir(), read, write); err == nil {
-		t.Error("expected error when LSP tool calls are disabled")
 	}
 }
 

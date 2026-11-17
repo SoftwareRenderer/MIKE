@@ -13,121 +13,123 @@ func rng(s, e lspPosition) lspRange { return lspRange{Start: s, End: e} }
 
 // ─── applyTextEdits ──────────────────────────────────────────────────────────
 
-func TestApplyTextEdits_Single(t *testing.T) {
+// applyTextEdits finds every position in the original content and writes the result in one pass, so
+// an edit delivered later must not be measured against a string an earlier edit already changed —
+// the offset-invalidation trap a language server's WorkspaceEdit lands in otherwise. A range that
+// cannot be honoured is refused as a whole call: a rename that applied half its edits would leave the
+// task holding a broken file.
+func TestApplyTextEdits(t *testing.T) {
 	t.Parallel()
-	content := "foo bar baz"
-	edits := []lspTextEdit{{Range: rng(pos(0, 4), pos(0, 7)), NewText: "baz"}}
-	got, err := applyTextEdits(content, edits)
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name    string
+		content string
+		edits   []lspTextEdit
+		want    string
+		wantErr string
+	}{
+		{
+			name:    "one replacement",
+			content: "foo bar baz",
+			edits:   []lspTextEdit{{Range: rng(pos(0, 4), pos(0, 7)), NewText: "baz"}},
+			want:    "foo baz baz",
+		},
+		{
+			name:    "edits delivered in reverse order of position",
+			content: "aaa bbb ccc",
+			edits: []lspTextEdit{
+				{Range: rng(pos(0, 8), pos(0, 11)), NewText: "DDD"},
+				{Range: rng(pos(0, 4), pos(0, 7)), NewText: "BBB"},
+			},
+			want: "aaa BBB DDD",
+		},
+		{
+			name:    "a range spanning two lines",
+			content: "line one\nline two\nline three",
+			edits:   []lspTextEdit{{Range: rng(pos(1, 0), pos(2, 0)), NewText: ""}},
+			want:    "line one\nline three",
+		},
+		{
+			name:    "no edits",
+			content: "unchanged",
+			edits:   nil,
+			want:    "unchanged",
+		},
+		{
+			name:    "an empty range inserts",
+			content: "ab",
+			edits:   []lspTextEdit{{Range: rng(pos(0, 1), pos(0, 1)), NewText: "XYZ"}},
+			want:    "aXYZb",
+		},
+		{
+			name:    "an insertion at the end of the file",
+			content: "end",
+			edits:   []lspTextEdit{{Range: rng(pos(0, 3), pos(0, 3)), NewText: "!"}},
+			want:    "end!",
+		},
+		{
+			name:    "end before start",
+			content: "a\nb",
+			edits:   []lspTextEdit{{Range: rng(pos(1, 0), pos(0, 0)), NewText: "x"}},
+			wantErr: "precedes",
+		},
+		{
+			name:    "overlapping ranges",
+			content: "0123456789",
+			edits: []lspTextEdit{
+				{Range: rng(pos(0, 2), pos(0, 5)), NewText: "A"},
+				{Range: rng(pos(0, 4), pos(0, 7)), NewText: "B"},
+			},
+			wantErr: "overlap",
+		},
+		{
+			name:    "a line past the end of the file",
+			content: "one line",
+			edits:   []lspTextEdit{{Range: rng(pos(5, 0), pos(5, 1)), NewText: "x"}},
+			wantErr: "out of range",
+		},
 	}
-	if got != "foo baz baz" {
-		t.Errorf("got %q, want %q", got, "foo baz baz")
-	}
-}
 
-func TestApplyTextEdits_MultipleOutOfOrder(t *testing.T) {
-	t.Parallel()
-	// Edits delivered in reverse order of position — the classic offset
-	// invalidation trap. Both must land correctly.
-	content := "aaa bbb ccc"
-	edits := []lspTextEdit{
-		{Range: rng(pos(0, 8), pos(0, 11)), NewText: "DDD"}, // ccc -> DDD (later first)
-		{Range: rng(pos(0, 4), pos(0, 7)), NewText: "BBB"},  // bbb -> BBB
-	}
-	got, err := applyTextEdits(content, edits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "aaa BBB DDD" {
-		t.Errorf("got %q, want %q", got, "aaa BBB DDD")
-	}
-}
-
-func TestApplyTextEdits_MultiLine(t *testing.T) {
-	t.Parallel()
-	content := "line one\nline two\nline three"
-	// Delete "line two\n" entirely (range spans two lines)
-	edits := []lspTextEdit{{Range: rng(pos(1, 0), pos(2, 0)), NewText: ""}}
-	got, err := applyTextEdits(content, edits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "line one\nline three" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestApplyTextEdits_EmptySet(t *testing.T) {
-	t.Parallel()
-	got, err := applyTextEdits("unchanged", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "unchanged" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestApplyTextEdits_Insertion(t *testing.T) {
-	t.Parallel()
-	content := "ab"
-	edits := []lspTextEdit{{Range: rng(pos(0, 1), pos(0, 1)), NewText: "XYZ"}}
-	got, err := applyTextEdits(content, edits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "aXYZb" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestApplyTextEdits_AtEOF(t *testing.T) {
-	t.Parallel()
-	content := "end"
-	edits := []lspTextEdit{{Range: rng(pos(0, 3), pos(0, 3)), NewText: "!"}}
-	got, err := applyTextEdits(content, edits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != "end!" {
-		t.Errorf("got %q", got)
-	}
-}
-
-func TestApplyTextEdits_InvalidRange(t *testing.T) {
-	t.Parallel()
-	edits := []lspTextEdit{{Range: rng(pos(1, 0), pos(0, 0)), NewText: "x"}}
-	if _, err := applyTextEdits("a\nb", edits); err == nil {
-		t.Error("expected error for end-before-start range")
-	}
-}
-
-func TestApplyTextEdits_Overlapping(t *testing.T) {
-	t.Parallel()
-	content := "0123456789"
-	edits := []lspTextEdit{
-		{Range: rng(pos(0, 2), pos(0, 5)), NewText: "A"},
-		{Range: rng(pos(0, 4), pos(0, 7)), NewText: "B"},
-	}
-	if _, err := applyTextEdits(content, edits); err == nil {
-		t.Error("expected error for overlapping edits")
-	}
-}
-
-func TestApplyTextEdits_OutOfBoundsLine(t *testing.T) {
-	t.Parallel()
-	edits := []lspTextEdit{{Range: rng(pos(5, 0), pos(5, 1)), NewText: "x"}}
-	if _, err := applyTextEdits("one line", edits); err == nil {
-		t.Error("expected error for line past end of file")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := applyTextEdits(tc.content, tc.edits)
+			if tc.wantErr != "" {
+				if err == nil {
+					t.Fatalf("expected an error saying %q, got result %q", tc.wantErr, got)
+				}
+				if !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error %q does not say %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("applyTextEdits: %v", err)
+			}
+			if got != tc.want {
+				t.Errorf("got %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
 // ─── parseWorkspaceEdit ──────────────────────────────────────────────────────
 
-func TestParseWorkspaceEdit_ChangesMap(t *testing.T) {
+// A language server may answer a rename with either shape of WorkspaceEdit, with nothing at all, or
+// with an error envelope. Each is read here and nowhere else, and an unsupported change kind is
+// refused by name rather than skipped — silently dropping a rename file is how a rename lands half
+// applied.
+func TestParseWorkspaceEdit(t *testing.T) {
 	t.Parallel()
-	resp := jsontext.Value(`{
+	cases := []struct {
+		name string
+		resp jsontext.Value
+		want map[string][]lspTextEdit
+		// wantErr is a substring of the refusal; wantErrIs is the sentinel it must wrap.
+		wantErr   string
+		wantErrIs error
+	}{
+		{
+			name: "the changes map",
+			resp: jsontext.Value(`{
 		"jsonrpc": "2.0", "id": 7,
 		"result": {
 			"changes": {
@@ -140,25 +142,18 @@ func TestParseWorkspaceEdit_ChangesMap(t *testing.T) {
 				]
 			}
 		}
-	}`)
-	edits, err := parseWorkspaceEdit(resp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(edits) != 2 {
-		t.Fatalf("want 2 files, got %d", len(edits))
-	}
-	if n := len(edits["file:///w/b.ts"]); n != 2 {
-		t.Errorf("want 2 edits in b.ts, got %d", n)
-	}
-	if got := edits["file:///w/a.ts"][0].NewText; got != "loadDraftText" {
-		t.Errorf("newText = %q", got)
-	}
-}
-
-func TestParseWorkspaceEdit_DocumentChanges(t *testing.T) {
-	t.Parallel()
-	resp := jsontext.Value(`{
+	}`),
+			want: map[string][]lspTextEdit{
+				"file:///w/a.ts": {{Range: rng(pos(0, 9), pos(0, 21)), NewText: "loadDraftText"}},
+				"file:///w/b.ts": {
+					{Range: rng(pos(0, 9), pos(0, 21)), NewText: "loadDraftText"},
+					{Range: rng(pos(3, 11), pos(3, 23)), NewText: "loadDraftText"},
+				},
+			},
+		},
+		{
+			name: "documentChanges",
+			resp: jsontext.Value(`{
 		"jsonrpc": "2.0", "id": 8,
 		"result": {
 			"documentChanges": [
@@ -169,105 +164,143 @@ func TestParseWorkspaceEdit_DocumentChanges(t *testing.T) {
 				 ]}
 			]
 		}
-	}`)
-	edits, err := parseWorkspaceEdit(resp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if n := len(edits["file:///w/a.ts"]); n != 1 {
-		t.Errorf("want 1 edit, got %d", n)
-	}
-}
-
-func TestParseWorkspaceEdit_UnknownChangeKind(t *testing.T) {
-	t.Parallel()
-	resp := jsontext.Value(`{
+	}`),
+			want: map[string][]lspTextEdit{
+				"file:///w/a.ts": {{Range: rng(pos(0, 9), pos(0, 21)), NewText: "y"}},
+			},
+		},
+		{
+			name: "an unsupported change kind is named",
+			resp: jsontext.Value(`{
 		"jsonrpc": "2.0", "id": 9,
 		"result": {
 			"documentChanges": [
 				{"kind": "rename", "oldUri": "file:///w/a.ts", "newUri": "file:///w/a2.ts"}
 			]
 		}
-	}`)
-	_, err := parseWorkspaceEdit(resp)
-	if err == nil {
-		t.Fatal("expected error for unsupported documentChanges kind")
+	}`),
+			wantErr: "rename",
+		},
+		{
+			name: "a null result is no edits",
+			resp: jsontext.Value(`{"jsonrpc": "2.0", "id": 10, "result": null}`),
+			want: nil,
+		},
+		{
+			name:    "an error envelope carries code and message",
+			resp:    jsontext.Value(`{"jsonrpc": "2.0", "id": 11, "error": {"code": -32602, "message": "Invalid newName"}}`),
+			wantErr: "-32602",
+		},
+		{
+			name:    "a result with neither shape is refused",
+			resp:    jsontext.Value(`{"jsonrpc": "2.0", "id": 12, "result": {"foo": "bar"}}`),
+			wantErr: "no changes or documentChanges",
+		},
 	}
-	if !strings.Contains(err.Error(), "rename") {
-		t.Errorf("error should name the unsupported kind, got: %v", err)
-	}
-}
 
-func TestParseWorkspaceEdit_NullResult(t *testing.T) {
-	t.Parallel()
-	resp := jsontext.Value(`{"jsonrpc": "2.0", "id": 10, "result": null}`)
-	edits, err := parseWorkspaceEdit(resp)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if edits != nil {
-		t.Errorf("want nil for null result, got %v", edits)
-	}
-}
-
-func TestParseWorkspaceEdit_LSPError(t *testing.T) {
-	t.Parallel()
-	resp := jsontext.Value(`{"jsonrpc": "2.0", "id": 11, "error": {"code": -32602, "message": "Invalid newName"}}`)
-	_, err := parseWorkspaceEdit(resp)
-	if err == nil {
-		t.Fatal("expected error for LSP error envelope")
-	}
-	if !strings.Contains(err.Error(), "-32602") || !strings.Contains(err.Error(), "Invalid newName") {
-		t.Errorf("error should carry code+message, got: %v", err)
-	}
-}
-
-func TestParseWorkspaceEdit_UnexpectedShape(t *testing.T) {
-	t.Parallel()
-	resp := jsontext.Value(`{"jsonrpc": "2.0", "id": 12, "result": {"foo": "bar"}}`)
-	if _, err := parseWorkspaceEdit(resp); err == nil {
-		t.Error("expected error for result without changes/documentChanges")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			edits, err := parseWorkspaceEdit(tc.resp)
+			if tc.wantErr != "" || tc.wantErrIs != nil {
+				if err == nil {
+					t.Fatalf("expected an error, got %v", edits)
+				}
+				if tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error %q does not say %q", err, tc.wantErr)
+				}
+				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+					t.Errorf("error %q does not wrap %v", err, tc.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("parseWorkspaceEdit: %v", err)
+			}
+			if len(edits) != len(tc.want) {
+				t.Fatalf("got %d files, want %d: %v", len(edits), len(tc.want), edits)
+			}
+			for uri, wantEdits := range tc.want {
+				got := edits[uri]
+				if len(got) != len(wantEdits) {
+					t.Errorf("%s: got %d edits, want %d", uri, len(got), len(wantEdits))
+					continue
+				}
+				for i := range got {
+					if got[i] != wantEdits[i] {
+						t.Errorf("%s edit %d = %+v, want %+v", uri, i, got[i], wantEdits[i])
+					}
+				}
+			}
+		})
 	}
 }
 
 // ─── workspaceEditTargets ────────────────────────────────────────────────────
 
-func TestWorkspaceEditTargets_AllInside(t *testing.T) {
+// A language server names its own files, so every URI of the answer is jailed to the workspace
+// before a byte is written: a sibling directory sharing the workspace's prefix is not inside it, and
+// a non-file scheme is not a path at all.
+func TestWorkspaceEditTargets(t *testing.T) {
 	t.Parallel()
-	ws := "/home/u/work"
-	uris := []string{"file:///home/u/work/src/a.ts", "file:///home/u/work/b.ts"}
-	rel, err := workspaceEditTargets(ws, uris)
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct {
+		name      string
+		uris      []string
+		want      map[string]string
+		wantErr   string
+		wantErrIs error
+	}{
+		{
+			name: "every file inside the workspace",
+			uris: []string{"file:///home/u/work/src/a.ts", "file:///home/u/work/b.ts"},
+			want: map[string]string{
+				"file:///home/u/work/src/a.ts": "src/a.ts",
+				"file:///home/u/work/b.ts":     "b.ts",
+			},
+		},
+		{
+			name:      "a sibling directory sharing the workspace's prefix",
+			uris:      []string{"file:///home/u/work-evil/a.ts"},
+			wantErrIs: errEditOutsideWorkspace,
+		},
+		{
+			name:      "another tree entirely",
+			uris:      []string{"file:///home/u/other/b.ts"},
+			wantErrIs: errEditOutsideWorkspace,
+		},
+		{
+			name:    "a URI that is not a file",
+			uris:    []string{"http://example.com/a.ts"},
+			wantErr: "unsupported edit URI scheme",
+		},
 	}
-	if rel["file:///home/u/work/src/a.ts"] != "src/a.ts" || rel["file:///home/u/work/b.ts"] != "b.ts" {
-		t.Errorf("got %v", rel)
-	}
-}
 
-func TestWorkspaceEditTargets_PrefixTrick(t *testing.T) {
-	t.Parallel()
-	// /home/u/work-evil must NOT pass as inside /home/u/work
-	ws := "/home/u/work"
-	uris := []string{"file:///home/u/work-evil/a.ts"}
-	if _, err := workspaceEditTargets(ws, uris); err == nil {
-		t.Fatal("expected error for sibling path sharing a prefix")
-	}
-}
-
-func TestWorkspaceEditTargets_NonFileURI(t *testing.T) {
-	t.Parallel()
-	ws := "/home/u/work"
-	if _, err := workspaceEditTargets(ws, []string{"http://example.com/a.ts"}); err == nil {
-		t.Fatal("expected error for non-file URI")
-	}
-}
-
-func TestWorkspaceEditTargets_ErrorsWrap(t *testing.T) {
-	t.Parallel()
-	ws := "/home/u/work"
-	_, err := workspaceEditTargets(ws, []string{"file:///home/u/other/b.ts"})
-	if !errors.Is(err, errEditOutsideWorkspace) {
-		t.Errorf("expected errEditOutsideWorkspace, got: %v", err)
+	const ws = "/home/u/work"
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rel, err := workspaceEditTargets(ws, tc.uris)
+			if tc.wantErr != "" || tc.wantErrIs != nil {
+				if err == nil {
+					t.Fatalf("expected an error, got %v", rel)
+				}
+				if tc.wantErr != "" && !strings.Contains(err.Error(), tc.wantErr) {
+					t.Errorf("error %q does not say %q", err, tc.wantErr)
+				}
+				if tc.wantErrIs != nil && !errors.Is(err, tc.wantErrIs) {
+					t.Errorf("error %q does not wrap %v", err, tc.wantErrIs)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("workspaceEditTargets: %v", err)
+			}
+			if len(rel) != len(tc.want) {
+				t.Fatalf("got %v, want %v", rel, tc.want)
+			}
+			for uri, want := range tc.want {
+				if rel[uri] != want {
+					t.Errorf("%s = %q, want %q", uri, rel[uri], want)
+				}
+			}
+		})
 	}
 }

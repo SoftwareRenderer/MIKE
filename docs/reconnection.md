@@ -166,4 +166,5 @@ The server does not time out slow clients. Instead:
 
 - **E2E Tests**: `reconnect-refresh.spec.ts`, `away-and-back.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `offline-send-queue.spec.ts`, `editor-external-change.spec.ts`.
 - **Unit Tests**: `connection-restored.unit.svelte.ts`, `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`.
-- **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`, `handler_task_sync_test.go`.
+- **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`,
+  `handler_message_window_test.go` (whose revalidation table covers the sync digest too).

@@ -36,8 +36,10 @@ func (r *interruptRun) awaitResultRows(t *testing.T, n int) []types.TaskMessage 
 }
 
 // Stopping a task removes its execution state, and the turn in progress finds that out only when its
-// next provider call fails. The tool calls that turn already holds have to be answered as stopped, since
-// with that state gone there is nothing left to tell them where to read and write.
+// next provider call fails. The tool calls that turn already holds have to be answered as stopped,
+// since with that state gone there is nothing left to tell them where to read and write — and a stop
+// is not an interrupt: nothing here came from a user message, so no row may claim one, and the run
+// makes no further call to the provider.
 func TestStoppedTurnDoesNotDispatchItsRemainingToolCalls(t *testing.T) {
 	t.Parallel()
 	run := newInterruptRun(t, &types.Task{Title: "Stop mid-batch", Prompt: "Work"},
@@ -57,6 +59,12 @@ func TestStoppedTurnDoesNotDispatchItsRemainingToolCalls(t *testing.T) {
 	}
 
 	rows := run.awaitResultRows(t, 3)
+	for _, row := range rows {
+		got := storedResult(t, row)
+		if got["interrupted"] == true {
+			t.Errorf("tool %s was recorded as interrupted by a user message; a stop is not a message", row.ID)
+		}
+	}
 	for _, row := range rows[1:] {
 		got := storedResult(t, row)
 		if got["output"] != stoppedToolResult {
@@ -75,5 +83,14 @@ func TestStoppedTurnDoesNotDispatchItsRemainingToolCalls(t *testing.T) {
 	// The third call never ran, so its file was never written.
 	if _, err := os.Stat(filepath.Join(run.worktreePath, "third.txt")); err == nil {
 		t.Error("third.txt exists: a call after the stop ran anyway")
+	}
+
+	select {
+	case <-run.done:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the executor did not finish after the task was stopped")
+	}
+	if got := run.llm.streamCalls(); got != 1 {
+		t.Errorf("streaming LLM calls = %d after a stop, want 1", got)
 	}
 }

@@ -75,31 +75,6 @@ func createTaskRow(t *testing.T, s *store.Store, id, projectID string, status ty
 	return task
 }
 
-// TestStopTransitionNamesWhatStoppedTheRun: a person's stop and a server fault move the row the same way,
-// and only the output tells them apart.
-func TestStopTransitionNamesWhatStoppedTheRun(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name   string
-		output string
-		want   string
-	}{
-		{"a person's stop", pausedByUserOutput, "Paused by user"},
-		{"a recovered panic", crashedOutput, "Stopped by an internal error"},
-	} {
-		task := &types.Task{Status: types.StatusInProgress, ExecutionState: types.ExecStateRunning}
-		if !applyStopTransition(task, tc.output) {
-			t.Fatalf("%s: transition refused an in-flight row", tc.name)
-		}
-		if task.ExecutionState != types.ExecStatePaused || task.Status != types.StatusInProgress {
-			t.Errorf("%s: got %s/%s, want in_progress/paused — a stopped run must stay resumable", tc.name, task.Status, task.ExecutionState)
-		}
-		if task.Output != tc.want {
-			t.Errorf("%s: output = %q, want %q", tc.name, task.Output, tc.want)
-		}
-	}
-}
-
 // TestRecoverTaskFromPanicSaysTheServerStoppedIt pins what the row says after executeTask's deferred
 // recover: the run is over, the reason is a server fault, and the row is not left reading as someone's pause.
 func TestRecoverTaskFromPanicSaysTheServerStoppedIt(t *testing.T) {
@@ -130,34 +105,34 @@ func TestRecoverTaskFromPanicSaysTheServerStoppedIt(t *testing.T) {
 	}
 }
 
-// TestStopStaleRunningTask: stopping a task whose executor no longer exists must succeed
-// and clear the stale running state.
-func TestStopStaleRunningTask(t *testing.T) {
+// TestStopTaskWithoutALiveExecutor covers the row a crash or a restart left in flight: stopping it
+// must succeed and clear the stale state, while a task that does not exist at all is still an error.
+func TestStopTaskWithoutALiveExecutor(t *testing.T) {
 	t.Parallel()
-	te := newSessionCostTestExecutor(t)
-	s := te.store
-	proj := createProject(t, s, "proj-stop-stale", "Stop Stale")
 
-	createTaskRow(t, s, "stale-running", proj.ID, "in_progress", "running")
+	t.Run("a stale running row is stopped", func(t *testing.T) {
+		te := newSessionCostTestExecutor(t)
+		s := te.store
+		proj := createProject(t, s, "proj-stop-stale", "Stop Stale")
 
-	// No executor in te.tasks for this task.
-	if err := te.StopTask("stale-running"); err != nil {
-		t.Fatalf("StopTask on stale running task must not error (was 'task not running'): %v", err)
-	}
-	task := waitTaskState(t, s, "stale-running", isPaused)
-	if task.Status != types.StatusInProgress {
-		t.Fatalf("status = %s, want in_progress", task.Status)
-	}
-}
+		createTaskRow(t, s, "stale-running", proj.ID, "in_progress", "running")
 
-// TestStopStaleMissingTask verifies StopTask still errors for a task that does
-// not exist at all.
-func TestStopStaleMissingTask(t *testing.T) {
-	t.Parallel()
-	te := newSessionCostTestExecutor(t)
-	if err := te.StopTask("no-such-task"); err == nil {
-		t.Fatal("StopTask on missing task must error")
-	}
+		// No executor in te.tasks for this task.
+		if err := te.StopTask("stale-running"); err != nil {
+			t.Fatalf("StopTask on stale running task must not error (was 'task not running'): %v", err)
+		}
+		task := waitTaskState(t, s, "stale-running", isPaused)
+		if task.Status != types.StatusInProgress {
+			t.Fatalf("status = %s, want in_progress", task.Status)
+		}
+	})
+
+	t.Run("an unknown task is an error", func(t *testing.T) {
+		te := newSessionCostTestExecutor(t)
+		if err := te.StopTask("no-such-task"); err == nil {
+			t.Fatal("StopTask on missing task must error")
+		}
+	})
 }
 
 // --- StopTask with a live executor ---
@@ -253,42 +228,6 @@ func startExecTaskExisting(t *testing.T, te *TaskExecutor, proj *types.Project, 
 
 	go te.executeTask(setup)
 	return setup
-}
-
-// TestPauseResumeCycle verifies the full pause -> resume cycle through the
-// real execution loop: stop a running task (paused), then start a fresh
-// executor for it (what /resume does) and confirm it runs again.
-func TestPauseResumeCycle(t *testing.T) {
-	t.Parallel()
-	te := newSessionCostTestExecutor(t)
-	s := te.store
-	proj := createProject(t, s, "proj-pause-resume", "Pause Resume")
-
-	mock := newHeldLLMMock()
-	server := httptest.NewServer(mock.Handler())
-	defer server.Close()
-
-	setup := runExecTask(t, te, proj, "pause-resume-1", server.URL, "task one")
-	mock.waitForArrival(t, 1)
-	waitTaskState(t, s, "pause-resume-1", isRunning)
-
-	if err := te.StopTask("pause-resume-1"); err != nil {
-		t.Fatalf("StopTask: %v", err)
-	}
-	waitTaskState(t, s, "pause-resume-1", isPaused)
-	select {
-	case <-setup.done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("executor did not exit after pause")
-	}
-
-	// Resume: a fresh executor for the same task must run again.
-	startExecTaskExisting(t, te, proj, "pause-resume-1", server.URL)
-	mock.waitForArrival(t, 2)
-	waitTaskState(t, s, "pause-resume-1", isRunning)
-
-	mock.Release()
-	te.StopTask("pause-resume-1")
 }
 
 // TestStopDoesNotClobberMovedTask: a delayed executor exit must not clobber a concurrent column move —

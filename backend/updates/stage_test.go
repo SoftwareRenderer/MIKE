@@ -425,7 +425,7 @@ func TestPrepareRefusesADowngradeFromAStaleRow(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	// Written straight into the state because a load would clear it (see
-	// TestAStoredAnswerAboutTheRunningReleaseStopsOfferingIt); the refusal below must hold whatever a
+	// TestNewDropsTheStoredAnswerAboutTheReleaseAlreadyRunning); the refusal below must hold whatever a
 	// row says.
 	svc.state = stale
 	if _, err := svc.Prepare(context.Background()); err == nil || !strings.Contains(err.Error(), "not newer") {

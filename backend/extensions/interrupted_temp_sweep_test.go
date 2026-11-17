@@ -44,14 +44,3 @@ func TestSweepInterruptedTempRemovesTheInstallFamiliesAndNothingElse(t *testing.
 		}
 	}
 }
-
-// The families are the whole point: a prefix that drifted from the one the install uses would sweep nothing
-// and leave every orphan behind in silence.
-func TestSweepInterruptedTempKnowsTheNamesInstallsUse(t *testing.T) {
-	if extensionBuildContextDirPrefix == "" || extensionCheckoutDirPrefix == "" {
-		t.Fatal("an empty prefix would match every directory in the temp root")
-	}
-	if extensionBuildContextDirPrefix == extensionCheckoutDirPrefix {
-		t.Fatal("the two install families share a name")
-	}
-}

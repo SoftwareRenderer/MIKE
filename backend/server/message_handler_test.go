@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -40,630 +42,328 @@ func seedMessage(t *testing.T, s *Server, projID, taskID string, msg *types.Task
 	return msg
 }
 
-func TestMessageCreate(t *testing.T) {
+// The POST answers with the row it wrote, stamped with what the client did not send, and the window the
+// task opens on then reads that row back: a row written into another thread is a message the conversation
+// never sees.
+func TestMessageCreateWritesTheRowTheWindowReadsBack(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
+	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
 
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":    "user",
-		"content": "Hello world",
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("expected 201, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	result := mustJSON[map[string]any](t, rr.Body)
-	if result["role"] != "user" || result["content"] != "Hello world" {
-		t.Fatalf("unexpected message: %+v", result)
-	}
-	if result["task_id"] != taskID {
-		t.Fatalf("wrong task_id: %s", result["task_id"])
-	}
-	// Server should generate an ID
-	if result["id"] == "" || result["id"] == nil {
-		t.Fatal("server should generate message ID")
-	}
-}
-
-func TestMessageCreateMissingFields(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Missing role
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"content": "Hello",
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for missing role, got %d", rr.Code)
-	}
-
-	// Missing content
-	req = testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role": "user",
-	})
-	rr = testResponseAuth(t, s, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for missing content, got %d", rr.Code)
-	}
-}
-
-func TestMessageList(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Create 3 messages
+	var created []string
 	for _, content := range []string{"msg 1", "msg 2", "msg 3"} {
-		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-			"role":    "user",
-			"content": content,
-		})
-		testResponseAuth(t, s, req)
+		rr := testResponseAuth(t, s, testRequest(http.MethodPost, path, map[string]any{
+			"role": "user", "content": content,
+		}))
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("POST = %d: %s", rr.Code, rr.Body.String())
+		}
+		got := mustJSON[map[string]any](t, rr.Body)
+		if got["role"] != "user" || got["content"] != content {
+			t.Errorf("the response carries %v/%v, want the sent role and content", got["role"], got["content"])
+		}
+		if got["task_id"] != taskID {
+			t.Errorf("task_id = %v, want the task the path named", got["task_id"])
+		}
+		// The id is the server's: a client that could choose one could answer for another row.
+		id, _ := got["id"].(string)
+		if id == "" {
+			t.Fatal("the row was answered with no id")
+		}
+		created = append(created, id)
 	}
 
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	window, _ := readWindow(t, s, path)
+	answered := map[string]bool{}
+	for _, m := range window {
+		answered[m.ID] = true
 	}
-
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	// Task creation stores the prompt as a system message, so there's 1 extra
-	if len(msgs) != 4 {
-		t.Fatalf("expected 4 messages (3 user + 1 prompt), got %d", len(msgs))
-	}
-}
-
-func TestMessageUpdate(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":    "user",
-		"content": "Original content",
-	})
-	createRR := testResponseAuth(t, s, createReq)
-	msg := mustJSON[map[string]any](t, createRR.Body)
-	msgID := msg["id"].(string)
-
-	req := testRequest("PATCH", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID, map[string]any{
-		"content": "Updated content",
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	listRR := testResponseAuth(t, s, listReq)
-	msgs := mustJSON[[]map[string]any](t, listRR.Body)
-	if msgs[len(msgs)-1]["content"] != "Updated content" {
-		t.Fatalf("expected updated content, got %s", msgs[len(msgs)-1]["content"])
-	}
-}
-
-func TestMessageDeleteAfter(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	var msgIDs []string
-	for _, content := range []string{"msg 1", "msg 2", "msg 3", "msg 4"} {
-		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-			"role":    "user",
-			"content": content,
-		})
-		rr := testResponseAuth(t, s, req)
-		msg := mustJSON[map[string]any](t, rr.Body)
-		msgIDs = append(msgIDs, msg["id"].(string))
-	}
-
-	// Delete after msg 2
-	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"message_id": msgIDs[1],
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// Verify messages were deleted (count should be less than before)
-	// Note: due to second-level timestamp granularity, messages created in the same
-	// second may all be deleted together. The store layer tests verify precise behavior.
-	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	listRR := testResponseAuth(t, s, listReq)
-	remaining := mustJSON[[]map[string]any](t, listRR.Body)
-	// At least the deleted message itself should be gone
-	for _, m := range remaining {
-		if m["id"] == msgIDs[1] {
-			t.Fatalf("deleted message %s should not be present", msgIDs[1])
+	for _, id := range created {
+		if !answered[id] {
+			t.Errorf("the row the POST answered (%s) is not in the window the task opens on", id)
 		}
 	}
-	_ = remaining // verified above
-}
-
-func TestMessageDeleteSummarizationSkipsForkCleanup(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	task, _ := s.store.GetTask(projID, taskID)
-	threadID := task.CurrentThreadID
-
-	// Create messages with explicit timestamps: msg1 < summarization < msg2 < msg3
-	baseTime := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        "msg-1",
-		TaskID:    taskID,
-		ThreadID:  threadID,
-		Role:      "user",
-		Content:   "msg 1",
-		CreatedAt: baseTime,
-	})
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        "summ-msg",
-		TaskID:    taskID,
-		ThreadID:  threadID,
-		Role:      "summarization",
-		Content:   "Summary of changes",
-		CreatedAt: baseTime.Add(time.Second),
-	})
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        "msg-2",
-		TaskID:    taskID,
-		ThreadID:  threadID,
-		Role:      "user",
-		Content:   "msg 2",
-		CreatedAt: baseTime.Add(2 * time.Second),
-	})
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        "msg-3",
-		TaskID:    taskID,
-		ThreadID:  threadID,
-		Role:      "user",
-		Content:   "msg 3",
-		CreatedAt: baseTime.Add(3 * time.Second),
-	})
-
-	// Delete the summarization message (default mode, not delete_single)
-	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"message_id": "summ-msg",
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	// Summarization deletion should succeed and truncate messages after it
-	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	listRR := testResponseAuth(t, s, listReq)
-	remaining := mustJSON[[]map[string]any](t, listRR.Body)
-
-	// The summarization message and messages after it should be gone
-	for _, m := range remaining {
-		if m["id"] == "summ-msg" {
-			t.Fatal("summarization message should have been deleted")
-		}
-		if m["id"] == "msg-2" || m["id"] == "msg-3" {
-			t.Fatalf("message after summarization should have been deleted, got %v", m["id"])
-		}
-	}
-	// msg-1 should still be present
-	found := false
-	for _, m := range remaining {
-		if m["id"] == "msg-1" {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("msg-1 should still be present")
+	// The task's own prompt is part of the thread whatever the client sent.
+	if len(window) != len(created)+1 {
+		t.Errorf("the window holds %d rows, want the %d sent beside the task's prompt row", len(window), len(created))
 	}
 }
 
-func TestMessageDeleteMissingID(t *testing.T) {
+// The message routes refuse a request they cannot act on, and each refusal costs a different answer: an
+// internal role would inject text into the LLM's conversation, and a body over the cap is a size problem
+// the caller can act on. A refused write leaves the thread as it was.
+func TestMessageRoutesRefuseARequestTheyCannotActOn(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
 	taskID := createTestTask(t, s, projID, "Test task")
+	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
 
-	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", rr.Code)
-	}
-}
-
-func TestMessageGetByID(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	createReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":    "user",
-		"content": "Hello",
-	})
-	createRR := testResponseAuth(t, s, createReq)
-	msg := mustJSON[map[string]any](t, createRR.Body)
-	msgID := msg["id"].(string)
-
-	// Get message metadata (will_delete_branch check)
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages/"+msgID, nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	result := mustJSON[map[string]any](t, rr.Body)
-	// No fork threads, so will_delete_branch should be false
-	if result["will_delete_branch"] != false {
-		t.Fatalf("expected will_delete_branch=false, got %v", result["will_delete_branch"])
-	}
-}
-
-func TestMessageListWriteFileContentSuppressed(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Create a tool_call message with write_file args
-	toolCallsJSON, _ := json.Marshal(map[string]any{
-		"tool_id":           "call_abc123",
-		"tool_name":         "write_file",
-		"tool_display_name": "Write File",
-		"args": map[string]any{
-			"path":    "src/main.go",
-			"content": "package main\n\nfunc main() {}\n",
+	cases := []struct {
+		name   string
+		method string
+		body   map[string]any
+		want   int
+	}{
+		{"a post with no role", http.MethodPost, map[string]any{"content": "Hello"}, http.StatusBadRequest},
+		{"a post with no content", http.MethodPost, map[string]any{"role": "user"}, http.StatusBadRequest},
+		{"a system row", http.MethodPost, map[string]any{"role": "system", "content": "injected"}, http.StatusBadRequest},
+		{"an assistant row", http.MethodPost, map[string]any{"role": "assistant", "content": "injected"}, http.StatusBadRequest},
+		{"a tool_call row", http.MethodPost, map[string]any{"role": "tool_call", "content": "injected"}, http.StatusBadRequest},
+		{"a tool row", http.MethodPost, map[string]any{"role": "tool", "content": "injected"}, http.StatusBadRequest},
+		{
+			"a body over the cap", http.MethodPost,
+			map[string]any{"role": "user", "content": strings.Repeat("a", (1<<20)+1)},
+			http.StatusRequestEntityTooLarge,
 		},
-		"raw_args": `{"path":"src/main.go","content":"package main\n\nfunc main() {}\n"}`,
-		"sandbox":  false,
-	})
-
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		Role:       "tool_call",
-		Content:    "file written",
-		ToolCalls:  string(toolCallsJSON),
-		ToolResult: `{"output":"","success":true,"duration":10}`,
-	})
-
-	// GET without full=1 — content should be suppressed
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		{"a delete naming no row", http.MethodDelete, map[string]any{}, http.StatusBadRequest},
 	}
 
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	// Find the tool_call message
-	var toolCallMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "tool_call" {
-			toolCallMsg = m
-			break
-		}
-	}
-	if toolCallMsg == nil {
-		t.Fatal("tool_call message not found")
-	}
-
-	// Parse tool_calls field
-	tcJSON := toolCallMsg["tool_calls"].(string)
-	var tc map[string]any
-	if err := json.Unmarshal([]byte(tcJSON), &tc); err != nil {
-		t.Fatalf("parse tool_calls: %v", err)
-	}
-	args := tc["args"].(map[string]any)
-
-	// content should be suppressed
-	if args["content"] != "[REDACTED]" {
-		t.Fatalf("expected content=[REDACTED], got %v", args["content"])
-	}
-	// path should still be present
-	if args["path"] != "src/main.go" {
-		t.Fatalf("expected path=src/main.go, got %v", args["path"])
-	}
-	// raw_args should also be suppressed
-	if tc["raw_args"] != "[REDACTED]" {
-		t.Fatalf("expected raw_args=[REDACTED], got %v", tc["raw_args"])
-	}
-}
-
-func TestMessageListWriteFileContentFull(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Create a tool_call message with write_file args
-	toolCallsJSON, _ := json.Marshal(map[string]any{
-		"tool_id":           "call_abc123",
-		"tool_name":         "write_file",
-		"tool_display_name": "Write File",
-		"args": map[string]any{
-			"path":    "src/main.go",
-			"content": "package main\n\nfunc main() {}\n",
-		},
-		"raw_args": `{"path":"src/main.go","content":"package main\n\nfunc main() {}\n"}`,
-		"sandbox":  false,
-	})
-
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		Role:       "tool_call",
-		Content:    "file written",
-		ToolCalls:  string(toolCallsJSON),
-		ToolResult: `{"output":"","success":true,"duration":10}`,
-	})
-
-	// GET with full=1 — content should be preserved
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var toolCallMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "tool_call" {
-			toolCallMsg = m
-			break
-		}
-	}
-	if toolCallMsg == nil {
-		t.Fatal("tool_call message not found")
-	}
-
-	tcJSON := toolCallMsg["tool_calls"].(string)
-	var tc map[string]any
-	if err := json.Unmarshal([]byte(tcJSON), &tc); err != nil {
-		t.Fatalf("parse tool_calls: %v", err)
-	}
-	args := tc["args"].(map[string]any)
-
-	// content should be preserved
-	if args["content"] != "package main\n\nfunc main() {}\n" {
-		t.Fatalf("expected full content, got %v", args["content"])
-	}
-	// raw_args should also be preserved
-	if tc["raw_args"] != `{"path":"src/main.go","content":"package main\n\nfunc main() {}\n"}` {
-		t.Fatalf("expected full raw_args, got %v", tc["raw_args"])
-	}
-}
-
-func TestMessageListNonWriteFileNotSuppressed(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Create a tool_call message with bash args (not write_file)
-	toolCallsJSON, _ := json.Marshal(map[string]any{
-		"tool_id":           "call_xyz789",
-		"tool_name":         "bash",
-		"tool_display_name": "Bash",
-		"args": map[string]any{
-			"command": "ls -la",
-		},
-		"raw_args": `{"command":"ls -la"}`,
-		"sandbox":  false,
-	})
-
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		Role:       "tool_call",
-		Content:    "executed",
-		ToolCalls:  string(toolCallsJSON),
-		ToolResult: `{"output":"total 100","success":true,"duration":5}`,
-	})
-
-	// GET without full=1 — non-write_file tool should NOT be suppressed
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var toolCallMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "tool_call" && m["tool_calls"].(string) != "" {
-			var tc map[string]any
-			json.Unmarshal([]byte(m["tool_calls"].(string)), &tc)
-			if tc["tool_name"] == "bash" {
-				toolCallMsg = m
-				break
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rr := testResponseAuth(t, s, testRequest(tc.method, path, tc.body))
+			if rr.Code != tc.want {
+				t.Errorf("status = %d, want %d: %s", rr.Code, tc.want, rr.Body.String())
 			}
-		}
-	}
-	if toolCallMsg == nil {
-		t.Fatal("bash tool_call message not found")
+		})
 	}
 
-	tcJSON := toolCallMsg["tool_calls"].(string)
-	var tc map[string]any
-	if err := json.Unmarshal([]byte(tcJSON), &tc); err != nil {
-		t.Fatalf("parse tool_calls: %v", err)
-	}
-	args := tc["args"].(map[string]any)
-
-	// command should NOT be suppressed
-	if args["command"] != "ls -la" {
-		t.Fatalf("expected command=ls -la, got %v", args["command"])
-	}
-	// raw_args should NOT be suppressed
-	if tc["raw_args"] != `{"command":"ls -la"}` {
-		t.Fatalf("expected raw_args unchanged, got %v", tc["raw_args"])
+	if window, _ := readWindow(t, s, path); len(window) != 1 {
+		t.Errorf("%d rows survived the refused writes, want the task's own prompt row alone", len(window))
 	}
 }
 
-func TestMessageListReasoningContentSuppressed(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
+// A PATCH writes the field the body names and leaves the one it does not. Both fields are load-bearing
+// downstream: a summarization row's content is what the task's system prompt carries, and a checkpoint hash
+// is later handed to `git read-tree`, so an absent key must never arrive as a zero written into the row.
+func TestPatchMessageWritesOnlyTheFieldItNames(t *testing.T) {
+	const edited = "the edited text"
 
-	// Create an assistant message with long reasoning + regular content (would be auto-hidden)
-	longReasoning := strings.Repeat("x", 300)
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		Role:             "assistant",
-		Content:          "Here is the answer.",
-		ReasoningContent: longReasoning,
-	})
-
-	// GET without full=1 — reasoning should be suppressed
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	cases := []struct {
+		name string
+		seed func(t *testing.T, s *Server, projID, taskID string) string
+	}{
+		{"a user row", func(t *testing.T, s *Server, projID, taskID string) string {
+			return seedMessage(t, s, projID, taskID, &types.TaskMessage{
+				Role: "user", Content: "original content",
+			}).ID
+		}},
+		{"a summarization row", func(t *testing.T, s *Server, projID, taskID string) string {
+			return createSummaryMessage(t, s, taskID, "the summary in effect")
+		}},
 	}
 
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var assistantMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "assistant" {
-			assistantMsg = m
-			break
-		}
-	}
-	if assistantMsg == nil {
-		t.Fatal("assistant message not found")
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
+			taskID := createTestTask(t, s, projID, "Test task")
+			msgID := tc.seed(t, s, projID, taskID)
+			path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages/"
 
-	if assistantMsg["reasoning_content"] != "[HIDDEN]" {
-		t.Fatalf("expected reasoning_content=[HIDDEN], got %v", assistantMsg["reasoning_content"])
-	}
-	// has_reasoning should be true so frontend knows reasoning exists
-	if assistantMsg["has_reasoning"] != true {
-		t.Fatalf("expected has_reasoning=true, got %v", assistantMsg["has_reasoning"])
-	}
-}
+			rr := testResponseAuth(t, s, testRequest(http.MethodPatch, path+msgID,
+				map[string]any{"content": edited}))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("edit = %d: %s", rr.Code, rr.Body.String())
+			}
+			if got := storedMessageContent(t, s, msgID); got != edited {
+				t.Errorf("stored content = %q, want the edited text", got)
+			}
+			// The chat reads the window, so the edit has to reach that response too.
+			window, _ := readWindow(t, s, "/api/projects/"+projID+"/tasks/"+taskID+"/messages")
+			var shown string
+			for _, m := range window {
+				if m.ID == msgID {
+					shown = m.Content
+				}
+			}
+			if shown != edited {
+				t.Errorf("the window answers %q, want the edited text", shown)
+			}
 
-func TestMessageListReasoningContentAutoExpanded(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Short reasoning with no content — should be auto-expanded (NOT suppressed)
-	// Create message directly in store (simulates exec loop behavior)
-	shortReasoning := "Brief thought"
-	task, _ := s.store.GetTask(projID, taskID)
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:               "test-reasoning-short",
-		TaskID:           taskID,
-		ThreadID:         task.CurrentThreadID,
-		Role:             "assistant",
-		Content:          "",
-		ReasoningContent: shortReasoning,
-		CreatedAt:        time.Now().UTC(),
-	})
-
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var assistantMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "assistant" {
-			assistantMsg = m
-			break
-		}
-	}
-	if assistantMsg == nil {
-		t.Fatal("assistant message not found")
-	}
-
-	// Short reasoning with no content should NOT be suppressed
-	if assistantMsg["reasoning_content"] != shortReasoning {
-		t.Fatalf("expected reasoning_content=%q, got %v", shortReasoning, assistantMsg["reasoning_content"])
+			// A body naming neither field is a no-op, not a blank written into the row.
+			rr = testResponseAuth(t, s, testRequest(http.MethodPatch, path+msgID, map[string]any{}))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("an empty patch = %d: %s", rr.Code, rr.Body.String())
+			}
+			if got := storedMessageContent(t, s, msgID); got != edited {
+				t.Errorf("a patch naming no field rewrote the row to %q", got)
+			}
+		})
 	}
 }
 
-func TestMessageListReasoningContentFull(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
+// storedMessageContent reads what the database holds, because a response that echoes an edit the row never
+// got would otherwise pass.
+func storedMessageContent(t *testing.T, s *Server, messageID string) string {
+	t.Helper()
+	msg, err := s.store.GetTaskMessageByID(messageID)
+	if err != nil {
+		t.Fatalf("read message: %v", err)
+	}
+	return msg.Content
+}
 
-	// Create an assistant message with long reasoning + regular content
-	longReasoning := strings.Repeat("y", 500)
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		Role:             "assistant",
-		Content:          "The answer is 42.",
-		ReasoningContent: longReasoning,
-	})
+// The list holds back a write_file's payload — the bytes are on disk and the card prints the path — and
+// leaves every other tool's arguments whole, because for those the arguments are what the card shows.
+func TestMessageListRedactsWriteFileArgs(t *testing.T) {
+	const fileBody = "package main\n\nfunc main() {}\n"
 
-	// GET with full=1 — reasoning should be preserved
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	cases := []struct {
+		name        string
+		toolName    string
+		args        map[string]any
+		rawArgs     string
+		query       string
+		wantArgs    map[string]any
+		wantRawArgs any
+	}{
+		{
+			name:     "the content of a write_file is held back",
+			toolName: "write_file",
+			args:     map[string]any{"path": "src/main.go", "content": fileBody},
+			rawArgs:  `{"path":"src/main.go","content":"package main\n\nfunc main() {}\n"}`,
+			wantArgs: map[string]any{"path": "src/main.go", "content": "[REDACTED]"}, wantRawArgs: "[REDACTED]",
+		},
+		{
+			name:        "full=1 sends it",
+			toolName:    "write_file",
+			args:        map[string]any{"path": "src/main.go", "content": fileBody},
+			rawArgs:     `{"path":"src/main.go","content":"package main\n\nfunc main() {}\n"}`,
+			query:       "?full=1",
+			wantArgs:    map[string]any{"path": "src/main.go", "content": fileBody},
+			wantRawArgs: `{"path":"src/main.go","content":"package main\n\nfunc main() {}\n"}`,
+		},
+		{
+			name:     "another tool's arguments are the card's own text",
+			toolName: "bash",
+			args:     map[string]any{"command": "ls -la"},
+			rawArgs:  `{"command":"ls -la"}`,
+			wantArgs: map[string]any{"command": "ls -la"}, wantRawArgs: `{"command":"ls -la"}`,
+		},
 	}
 
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var assistantMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "assistant" {
-			assistantMsg = m
-			break
-		}
-	}
-	if assistantMsg == nil {
-		t.Fatal("assistant message not found")
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
+			taskID := createTestTask(t, s, projID, "Test task")
+			toolCalls, err := json.Marshal(map[string]any{
+				"tool_id": "call-1", "tool_name": tc.toolName, "tool_display_name": "Tool",
+				"args": tc.args, "raw_args": tc.rawArgs, "sandbox": false,
+			})
+			if err != nil {
+				t.Fatalf("encode tool_calls: %v", err)
+			}
+			seedMessage(t, s, projID, taskID, &types.TaskMessage{
+				Role: "tool_call", Content: "done",
+				ToolCalls: string(toolCalls), ToolResult: `{"output":"","success":true,"duration":10}`,
+			})
 
-	if assistantMsg["reasoning_content"] != longReasoning {
-		t.Fatalf("expected full reasoning_content, got length %d", len(assistantMsg["reasoning_content"].(string)))
+			row := windowRowByRole(t, s, "/api/projects/"+projID+"/tasks/"+taskID+"/messages"+tc.query, "tool_call")
+			var tc2 struct {
+				ToolName string         `json:"tool_name"`
+				Args     map[string]any `json:"args"`
+				RawArgs  any            `json:"raw_args"`
+			}
+			if err := json.Unmarshal([]byte(row["tool_calls"].(string)), &tc2); err != nil {
+				t.Fatalf("parse tool_calls: %v", err)
+			}
+			if tc2.ToolName != tc.toolName {
+				t.Fatalf("the row read back is a %q call", tc2.ToolName)
+			}
+			if !reflect.DeepEqual(tc2.Args, tc.wantArgs) {
+				t.Errorf("args = %v, want %v", tc2.Args, tc.wantArgs)
+			}
+			if tc2.RawArgs != tc.wantRawArgs {
+				t.Errorf("raw_args = %v, want %v", tc2.RawArgs, tc.wantRawArgs)
+			}
+		})
 	}
 }
 
-func TestMessageListReasoningWithToolCallsNotSuppressed(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Assistant message with reasoning + tool calls but no content — should NOT be suppressed
-	// Create message directly in store (simulates exec loop behavior)
-	longReasoning := strings.Repeat("z", 400)
-	toolCallsJSON, _ := json.Marshal(map[string]any{
-		"tool_id":   "call_1",
-		"tool_name": "bash",
-		"args":      map[string]any{"command": "ls"},
-	})
-	task, _ := s.store.GetTask(projID, taskID)
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:               "test-reasoning-toolcalls",
-		TaskID:           taskID,
-		ThreadID:         task.CurrentThreadID,
-		Role:             "assistant",
-		Content:          "",
-		ReasoningContent: longReasoning,
-		ToolCalls:        string(toolCallsJSON),
-		CreatedAt:        time.Now().UTC(),
-	})
-
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
+// windowRowByRole reads the window and answers the last row of one role.
+func windowRowByRole(t *testing.T, s *Server, path, role string) map[string]any {
+	t.Helper()
+	rr := testResponseAuth(t, s, testRequest(http.MethodGet, path, nil))
 	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+		t.Fatalf("GET %s = %d: %s", path, rr.Code, rr.Body.String())
 	}
-
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var assistantMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "assistant" {
-			assistantMsg = m
-			break
+	var found map[string]any
+	for _, m := range mustJSON[[]map[string]any](t, rr.Body) {
+		if m["role"] == role {
+			found = m
 		}
 	}
-	if assistantMsg == nil {
-		t.Fatal("assistant message not found")
+	if found == nil {
+		t.Fatalf("%s holds no %s row", path, role)
+	}
+	return found
+}
+
+// Reasoning is bulk: a long chain of thought behind an answer costs bandwidth the answer already used, so
+// the list hides it and says it is there. Two shapes keep it whole — reasoning that IS the answer, and
+// reasoning that carried a tool call — and full=1 lifts the rule entirely. The same pass runs over the
+// window, so a task opened on one answer is redacted too.
+func TestMessageListSuppressesBulkReasoning(t *testing.T) {
+	cases := []struct {
+		name       string
+		content    string
+		reasoning  string
+		toolCalls  string
+		olderUser  bool
+		query      string
+		want       string
+		wantHidden bool
+	}{
+		{
+			name: "a chain of thought behind an answer", content: "Here is the answer.",
+			reasoning: strings.Repeat("x", 300), want: "[HIDDEN]", wantHidden: true,
+		},
+		{
+			name: "reasoning that is the whole answer", reasoning: "Brief thought",
+			want: "Brief thought",
+		},
+		{
+			name: "reasoning that carried a tool call", reasoning: strings.Repeat("z", 400),
+			toolCalls: `{"tool_id":"call_1","tool_name":"bash","args":{"command":"ls"}}`,
+			want:      strings.Repeat("z", 400),
+		},
+		{
+			name: "full=1 sends it", content: "The answer is 42.", reasoning: strings.Repeat("y", 500),
+			query: "?full=1", want: strings.Repeat("y", 500),
+		},
+		{
+			name: "the newest answer of a windowed read", olderUser: true, content: "writing it now",
+			reasoning: strings.Repeat("w", 300) + " the tail of the thought",
+			query:     "?limit=1", want: "[HIDDEN]", wantHidden: true,
+		},
 	}
 
-	// Reasoning with tool calls (no content) should NOT be suppressed
-	if assistantMsg["reasoning_content"] != longReasoning {
-		t.Fatalf("expected full reasoning_content, got length %d", len(assistantMsg["reasoning_content"].(string)))
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
+			taskID := createTestTask(t, s, projID, "Test task")
+			if tc.olderUser {
+				seedWindow(t, s, projID, taskID, 1)
+			}
+			seedMessage(t, s, projID, taskID, &types.TaskMessage{
+				Role: "assistant", Content: tc.content, ReasoningContent: tc.reasoning, ToolCalls: tc.toolCalls,
+			})
+
+			path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages" + tc.query
+			row := windowRowByRole(t, s, path, "assistant")
+			if got := row["reasoning_content"]; got != tc.want {
+				t.Errorf("reasoning_content = %v, want %q", got, tc.want)
+			}
+			if got := row["has_reasoning"]; got == true != tc.wantHidden {
+				t.Errorf("has_reasoning = %v, want %v", got, tc.wantHidden)
+			}
+			if tc.wantHidden && row["content"] != tc.content {
+				t.Errorf("hiding the reasoning also moved the answer: %v", row["content"])
+			}
+		})
 	}
 }
 
@@ -697,7 +397,8 @@ func TestMessageGetByIDFull(t *testing.T) {
 }
 
 // The list redacts a tool result too long to ship whole, for the two tools that return bulk output. The
-// tool name is part of that decision, so it is a case here.
+// tool name is part of that decision, so it is a case here — and so is full=1, which is how the card that
+// asks for the whole result gets back the bytes it was cut from.
 func TestMessageListToolResultTruncation(t *testing.T) {
 	long := strings.Repeat("line of output text\n", 20)
 	short := "total 100\ndrwxr-xr-x  5 user user  4096 Jan 1 .\n"
@@ -706,11 +407,13 @@ func TestMessageListToolResultTruncation(t *testing.T) {
 		name     string
 		toolName string
 		output   string
+		full     bool
 		wantCut  bool
 	}{
-		{"bash output over the ceiling", "bash", long, true},
-		{"read_file output over the ceiling", "read_file", long, true},
-		{"bash output within the ceiling", "bash", short, false},
+		{"bash output over the ceiling", "bash", long, false, true},
+		{"read_file output over the ceiling", "read_file", long, false, true},
+		{"bash output within the ceiling", "bash", short, false, false},
+		{"full=1 ships the whole result", "bash", long, true, false},
 	}
 
 	for _, tc := range cases {
@@ -720,9 +423,8 @@ func TestMessageListToolResultTruncation(t *testing.T) {
 			taskID := createTestTask(t, s, projID, "Test task")
 
 			toolCalls, _ := json.Marshal(map[string]any{
-				"tool_id":   "call-1",
-				"tool_name": tc.toolName,
-				"args":      map[string]any{"command": "cat large_file.txt"},
+				"tool_id": "call-1", "tool_name": tc.toolName,
+				"args": map[string]any{"command": "cat large_file.txt"},
 			})
 			toolResult, _ := json.Marshal(map[string]any{
 				"output": tc.output, "success": true, "duration": 50,
@@ -732,21 +434,11 @@ func TestMessageListToolResultTruncation(t *testing.T) {
 				ToolCalls: string(toolCalls), ToolResult: string(toolResult),
 			})
 
-			rr := testResponseAuth(t, s,
-				testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil))
-			if rr.Code != http.StatusOK {
-				t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+			path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
+			if tc.full {
+				path += "?full=1"
 			}
-
-			var msg map[string]any
-			for _, m := range mustJSON[[]map[string]any](t, rr.Body) {
-				if m["role"] == "tool_call" {
-					msg = m
-				}
-			}
-			if msg == nil {
-				t.Fatal("tool_call message not found")
-			}
+			msg := windowRowByRole(t, s, path, "tool_call")
 			if got := msg["result_truncated"] == true; got != tc.wantCut {
 				t.Fatalf("result_truncated = %v, want %v", got, tc.wantCut)
 			}
@@ -777,341 +469,6 @@ func TestMessageListToolResultTruncation(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestMessageListBashResultFull(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	longOutput := strings.Repeat("line of output text\n", 20)
-	toolCallsJSON, _ := json.Marshal(map[string]any{
-		"tool_id":   "call_bash",
-		"tool_name": "bash",
-		"args":      map[string]any{"command": "cat large_file.txt"},
-	})
-	toolResultJSON, _ := json.Marshal(map[string]any{
-		"output":   longOutput,
-		"success":  true,
-		"duration": 50,
-	})
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:         "test-bash-full",
-		TaskID:     taskID,
-		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
-		Role:       "tool_call",
-		Content:    "executed",
-		ToolCalls:  string(toolCallsJSON),
-		ToolResult: string(toolResultJSON),
-		CreatedAt:  time.Now().UTC(),
-	})
-
-	// GET with full=1 — output should be preserved
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages?full=1", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var bashMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "tool_call" {
-			bashMsg = m
-			break
-		}
-	}
-	if bashMsg == nil {
-		t.Fatal("tool_call message not found")
-	}
-
-	// result_truncated should NOT be set
-	if bashMsg["result_truncated"] == true {
-		t.Fatalf("expected result_truncated=false, got true")
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(bashMsg["tool_result"].(string)), &result); err != nil {
-		t.Fatalf("parse tool_result: %v", err)
-	}
-	output := result["output"].(string)
-	if output != longOutput {
-		t.Fatalf("expected full output, got length %d", len(output))
-	}
-}
-
-func TestMessageListShortBashResultNotTruncated(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	// Short output — should NOT be truncated
-	shortOutput := "total 100\ndrwxr-xr-x  5 user user  4096 Jan 1 .\n"
-	toolCallsJSON, _ := json.Marshal(map[string]any{
-		"tool_id":   "call_bash",
-		"tool_name": "bash",
-		"args":      map[string]any{"command": "ls -la"},
-	})
-	toolResultJSON, _ := json.Marshal(map[string]any{
-		"output":   shortOutput,
-		"success":  true,
-		"duration": 5,
-	})
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:         "test-bash-short",
-		TaskID:     taskID,
-		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
-		Role:       "tool_call",
-		Content:    "executed",
-		ToolCalls:  string(toolCallsJSON),
-		ToolResult: string(toolResultJSON),
-		CreatedAt:  time.Now().UTC(),
-	})
-
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var bashMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "tool_call" {
-			bashMsg = m
-			break
-		}
-	}
-	if bashMsg == nil {
-		t.Fatal("tool_call message not found")
-	}
-
-	if bashMsg["result_truncated"] == true {
-		t.Fatalf("expected result_truncated=false for short output, got true")
-	}
-
-	var result map[string]any
-	if err := json.Unmarshal([]byte(bashMsg["tool_result"].(string)), &result); err != nil {
-		t.Fatalf("parse tool_result: %v", err)
-	}
-	output := result["output"].(string)
-	if output != shortOutput {
-		t.Fatalf("expected unchanged short output, got: %s", output)
-	}
-}
-
-func TestMessageListReadFileResultTruncated(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	longOutput := strings.Repeat("line of file content text\n", 20)
-	toolCallsJSON, _ := json.Marshal(map[string]any{
-		"tool_id":   "call_read",
-		"tool_name": "read_file",
-		"args":      map[string]any{"path": "src/large_file.go"},
-	})
-	toolResultJSON, _ := json.Marshal(map[string]any{
-		"output":   longOutput,
-		"success":  true,
-		"duration": 10,
-	})
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:         "test-read-long",
-		TaskID:     taskID,
-		ThreadID:   (func() string { task, _ := s.store.GetTask(projID, taskID); return task.CurrentThreadID })(),
-		Role:       "tool_call",
-		Content:    "",
-		ToolCalls:  string(toolCallsJSON),
-		ToolResult: string(toolResultJSON),
-		CreatedAt:  time.Now().UTC(),
-	})
-
-	req := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", nil)
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	msgs := mustJSON[[]map[string]any](t, rr.Body)
-	var readMsg map[string]any
-	for _, m := range msgs {
-		if m["role"] == "tool_call" {
-			readMsg = m
-			break
-		}
-	}
-	if readMsg == nil {
-		t.Fatal("tool_call message not found")
-	}
-
-	// result_truncated should be true
-	if readMsg["result_truncated"] != true {
-		t.Fatalf("expected result_truncated=true, got %v", readMsg["result_truncated"])
-	}
-
-	// Parse tool_result and check output is truncated
-	var result map[string]any
-	if err := json.Unmarshal([]byte(readMsg["tool_result"].(string)), &result); err != nil {
-		t.Fatalf("parse tool_result: %v", err)
-	}
-	output := result["output"].(string)
-	if !strings.Contains(output, "truncated") {
-		t.Fatalf("expected truncated output, got: %s", output)
-	}
-	outputLines := strings.Count(output, "\n")
-	if outputLines >= 20 {
-		t.Fatalf("expected fewer than 20 lines, got %d", outputLines)
-	}
-	originalLines := len(strings.Split(longOutput, "\n"))
-	if result["original_lines"] != float64(originalLines) {
-		t.Fatalf("expected original_lines=%d, got %v", originalLines, result["original_lines"])
-	}
-	if result["original_bytes"] != float64(len(longOutput)) {
-		t.Fatalf("expected original_bytes=%d, got %v", len(longOutput), result["original_bytes"])
-	}
-}
-
-// TestDeleteMessagesAfterCheckpointRollsBackFork verifies that when a user deletes
-// all messages after a checkpoint (the message just below the checkpoint line),
-// the worktree is rolled back to the checkpoint state so related file changes are
-// discarded. This specifically covers fork threads, where copied messages carry no
-// git_commit_hash, so the last-remaining-message lookup finds nothing and the code
-// must fall back to the thread's checkpoint_commit_hash.
-func TestDeleteMessagesAfterCheckpointRollsBackFork(t *testing.T) {
-	s := testServer(t)
-
-	// Create a project with a git repo that has an initial committed file.
-	tmpDir := t.TempDir()
-	initialContent := "hello world\n"
-	if err := os.WriteFile(filepath.Join(tmpDir, "file.txt"), []byte(initialContent), 0o644); err != nil {
-		t.Fatalf("write initial file: %v", err)
-	}
-	initGitRepo(t, tmpDir)
-	testgit.Git(t, tmpDir, "add", "file.txt")
-	testgit.Git(t, tmpDir, "commit", "-m", "Add file.txt")
-
-	cookie, csrfToken := loginTestCSRF(t, s)
-	proj := map[string]any{"name": "checkpoint-rollback-test", "path": tmpDir}
-	req := testRequest("POST", "/api/projects", proj)
-	withAuthCSRF(req, cookie, csrfToken)
-	rr := testResponse(t, s, req)
-	if rr.Code != http.StatusCreated {
-		t.Fatalf("create project: %d %s", rr.Code, rr.Body.String())
-	}
-	projID := mustJSON[map[string]any](t, rr.Body)["id"].(string)
-
-	taskReq := testRequest("POST", "/api/projects/"+projID+"/tasks", map[string]any{"prompt": "test task"})
-	withAuthCSRF(taskReq, cookie, csrfToken)
-	taskRR := testResponse(t, s, taskReq)
-	if taskRR.Code != http.StatusCreated {
-		t.Fatalf("create task: %d %s", taskRR.Code, taskRR.Body.String())
-	}
-	taskData := mustJSON[map[string]any](t, taskRR.Body)
-	taskID := taskData["id"].(string)
-
-	// Create worktree (simulating task start).
-	worktreePath, _, err := s.executor.WorktreeMgr().CreateWorktree(projID, taskID, "task/"+taskID, "HEAD")
-	if err != nil {
-		t.Fatalf("create worktree: %v", err)
-	}
-
-	// Update task with branch info (required for fork to manipulate the worktree).
-	task, err := s.store.GetTask(projID, taskID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	task.Branch = "task/" + taskID
-	task.BaseRef = "master"
-	if err := s.store.UpdateTask(task); err != nil {
-		t.Fatalf("update task branch: %v", err)
-	}
-
-	// Main thread: commit a change so there is a real checkpoint commit.
-	friendContent := "hello friend\n"
-	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(friendContent), 0o644); err != nil {
-		t.Fatalf("write friend content: %v", err)
-	}
-	testgit.Git(t, worktreePath, "add", "file.txt")
-	testgit.Git(t, worktreePath, "commit", "-m", "friend changes")
-	checkpointCommit := testgit.GitOutput(t, worktreePath, "rev-parse", "HEAD")
-
-	// Get the Main thread.
-	listReq := testRequest("GET", "/api/projects/"+projID+"/tasks/"+taskID+"/threads", nil)
-	listRR := testResponseAuth(t, s, listReq)
-	threads := mustJSON[[]map[string]any](t, listRR.Body)
-	mainThreadID := threads[0]["id"].(string)
-
-	// Create messages with explicit, distinct timestamps so the fork point is
-	// deterministically detected: a message carrying the checkpoint commit, then
-	// the checkpoint message itself.
-	baseTime := time.Date(2025, 1, 1, 12, 0, 0, 0, time.UTC)
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:            "cp-prev-msg",
-		TaskID:        taskID,
-		ThreadID:      mainThreadID,
-		Role:          "assistant",
-		Content:       "made friend changes",
-		GitCommitHash: checkpointCommit,
-		CreatedAt:     baseTime,
-	})
-	_ = s.store.CreateTaskMessage(&types.TaskMessage{
-		ID:        "cp-msg",
-		TaskID:    taskID,
-		ThreadID:  mainThreadID,
-		Role:      "user",
-		Content:   "checkpoint here",
-		CreatedAt: baseTime.Add(time.Second),
-	})
-
-	// Fork at the checkpoint → fork thread gets checkpoint_commit_hash = checkpointCommit.
-	forkReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/threads/fork", map[string]any{
-		"from_thread_id":  mainThreadID,
-		"from_message_id": "cp-msg",
-	})
-	withAuthCSRF(forkReq, cookie, csrfToken)
-	forkRR := testResponse(t, s, forkReq)
-	if forkRR.Code != http.StatusCreated {
-		t.Fatalf("fork: %d %s", forkRR.Code, forkRR.Body.String())
-	}
-
-	// After fork, worktree should be reset to the checkpoint commit (friend content).
-	verifyWorktreeContent(t, worktreePath, "file.txt", friendContent, "after fork reset to checkpoint")
-
-	// In the fork thread, add a message after the checkpoint and commit a change.
-	afterReq := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":    "user",
-		"content": "after checkpoint",
-	})
-	withAuthCSRF(afterReq, cookie, csrfToken)
-	afterRR := testResponse(t, s, afterReq)
-	if afterRR.Code != http.StatusCreated {
-		t.Fatalf("create after-checkpoint message: %d %s", afterRR.Code, afterRR.Body.String())
-	}
-	afterMsg := mustJSON[map[string]any](t, afterRR.Body)
-	afterMsgID := afterMsg["id"].(string)
-
-	forkContent := "hello fork\n"
-	if err := os.WriteFile(filepath.Join(worktreePath, "file.txt"), []byte(forkContent), 0o644); err != nil {
-		t.Fatalf("write fork content: %v", err)
-	}
-	testgit.Git(t, worktreePath, "add", "file.txt")
-	testgit.Git(t, worktreePath, "commit", "-m", "fork changes")
-	verifyWorktreeContent(t, worktreePath, "file.txt", forkContent, "fork committed changes")
-
-	// Delete the message just below the checkpoint (removes it and everything after).
-	delReq := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"message_id": afterMsgID,
-	})
-	withAuthCSRF(delReq, cookie, csrfToken)
-	delRR := testResponse(t, s, delReq)
-	if delRR.Code != http.StatusOK {
-		t.Fatalf("delete: %d %s", delRR.Code, delRR.Body.String())
-	}
-
-	// The fork thread now ends at the checkpoint. File changes made after the
-	// checkpoint should be discarded → the worktree rolls back to the checkpoint.
-	verifyWorktreeContent(t, worktreePath, "file.txt", friendContent, "after delete rollback to checkpoint")
 }
 
 // TestDeleteFirstRequestRollsBackToBase verifies that deleting the first real
@@ -1312,73 +669,75 @@ func TestDeleteCounterRequestRollsBackToPriorCheckpoint(t *testing.T) {
 	verifyWorktreeContent(t, worktreePath, "hello.cs", noCounter, "after delete rollback to prior checkpoint")
 }
 
-func TestMessageCreateRejectsInvalidRole(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
+// A DELETE cuts the thread at the named row's entry: the row and everything after it go, everything older
+// stays, and the newest summary — what the turns before it are remembered by — is never swept by a cascade
+// aimed at an older row, which would reinstate the whole pre-summary history into the LLM context. Which
+// rows the cut takes is backend/store's own rule; this is the route the UI calls.
+func TestDeleteAfterNamedRowCutsTheThreadAtItsEntry(t *testing.T) {
+	cases := []struct {
+		name   string
+		rows   []types.TaskMessage
+		target string
+		want   []string
+	}{
+		{
+			name: "a cascade aimed at an older row leaves the summary standing",
+			rows: []types.TaskMessage{
+				{ID: "msg-old", Role: "user", Content: "oldest request"},
+				{ID: "sum-1", Role: "summarization", Content: "summary of msg-old"},
+				{ID: "msg-new", Role: "user", Content: "newest request"},
+			},
+			target: "msg-old",
+			want:   []string{"sum-1"},
+		},
+		{
+			name: "a summarization row takes its own tail with it",
+			rows: []types.TaskMessage{
+				{ID: "msg-1", Role: "user", Content: "msg 1"},
+				{ID: "summ-msg", Role: "summarization", Content: "summary of msg 1"},
+				{ID: "msg-2", Role: "user", Content: "msg 2"},
+				{ID: "msg-3", Role: "user", Content: "msg 3"},
+			},
+			target: "summ-msg",
+			want:   []string{"msg-1"},
+		},
+	}
 
-	// Internal roles must not be injectable over HTTP (prompt injection into
-	// the LLM conversation context).
-	for _, role := range []string{"system", "assistant", "tool_call", "tool"} {
-		req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-			"role":    role,
-			"content": "injected",
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
+			taskID := createTestTask(t, s, projID, "Truncated")
+			seeded := map[string]bool{}
+			base := time.Now().UTC().Add(-time.Minute)
+			for i := range tc.rows {
+				m := tc.rows[i]
+				m.CreatedAt = base.Add(time.Duration(i) * time.Second)
+				seedMessage(t, s, projID, taskID, &m)
+				seeded[m.ID] = true
+			}
+
+			rr := testResponseAuth(t, s, testRequest(http.MethodDelete,
+				"/api/projects/"+projID+"/tasks/"+taskID+"/messages",
+				map[string]any{"message_id": tc.target}))
+			if rr.Code != http.StatusOK {
+				t.Fatalf("delete = %d: %s", rr.Code, rr.Body.String())
+			}
+
+			all, err := s.store.GetTaskMessages(taskID, "")
+			if err != nil {
+				t.Fatalf("read the thread: %v", err)
+			}
+			var left []string
+			for _, m := range all {
+				if seeded[m.ID] {
+					left = append(left, m.ID)
+				}
+			}
+			if !slices.Equal(left, tc.want) {
+				t.Errorf("the rows still standing are %v, want %v", left, tc.want)
+			}
 		})
-		rr := testResponseAuth(t, s, req)
-		if rr.Code != http.StatusBadRequest {
-			t.Errorf("role %q: expected 400, got %d", role, rr.Code)
-		}
-	}
-}
-
-func TestMessageCreateRejectsOversizedContent(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Test task")
-
-	big := strings.Repeat("a", (1<<20)+1)
-	req := testRequest("POST", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"role":    "user",
-		"content": big,
-	})
-	rr := testResponseAuth(t, s, req)
-	if rr.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("expected 413 for oversized content, got %d", rr.Code)
-	}
-}
-
-// Deleting a message older than the summary must not take the summary with it: it is
-// what the turns before it are remembered by, and losing it while those rows survive
-// reinstates the whole pre-summary history into the LLM context. Store-level coverage
-// lives in backend/store; this is the endpoint the UI actually calls.
-func TestDeleteBeforeSummarizationKeepsSummary(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Summary survives cascade")
-
-	base := time.Now().UTC().Add(-time.Minute)
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		ID: "msg-old", Role: "user", Content: "oldest request", CreatedAt: base,
-	})
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		ID: "sum-1", Role: "summarization", Content: "summary of msg-old", CreatedAt: base.Add(time.Second),
-	})
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		ID: "msg-new", Role: "user", Content: "newest request", CreatedAt: base.Add(2 * time.Second),
-	})
-
-	req := testRequest("DELETE", "/api/projects/"+projID+"/tasks/"+taskID+"/messages", map[string]any{
-		"message_id": "msg-old",
-	})
-	if rr := testResponseAuth(t, s, req); rr.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
-	}
-
-	if _, err := s.store.GetTaskMessageByID("sum-1"); err != nil {
-		t.Fatalf("summary row was swept by a cascade targeting an older message: %v", err)
-	}
-	if _, err := s.store.GetTaskMessageByID("msg-new"); err == nil {
-		t.Fatal("message after the target should have been deleted")
 	}
 }
 
@@ -1392,9 +751,10 @@ func deleteCheck(t *testing.T, s *Server, projID, taskID, msgID string) map[stri
 	return mustJSON[map[string]any](t, rr.Body)
 }
 
-// The delete confirmation names the files, and that verdict is the server's: it is the side that rewinds the
-// worktree to the state the remaining conversation describes. A summarized row owns no files, and a task with
-// no worktree has nothing to go back to.
+// The delete confirmation names what the click costs — the files it rewinds and the branch it deletes — and
+// that verdict is the server's, because it is the side that rewinds the worktree to the state the remaining
+// conversation describes. A summarized row owns no files, and a task with no worktree has nothing to go back
+// to. No fork hangs off these rows, so the branch half of the answer says so.
 func TestMessageDeleteCheckReportsFileRewind(t *testing.T) {
 	s := testServer(t)
 	projID := createTestProject(t, s)
@@ -1405,8 +765,15 @@ func TestMessageDeleteCheckReportsFileRewind(t *testing.T) {
 	created := mustJSON[map[string]any](t, createdRR.Body)
 	msgID, _ := created["id"].(string)
 
-	if got := deleteCheck(t, s, projID, taskID, msgID)["resets_files"]; got == true {
+	check := deleteCheck(t, s, projID, taskID, msgID)
+	if check["resets_files"] == true {
 		t.Error("a task with no worktree has no state to rewind")
+	}
+	if check["will_delete_branch"] != false {
+		t.Errorf("will_delete_branch = %v, want false — no fork is keyed on this row", check["will_delete_branch"])
+	}
+	if check["branch_name"] != "" {
+		t.Errorf("branch_name = %v, want the empty string beside a false will_delete_branch", check["branch_name"])
 	}
 
 	task, err := s.store.GetTaskByID(taskID)

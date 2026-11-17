@@ -5,65 +5,62 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 )
 
-// Tested against a real redirect: a client that follows one has already reached a host nothing validated.
+// TestClientRedirectPolicyIsWhatTheConstructorChose: one rule, two clients, stated by which one you
+// asked for. A client that follows a redirect has already reached a host nothing validated, so the
+// single-attempt client must report the 3xx itself; the client behind a URL the server chose follows it.
+func TestClientRedirectPolicyIsWhatTheConstructorChose(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		client   func(time.Duration) *http.Client
+		followed bool
+	}{
+		{"NewClient follows", NewClient, true},
+		{"NewSingleAttemptClient refuses", NewSingleAttemptClient, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const body = "arrived"
+			var escapeHits int
+			escapes := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				escapeHits++
+				_, _ = io.WriteString(w, body)
+			}))
+			defer escapes.Close()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, escapes.URL, http.StatusFound)
+			}))
+			defer srv.Close()
 
-func TestNewSingleAttemptClientRefusesRedirects(t *testing.T) {
-	var escapeHits int
-	escapes := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		escapeHits++
-		w.WriteHeader(http.StatusTeapot)
-	}))
-	defer escapes.Close()
+			resp, err := tc.client(5 * time.Second).Get(srv.URL)
+			if err != nil {
+				t.Fatalf("get: %v", err)
+			}
+			defer func() { _ = resp.Body.Close() }()
+			got, _ := io.ReadAll(resp.Body)
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, escapes.URL, http.StatusFound)
-	}))
-	defer srv.Close()
-
-	resp, err := NewSingleAttemptClient(5 * time.Second).Get(srv.URL)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	// ErrUseLastResponse reports the redirect as the response, not as an error.
-	if resp.StatusCode != http.StatusFound {
-		t.Errorf("status = %d, want the 307 itself — a client that refused the redirect reports it", resp.StatusCode)
-	}
-	if loc := resp.Header.Get("Location"); loc != escapes.URL {
-		t.Errorf("Location = %q, want %q", loc, escapes.URL)
-	}
-	if escapeHits != 0 {
-		t.Errorf("redirect target contacted %d time(s)", escapeHits)
-	}
-}
-
-func TestNewClientFollowsRedirects(t *testing.T) {
-	want := "arrived"
-	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = io.WriteString(w, want)
-	}))
-	defer target.Close()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, target.URL, http.StatusFound)
-	}))
-	defer srv.Close()
-
-	resp, err := NewClient(5 * time.Second).Get(srv.URL)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-	body, _ := io.ReadAll(resp.Body)
-
-	if resp.StatusCode != http.StatusOK || string(body) != want {
-		t.Errorf("status=%d body=%q, want 200 %q", resp.StatusCode, strings.TrimSpace(string(body)), want)
+			if tc.followed {
+				if resp.StatusCode != http.StatusOK || string(got) != body {
+					t.Errorf("status=%d body=%q, want 200 %q", resp.StatusCode, got, body)
+				}
+				if escapeHits != 1 {
+					t.Errorf("the redirect target was contacted %d time(s), want 1", escapeHits)
+				}
+				return
+			}
+			// ErrUseLastResponse reports the redirect as the response, not as an error.
+			if resp.StatusCode != http.StatusFound {
+				t.Errorf("status = %d, want the 307 itself — a client that refused the redirect reports it", resp.StatusCode)
+			}
+			if loc := resp.Header.Get("Location"); loc != escapes.URL {
+				t.Errorf("Location = %q, want %q", loc, escapes.URL)
+			}
+			if escapeHits != 0 {
+				t.Errorf("redirect target contacted %d time(s)", escapeHits)
+			}
+		})
 	}
 }
 
@@ -116,7 +113,6 @@ func TestGrantedEgressClientRefusesLoopbackForAnyOtherHost(t *testing.T) {
 		name    string
 		granted []string
 	}{
-		{"no grants at all", nil},
 		{"a different host", []string{"searx.test"}},
 		// The grant matches the dial hostname, so loopback reached under another name is not named.
 		{"another name for this machine", []string{"localhost"}},

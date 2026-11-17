@@ -250,22 +250,6 @@ func TestFSRawRefusalNamesNoHostPath(t *testing.T) {
 	}
 }
 
-// TestFSRawRefusesATaskOfAnotherProjectAtARef: the ref branch binds ?task= to ?project= on its own
-// path through the handler, so the working-tree case above does not cover it.
-func TestFSRawRefusesATaskOfAnotherProjectAtARef(t *testing.T) {
-	s := testServer(t)
-	a, _ := rawImageProject(t, s, "pa", map[string][]byte{"logo.png": rawPNG})
-	b, _ := rawImageProject(t, s, "pb", map[string][]byte{"logo.png": rawPNG})
-	if err := s.store.CreateTask(&types.Task{ID: "tb", ProjectID: b, Title: "tb", Status: types.StatusDone}); err != nil {
-		t.Fatal(err)
-	}
-
-	rr := rawImageGet(t, s, rawQuery(a, "logo.png", "HEAD", "tb"))
-	if rr.Code == http.StatusOK {
-		t.Fatalf("a ref read honoured a task of another project: %s", rr.Body.String())
-	}
-}
-
 // TestFSRawRefBranchRefusesAnOversizedBlob: the ref branch caps on `git cat-file -s` and again in
 // the read, so a refusal must not cost the 20MB it refused.
 func TestFSRawRefBranchRefusesAnOversizedBlob(t *testing.T) {

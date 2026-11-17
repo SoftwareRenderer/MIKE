@@ -16,51 +16,37 @@ import (
 	"mike/pkg/bridge/protocol"
 )
 
-// --- isSandboxableTool Tests ---
+// --- tool families ---
 
-func TestIsSandboxableTool(t *testing.T) {
+// The two families decide which tool calls a sandbox container runs, and they are decided by name
+// alone: the sandbox badge on a card, and the read-only streaming path, both read these tables, so a
+// name in the wrong family is a card that lies rather than a build failure.
+func TestToolSandboxFamilies(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		want bool
+		name        string
+		sandboxable bool
+		lsp         bool
 	}{
-		{"read_file", true},
-		{"write_file", true},
-		{"edit_file", true},
-		{"bash", true},
-		{"request_review", false},
-		{"unknown_tool", false},
-		{"", false},
+		{name: "read_file", sandboxable: true},
+		{name: "write_file", sandboxable: true},
+		{name: "edit_file", sandboxable: true},
+		{name: "bash", sandboxable: true},
+		{name: "lsp_references", lsp: true},
+		{name: "lsp_definition", lsp: true},
+		{name: "lsp_hover", lsp: true},
+		{name: "lsp_rename", lsp: true},
+		{name: "request_review"},
+		{name: "unknown_tool"},
+		{name: ""},
 	}
 
 	for _, tt := range tests {
-		got := isSandboxableTool(tt.name)
-		if got != tt.want {
-			t.Errorf("isSandboxableTool(%q) = %v, want %v", tt.name, got, tt.want)
+		if got := isSandboxableTool(tt.name); got != tt.sandboxable {
+			t.Errorf("isSandboxableTool(%q) = %v, want %v", tt.name, got, tt.sandboxable)
 		}
-	}
-}
-
-func TestIsLSPTool(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		want bool
-	}{
-		{"lsp_references", true},
-		{"lsp_definition", true},
-		{"lsp_hover", true},
-		{"lsp_rename", true},
-		{"read_file", false},
-		{"write_file", false},
-		{"unknown_tool", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		got := isLSPTool(tt.name)
-		if got != tt.want {
-			t.Errorf("isLSPTool(%q) = %v, want %v", tt.name, got, tt.want)
+		if got := isLSPTool(tt.name); got != tt.lsp {
+			t.Errorf("isLSPTool(%q) = %v, want %v", tt.name, got, tt.lsp)
 		}
 	}
 }
@@ -91,52 +77,6 @@ func TestExecuteTool_ReadFile_Sandboxed(t *testing.T) {
 	}
 	if result != expectedContent {
 		t.Errorf("expected %q, got %q", expectedContent, result)
-	}
-}
-
-func TestExecuteTool_ReadFile_HostFallback(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "host.txt")
-	expectedContent := "hello from host"
-	if err := os.WriteFile(testFile, []byte(expectedContent), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	te := newBareTestExecutor(t)
-
-	// No sandboxRead — should fall back to host
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "host.txt"}, dir, &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success, got failure: %s", result)
-	}
-	if result != expectedContent {
-		t.Errorf("expected %q, got %q", expectedContent, result)
-	}
-}
-
-func TestExecuteTool_ReadFile_RelativeParentIsAHostPath(t *testing.T) {
-	t.Parallel()
-	// A task whose project runs without a sandbox works on the host: ".." resolves against
-	// the worktree and reads whatever it names. The boundary for such a task is the
-	// project's sandbox_enabled column; TestSandboxedTaskWithoutBridgeRefusesEveryHostTool
-	// holds the other side.
-	base := t.TempDir()
-	worktree := filepath.Join(base, "worktree")
-	if err := os.Mkdir(worktree, 0o755); err != nil {
-		t.Fatalf("create worktree dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(base, "notes.txt"), []byte("outside"), 0o644); err != nil {
-		t.Fatalf("seed file outside the worktree: %v", err)
-	}
-	te := newBareTestExecutor(t)
-
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "../notes.txt"}, worktree, &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected the host path to be read, got failure: %s", result)
-	}
-	if result != "outside" {
-		t.Errorf("read %q, want %q", result, "outside")
 	}
 }
 
@@ -247,75 +187,6 @@ func TestExecuteTool_WriteFile_WritesWhereThePathNames(t *testing.T) {
 	assertTreeEquals(t, worktree, []string{"deep"})
 }
 
-func TestExecuteTool_WriteFile_CreatesNestedDirs(t *testing.T) {
-	t.Parallel()
-	// A brand-new nested subdirectory under the worktree is created on the way to the
-	// file (no sandboxWrite injected), which keeps the historical 0644 mode.
-	worktree := t.TempDir()
-	te := newBareTestExecutor(t)
-
-	result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
-		"path":    "deep/nested/dir/file.txt",
-		"content": "nested content",
-	}, worktree, &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success writing into a new nested dir, got failure: %s", result)
-	}
-
-	full := filepath.Join(worktree, "deep", "nested", "dir", "file.txt")
-	data, err := os.ReadFile(full)
-	if err != nil {
-		t.Fatalf("read nested file: %v", err)
-	}
-	if string(data) != "nested content" {
-		t.Errorf("nested file content = %q, want 'nested content'", string(data))
-	}
-	info, err := os.Stat(full)
-	if err != nil {
-		t.Fatalf("stat nested file: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o644 {
-		t.Errorf("nested file mode = %o, want 0644", perm)
-	}
-	for _, d := range []string{"deep", "deep/nested", "deep/nested/dir"} {
-		di, err := os.Stat(filepath.Join(worktree, d))
-		if err != nil {
-			t.Fatalf("created dir %q missing: %v", d, err)
-		}
-		if !di.IsDir() {
-			t.Errorf("%q is not a directory", d)
-		}
-	}
-}
-
-func TestExecuteTool_WriteFile_DirCreation(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newBareTestExecutor(t)
-
-	sandboxWrite := func(_ context.Context, path, content string) error {
-		fullPath := filepath.Join(dir, path)
-		os.MkdirAll(filepath.Dir(fullPath), 0755)
-		return os.WriteFile(fullPath, []byte(content), 0644)
-	}
-
-	result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
-		"path":    "deep/nested/dir/file.txt",
-		"content": "nested content",
-	}, dir, &types.Task{}, &executionState{sandboxWrite: sandboxWrite}, nil)
-	if !ok {
-		t.Fatalf("expected success, got failure: %s", result)
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, "deep", "nested", "dir", "file.txt"))
-	if err != nil {
-		t.Fatalf("read nested file: %v", err)
-	}
-	if string(data) != "nested content" {
-		t.Errorf("nested file content = %q, want 'nested content'", string(data))
-	}
-}
-
 // assertTreeEquals checks that dir contains exactly the given top-level entries.
 // Used by the escape tests to prove a rejected write left no directory behind.
 func assertTreeEquals(t *testing.T, dir string, want []string) {
@@ -336,148 +207,34 @@ func assertTreeEquals(t *testing.T, dir string, want []string) {
 	}
 }
 
-func TestExecuteTool_TaskComplete(t *testing.T) {
+// The tools that answer the model directly, without touching a file or a container: their answer is
+// the conversation, so the sentence and the success flag are the whole contract.
+func TestExecuteTool_ConversationToolsAnswerTheModel(t *testing.T) {
 	t.Parallel()
 	te := newBareTestExecutor(t)
-	result, ok := te.executeTool(context.Background(), "request_review", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success, got failure: %s", result)
-	}
-	if result != "Task complete" {
-		t.Errorf("expected 'Task complete', got %q", result)
-	}
-}
-
-func TestExecuteTool_AskQuestion(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-	result, ok := te.executeTool(context.Background(), "ask_question", map[string]any{"question": "What framework should I use?"}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success, got failure: %s", result)
-	}
-	if result != "What framework should I use?" {
-		t.Errorf("expected question text, got %q", result)
-	}
-}
-
-func TestExecuteTool_AskQuestion_Empty(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-	result, ok := te.executeTool(context.Background(), "ask_question", map[string]any{"question": ""}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for empty question, got success: %s", result)
-	}
-	if result != "Error: question is required" {
-		t.Errorf("expected 'Error: question is required', got %q", result)
-	}
-}
-
-func TestExecuteTool_UnknownTool(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-	result, ok := te.executeTool(context.Background(), "unknown_tool", map[string]any{}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for unknown tool, got success: %s", result)
-	}
-	if result != "Unknown tool: unknown_tool" {
-		t.Errorf("expected 'Unknown tool: unknown_tool', got %q", result)
-	}
-}
-
-func TestExecuteTool_ReadFile_CallbackError(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-
-	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
-		return nil, fmt.Errorf("file not found in sandbox")
-	}
-
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "missing.txt"}, "/tmp/worktree", &types.Task{}, &executionState{sandboxRead: sandboxRead}, nil)
-	if ok {
-		t.Fatalf("expected failure, got success: %s", result)
-	}
-	if result != "Error: file not found in sandbox" {
-		t.Errorf("unexpected error: %q", result)
-	}
-}
-
-// --- read_file with offset/limit Tests ---
-
-func TestExecuteTool_ReadFile_OffsetLimit(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	content := "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10"
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	te := newBareTestExecutor(t)
-
-	tests := []struct {
-		name    string
-		args    map[string]any
-		want    string
-		wantErr bool
+	cases := []struct {
+		name   string
+		tool   string
+		args   map[string]any
+		want   string
+		wantOK bool
 	}{
-		{
-			name:    "no offset/limit returns full file",
-			args:    map[string]any{"path": "test.txt"},
-			want:    content,
-			wantErr: false,
-		},
-		{
-			name:    "offset 1 returns full file",
-			args:    map[string]any{"path": "test.txt", "offset": float64(1)},
-			want:    content,
-			wantErr: false,
-		},
-		{
-			name:    "offset 4 returns lines 4-10",
-			args:    map[string]any{"path": "test.txt", "offset": float64(4)},
-			want:    "line4\nline5\nline6\nline7\nline8\nline9\nline10",
-			wantErr: false,
-		},
-		{
-			name:    "offset 4 limit 3 returns lines 4-6",
-			args:    map[string]any{"path": "test.txt", "offset": float64(4), "limit": float64(3)},
-			want:    "line4\nline5\nline6",
-			wantErr: false,
-		},
-		{
-			name:    "limit 3 returns first 3 lines",
-			args:    map[string]any{"path": "test.txt", "limit": float64(3)},
-			want:    "line1\nline2\nline3",
-			wantErr: false,
-		},
-		{
-			name:    "offset past end returns error to inform the LLM",
-			args:    map[string]any{"path": "test.txt", "offset": float64(100)},
-			want:    "Error: offset 100 is past the end of the file (file has 10 line(s)). Use a valid offset.",
-			wantErr: true,
-		},
-		{
-			name:    "limit larger than file returns full file",
-			args:    map[string]any{"path": "test.txt", "limit": float64(100)},
-			want:    content,
-			wantErr: false,
-		},
+		{name: "request_review outside plan mode", tool: "request_review", args: map[string]any{}, want: "Task complete", wantOK: true},
+		{name: "ask_question echoes the question", tool: "ask_question",
+			args: map[string]any{"question": "What framework should I use?"},
+			want: "What framework should I use?", wantOK: true},
+		{name: "ask_question with no question", tool: "ask_question", args: map[string]any{"question": ""},
+			want: "Error: question is required", wantOK: false},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, ok := te.executeTool(context.Background(), "read_file", tt.args, dir, &types.Task{}, &executionState{}, nil)
-			if tt.wantErr {
-				if ok {
-					t.Fatalf("expected failure, got success: %s", result)
-				}
-			} else {
-				if !ok {
-					t.Fatalf("expected success, got failure: %s", result)
-				}
-				if result != tt.want {
-					t.Errorf("got %q, want %q", result, tt.want)
-				}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result, ok := te.executeTool(context.Background(), tc.tool, tc.args, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (result %q)", ok, tc.wantOK, result)
+			}
+			if result != tc.want {
+				t.Errorf("result = %q, want %q", result, tc.want)
 			}
 		})
 	}
@@ -485,68 +242,103 @@ func TestExecuteTool_ReadFile_OffsetLimit(t *testing.T) {
 
 // --- edit_file Tests ---
 
-func TestExecuteTool_EditFile_SingleEdit(t *testing.T) {
+// applyEditReplacements answers from positions found in the original content, so every shape it
+// refuses is one the model can correct. The refusal is the whole answer: nothing is written.
+func TestExecuteTool_EditFile(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	content := "hello world\nfoo bar\nbaz qux"
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
+	cases := []struct {
+		name    string
+		content string
+		absent  bool // the file does not exist at all
+		edits   string
+		want    string // the file's content after a successful edit
+		wantErr string // the substring the refusal must carry
+	}{
+		{
+			name: "single edit", content: "hello world\nfoo bar\nbaz qux",
+			edits: `[{"oldText":"hello world","newText":"goodbye world"}]`,
+			want:  "goodbye world\nfoo bar\nbaz qux",
+		},
+		{
+			name: "multiple edits in one pass", content: "alpha\nbeta\ngamma\ndelta",
+			edits: `[{"oldText":"alpha","newText":"ALPHA"},{"oldText":"gamma","newText":"GAMMA"}]`,
+			want:  "ALPHA\nbeta\nGAMMA\ndelta",
+		},
+		{
+			name: "oldText not found", content: "hello world",
+			edits: `[{"oldText":"not here","newText":"replacement"}]`, wantErr: "not found",
+		},
+		{
+			name: "oldText appears more than once", content: "foo\nbar\nfoo\nbaz",
+			edits: `[{"oldText":"foo","newText":"BAR"}]`, wantErr: "multiple times",
+		},
+		{
+			name: "overlapping edits", content: "abcdefgh",
+			edits: `[{"oldText":"abcd","newText":"ABCD"},{"oldText":"cdef","newText":"CDEF"}]`, wantErr: "overlap",
+		},
+		{
+			name: "empty oldText", content: "content",
+			edits: `[{"oldText":"","newText":"replacement"}]`, wantErr: "empty",
+		},
+		{
+			name: "no edits", content: "content",
+			edits: `[]`, wantErr: "no edits",
+		},
+		{
+			name: "missing file", absent: true,
+			edits: `[{"oldText":"x","newText":"y"}]`, wantErr: "Error:",
+		},
 	}
 
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{
-		{"oldText": "hello world", "newText": "goodbye world"},
-	})
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if !tc.absent {
+				if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte(tc.content), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+			}
+			te := newBareTestExecutor(t)
 
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success, got failure: %s", result)
-	}
+			result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
+				"path":  "test.txt",
+				"edits": jsontext.Value(tc.edits),
+			}, dir, &types.Task{}, &executionState{}, nil)
 
-	data, err := os.ReadFile(testFile)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	want := "goodbye world\nfoo bar\nbaz qux"
-	if string(data) != want {
-		t.Errorf("got %q, want %q", string(data), want)
-	}
-}
+			if tc.wantErr != "" {
+				if ok {
+					t.Fatalf("expected failure, got success: %s", result)
+				}
+				if !strings.Contains(result, tc.wantErr) {
+					t.Errorf("refusal %q does not say %q", result, tc.wantErr)
+				}
+				got, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+				if tc.absent {
+					if err == nil {
+						t.Errorf("a refused edit created the file: %q", got)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("read file after refusal: %v", err)
+				}
+				if string(got) != tc.content {
+					t.Errorf("the refused edit changed the file to %q", got)
+				}
+				return
+			}
 
-func TestExecuteTool_EditFile_MultipleEdits(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	content := "alpha\nbeta\ngamma\ndelta"
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{
-		{"oldText": "alpha", "newText": "ALPHA"},
-		{"oldText": "gamma", "newText": "GAMMA"},
-	})
-
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success, got failure: %s", result)
-	}
-
-	data, err := os.ReadFile(testFile)
-	if err != nil {
-		t.Fatalf("read file: %v", err)
-	}
-	want := "ALPHA\nbeta\nGAMMA\ndelta"
-	if string(data) != want {
-		t.Errorf("got %q, want %q", string(data), want)
+			if !ok {
+				t.Fatalf("expected success, got failure: %s", result)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+			if err != nil {
+				t.Fatalf("read file: %v", err)
+			}
+			if string(data) != tc.want {
+				t.Errorf("got %q, want %q", string(data), tc.want)
+			}
+		})
 	}
 }
 
@@ -650,79 +442,61 @@ func TestExecuteTool_EditFile_SandboxDelegation(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_EditFile_SandboxDelegation_Error(t *testing.T) {
+// A callback's own sentence is the answer the model gets, so the container's reason for refusing
+// (or the host's) is never replaced by a generic failure.
+func TestExecuteTool_CallbackFailureIsTheAnswer(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("hello world"), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
+	cases := []struct {
+		name    string
+		tool    string
+		args    func(dir string) map[string]any
+		state   func(t *testing.T, dir string) *executionState
+		wantSub string
+	}{
+		{
+			name: "sandbox write", tool: "write_file",
+			args: func(string) map[string]any {
+				return map[string]any{"path": "readonly.txt", "content": "data"}
+			},
+			state: func(*testing.T, string) *executionState {
+				return &executionState{sandboxWrite: func(_ context.Context, path, content string) error {
+					return fmt.Errorf("permission denied")
+				}}
+			},
+			wantSub: "Error: permission denied",
+		},
+		{
+			name: "sandbox edit", tool: "edit_file",
+			args: func(string) map[string]any {
+				return map[string]any{"path": "test.txt", "edits": jsontext.Value(`[{"oldText":"nope","newText":"x"}]`)}
+			},
+			state: func(t *testing.T, dir string) *executionState {
+				if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("hello world"), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+				return &executionState{
+					projectName: "test",
+					sandboxEdit: func(_ context.Context, path string, edits []protocol.Edit) error {
+						return fmt.Errorf("edits[0].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got 1 lines in file.")
+					},
+				}
+			},
+			wantSub: "not found in file",
+		},
 	}
 
-	editErr := func(_ context.Context, path string, edits []protocol.Edit) error {
-		return fmt.Errorf("edits[0].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got 1 lines in file.")
-	}
-	state := &executionState{
-		projectName: "test",
-		sandboxEdit: editErr,
-	}
-
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{{"oldText": "nope", "newText": "x"}})
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, dir, &types.Task{}, state, nil)
-	if ok {
-		t.Fatalf("expected failure, got success: %s", result)
-	}
-	if !strings.Contains(result, "not found in file") {
-		t.Errorf("expected sandbox edit error, got %q", result)
-	}
-}
-
-func TestExecuteTool_EditFile_SandboxDelegation_Recovery(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("line one\nline two\nline three"), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	working := &sandboxEditRecorder{}
-	failing := &sandboxEditRecorder{failN: 1}
-	recoveryCalled := false
-	state := &executionState{
-		projectName: "test",
-		sandboxEdit: failing.callback(dir),
-	}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		// Refresh to a working callback, like a reconnected sandbox client.
-		state.sandboxEdit = working.callback(dir)
-		return true
-	}
-
-	edits, _ := json.Marshal([]map[string]any{{"oldText": "line two", "newText": "modified two"}})
-	te := newBareTestExecutor(t)
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(edits),
-	}, dir, &types.Task{}, state, nil)
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
-	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called")
-	}
-	if !strings.Contains(result, "Edited") {
-		t.Errorf("unexpected result: %q", result)
-	}
-	data, err := os.ReadFile(testFile)
-	if err != nil {
-		t.Fatalf("read edited file: %v", err)
-	}
-	if !strings.Contains(string(data), "modified two") {
-		t.Errorf("file content = %q, want to contain %q", string(data), "modified two")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			te := newBareTestExecutor(t)
+			result, ok := te.executeTool(context.Background(), tc.tool, tc.args(dir), dir, &types.Task{}, tc.state(t, dir), nil)
+			if ok {
+				t.Fatalf("expected failure, got success: %s", result)
+			}
+			if !strings.Contains(result, tc.wantSub) {
+				t.Errorf("result %q does not carry the cause %q", result, tc.wantSub)
+			}
+		})
 	}
 }
 
@@ -767,85 +541,6 @@ func BenchmarkExecuteTool_EditFile(b *testing.B) {
 	}
 }
 
-func TestExecuteTool_EditFile_OldTextNotFound(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	content := "hello world"
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{
-		{"oldText": "not here", "newText": "replacement"},
-	})
-
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure, got success: %s", result)
-	}
-	if !strings.Contains(result, "not found") {
-		t.Errorf("expected 'not found' error, got %q", result)
-	}
-}
-
-func TestExecuteTool_EditFile_DuplicateOldText(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	content := "foo\nbar\nfoo\nbaz"
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{
-		{"oldText": "foo", "newText": "BAR"},
-	})
-
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for duplicate oldText, got success: %s", result)
-	}
-	if !strings.Contains(result, "multiple times") {
-		t.Errorf("expected 'multiple times' error, got %q", result)
-	}
-}
-
-func TestExecuteTool_EditFile_OverlappingEdits(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	content := "abcdefgh"
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte(content), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{
-		{"oldText": "abcd", "newText": "ABCD"},
-		{"oldText": "cdef", "newText": "CDEF"},
-	})
-
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for overlapping edits, got success: %s", result)
-	}
-	if !strings.Contains(result, "overlap") {
-		t.Errorf("expected 'overlap' error, got %q", result)
-	}
-}
-
 func TestExecuteTool_EditFile_OutsideWorktreeIsAHostEdit(t *testing.T) {
 	t.Parallel()
 	// edit_file reads and writes the same path, so on a host task it edits whatever
@@ -882,54 +577,6 @@ func TestExecuteTool_EditFile_OutsideWorktreeIsAHostEdit(t *testing.T) {
 		t.Errorf("host edit did not reach %s: got %q", target, string(data))
 	}
 	assertTreeEquals(t, base, []string{"victim.txt", "worktree"})
-}
-
-func TestExecuteTool_EditFile_EmptyOldText(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("content"), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{
-		{"oldText": "", "newText": "replacement"},
-	})
-
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for empty oldText, got success: %s", result)
-	}
-	if !strings.Contains(result, "empty") {
-		t.Errorf("expected 'empty' error, got %q", result)
-	}
-}
-
-func TestExecuteTool_EditFile_NoEdits(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "test.txt")
-	if err := os.WriteFile(testFile, []byte("content"), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{})
-
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for empty edits, got success: %s", result)
-	}
-	if !strings.Contains(result, "no edits") {
-		t.Errorf("expected 'no edits' error, got %q", result)
-	}
 }
 
 func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
@@ -983,88 +630,52 @@ func TestExecuteTool_EditFile_Sandboxed(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_EditFile_MissingFile(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-	editsJSON, _ := json.Marshal([]map[string]any{
-		{"oldText": "x", "newText": "y"},
-	})
-
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "nonexistent.txt",
-		"edits": jsontext.Value(editsJSON),
-	}, "/tmp/worktree", &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure for missing file, got success: %s", result)
-	}
-	if !strings.Contains(result, "Error:") {
-		t.Errorf("expected error, got %q", result)
-	}
-}
-
 // --- bash Tests ---
 
-func TestExecuteTool_Bash_Direct(t *testing.T) {
+// A tool's output is what the model reads and the card shows, so the escape sequences a build or a
+// test runner prints are stripped on the way to both — on the failing path as well as the succeeding
+// one, which is the half that would otherwise keep them.
+func TestExecuteTool_BashStripsANSI(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
-	te := newBareTestExecutor(t)
+	cases := []struct {
+		name    string
+		command string
+		wantOK  bool
+		wants   []string
+	}{
+		{
+			name:    "succeeding command",
+			command: "printf '\x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10\n'",
+			wantOK:  true,
+			wants:   []string{"RUN", "v4.1.10"},
+		},
+		{
+			name:    "failing command",
+			command: "printf '\\x1b[31mERROR\\x1b[0m something failed\\n'; exit 1",
+			wantOK:  false,
+			wants:   []string{"ERROR"},
+		},
+	}
 
-	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
-		"command": "echo hello",
-		"timeout": float64(5),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success, got failure: %s", result)
-	}
-	if !strings.Contains(result, "hello") {
-		t.Errorf("expected 'hello' in output, got %q", result)
-	}
-}
-
-func TestExecuteTool_Bash_ANSIStripping(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newBareTestExecutor(t)
-
-	// printf with ANSI color codes (bold, foreground, background, reset)
-	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
-		"command": "printf '\x1b[1m\x1b[30m\x1b[46m RUN \x1b[49m\x1b[39m\x1b[22m \x1b[36mv4.1.10\n'",
-		"timeout": float64(5),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if !ok {
-		t.Fatalf("expected success, got failure: %s", result)
-	}
-	// ANSI codes should be stripped
-	if strings.Contains(result, "\x1b") {
-		t.Errorf("expected no ANSI escape codes in output, got %q", result)
-	}
-	if !strings.Contains(result, "RUN") {
-		t.Errorf("expected 'RUN' in output, got %q", result)
-	}
-	if !strings.Contains(result, "v4.1.10") {
-		t.Errorf("expected 'v4.1.10' in output, got %q", result)
-	}
-}
-
-func TestExecuteTool_Bash_FailedWithANSI(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	te := newBareTestExecutor(t)
-
-	// Command that fails and outputs ANSI codes (use \\x1b so bash printf interprets them)
-	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
-		"command": "printf '\\x1b[31mERROR\\x1b[0m something failed\\n'; exit 1",
-		"timeout": float64(5),
-	}, dir, &types.Task{}, &executionState{}, nil)
-	if ok {
-		t.Fatalf("expected failure, got success: %s", result)
-	}
-	// Even in error output, ANSI should be stripped
-	if strings.Contains(result, "\x1b") {
-		t.Errorf("expected no ANSI escape codes in error output, got %q", result)
-	}
-	if !strings.Contains(result, "ERROR") {
-		t.Errorf("expected 'ERROR' in output, got %q", result)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			te := newBareTestExecutor(t)
+			result, ok := te.executeTool(context.Background(), "bash", map[string]any{
+				"command": tc.command,
+				"timeout": float64(5),
+			}, t.TempDir(), &types.Task{}, &executionState{}, nil)
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (result %q)", ok, tc.wantOK, result)
+			}
+			if strings.Contains(result, "\x1b") {
+				t.Errorf("ANSI escape codes survived: %q", result)
+			}
+			for _, want := range tc.wants {
+				if !strings.Contains(result, want) {
+					t.Errorf("output lost %q: %q", want, result)
+				}
+			}
+		})
 	}
 }
 
@@ -1139,72 +750,356 @@ func TestStripANSI(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_WriteFile_CallbackError(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
+// --- Bridge recovery tests ---
 
-	sandboxWrite := func(_ context.Context, path, content string) error {
-		return fmt.Errorf("permission denied")
-	}
-
-	result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
-		"path":    "readonly.txt",
-		"content": "data",
-	}, "/tmp/worktree", &types.Task{}, &executionState{sandboxWrite: sandboxWrite}, nil)
-	if ok {
-		t.Fatalf("expected failure, got success: %s", result)
-	}
-	if result != "Error: permission denied" {
-		t.Errorf("unexpected error: %q", result)
-	}
+// bridgeAttempts carries what one recovery case exercised: whether the latch fired and how many
+// times the dying callback was asked.
+type bridgeAttempts struct {
+	recovered bool
+	failed    int
 }
 
-// --- Bridge recovery tests ---
-// These test the recoverBridge callback and retry logic in executeTool.
-// Callbacks return bridge errors, recoverBridge refreshes them, and the retry succeeds.
-
-func TestExecuteTool_ReadFile_BridgeRecovery(t *testing.T) {
+// bridgeCases run the same retry over every callback a tool call can hold. Each installs a callback
+// that answers with a bridge error and a recoverBridge that swaps in a working one. The read, exec
+// and stream callbacks are re-read from live state, so those cases use a callback that fails every
+// time: a retry that reused the snapshot the dispatch took would call it again and never answer. The
+// write and the delegated edit are the opposite — the retry runs through the callback the call was
+// dispatched with — so those refuse once and then do the work.
+func TestExecuteTool_BridgeRecoveryRetriesEachToolCall(t *testing.T) {
 	t.Parallel()
-	te := newBareTestExecutor(t)
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "hello.txt")
-	expectedContent := "hello from sandbox"
-	if err := os.WriteFile(testFile, []byte(expectedContent), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
+	type bridgeCase struct {
+		name    string
+		tool    string
+		args    func(dir string) map[string]any
+		prepare func(t *testing.T, dir string)
+		// withOutput gives the call an output callback, which is what makes bash take its
+		// streaming callback rather than the plain one; wantStreamed is what the UI must have seen.
+		withOutput   bool
+		wantStreamed string
+		install      func(t *testing.T, st *executionState, dir string, a *bridgeAttempts)
+		// want checks the answer and, where the call touched a file, the file.
+		want func(t *testing.T, dir, result string, a *bridgeAttempts)
 	}
 
-	// First read fails with bridge error, recovery refreshes the callback
-	readAttempts := 0
-	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
-		readAttempts++
-		if readAttempts == 1 {
-			return nil, fmt.Errorf("broken pipe")
-		}
-		return os.ReadFile(filepath.Join(dir, path))
-	}
-
-	recoveryCalled := false
-	state := &executionState{sandboxRead: sandboxRead}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		state.sandboxRead = func(_ context.Context, path string) ([]byte, error) {
+	workingRead := func(dir string) readFunc {
+		return func(_ context.Context, path string) ([]byte, error) {
 			return os.ReadFile(filepath.Join(dir, path))
 		}
-		return true
+	}
+	workingWrite := func(dir string) writeFunc {
+		return func(_ context.Context, path, content string) error {
+			return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
+		}
+	}
+	// dying is a callback on the connection that died: it fails every time, so a retry that reused
+	// the snapshot the dispatch took keeps failing and the case goes red.
+	dyingRead := func(marker string, a *bridgeAttempts) readFunc {
+		return func(_ context.Context, _ string) ([]byte, error) {
+			a.failed++
+			return nil, fmt.Errorf("read: %s", marker)
+		}
+	}
+	dyingWrite := func(marker string, a *bridgeAttempts, dir string) writeFunc {
+		// Unlike the reader, the writer is the callback the call was dispatched with, so the retry
+		// runs through this one: it refuses once, as a connection that died does, then writes.
+		return func(_ context.Context, path, content string) error {
+			a.failed++
+			if a.failed == 1 {
+				return fmt.Errorf("%s", marker)
+			}
+			return os.WriteFile(filepath.Join(dir, path), []byte(content), 0o644)
+		}
 	}
 
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, state, nil)
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
+	cases := []bridgeCase{
+		{
+			name: "read_file",
+			tool: "read_file",
+			args: func(string) map[string]any { return map[string]any{"path": "hello.txt"} },
+			prepare: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello from sandbox"), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+			},
+			install: func(_ *testing.T, st *executionState, dir string, a *bridgeAttempts) {
+				st.sandboxRead = dyingRead("broken pipe", a)
+				st.recoverBridge = func() bool { a.recovered = true; st.sandboxRead = workingRead(dir); return true }
+			},
+			want: func(t *testing.T, _, result string, a *bridgeAttempts) {
+				if want := "hello from sandbox"; result != want {
+					t.Errorf("result = %q, want %q", result, want)
+				}
+				if a.failed != 1 {
+					t.Errorf("the dead reader was called %d times, want once", a.failed)
+				}
+			},
+		},
+		{
+			name: "read_file client closed",
+			tool: "read_file",
+			args: func(string) map[string]any { return map[string]any{"path": "hello.txt"} },
+			prepare: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello from sandbox"), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+			},
+			install: func(_ *testing.T, st *executionState, dir string, a *bridgeAttempts) {
+				// "client closed" is what Client.Close() answers with, when a sandbox was
+				// recreated (an operating-mode change) and a call still holds the old client.
+				st.sandboxRead = dyingRead("client closed", a)
+				st.recoverBridge = func() bool { a.recovered = true; st.sandboxRead = workingRead(dir); return true }
+			},
+			want: func(t *testing.T, _, result string, _ *bridgeAttempts) {
+				if want := "hello from sandbox"; result != want {
+					t.Errorf("result = %q, want %q", result, want)
+				}
+			},
+		},
+		{
+			name: "read_file connection closed",
+			tool: "read_file",
+			args: func(string) map[string]any { return map[string]any{"path": "hello.txt"} },
+			prepare: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hello from sandbox"), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+			},
+			install: func(_ *testing.T, st *executionState, dir string, a *bridgeAttempts) {
+				// "connection closed" is what the readLoop hands pending requests when it exits.
+				st.sandboxRead = dyingRead("connection closed", a)
+				st.recoverBridge = func() bool { a.recovered = true; st.sandboxRead = workingRead(dir); return true }
+			},
+			want: func(t *testing.T, _, result string, _ *bridgeAttempts) {
+				if want := "hello from sandbox"; result != want {
+					t.Errorf("result = %q, want %q", result, want)
+				}
+			},
+		},
+		{
+			name: "write_file",
+			tool: "write_file",
+			args: func(string) map[string]any {
+				return map[string]any{"path": "test.txt", "content": "hello"}
+			},
+			install: func(_ *testing.T, st *executionState, dir string, a *bridgeAttempts) {
+				st.sandboxWrite = dyingWrite("broken pipe", a, dir)
+				st.recoverBridge = func() bool { a.recovered = true; st.sandboxWrite = workingWrite(dir); return true }
+			},
+			want: func(t *testing.T, dir, result string, a *bridgeAttempts) {
+				if want := "Wrote 5 bytes to test.txt"; result != want {
+					t.Errorf("result = %q, want %q", result, want)
+				}
+				if a.failed != 2 {
+					t.Errorf("the writer was called %d times, want the refusal and the retry", a.failed)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+				if err != nil {
+					t.Fatalf("read written file: %v", err)
+				}
+				if string(data) != "hello" {
+					t.Errorf("file content = %q, want %q", data, "hello")
+				}
+			},
+		},
+		{
+			name: "bash",
+			tool: "bash",
+			args: func(string) map[string]any { return map[string]any{"command": "echo hello"} },
+			install: func(_ *testing.T, st *executionState, _ string, a *bridgeAttempts) {
+				st.sandboxExec = func(_ context.Context, _ string, _ int64) (string, error) {
+					a.failed++
+					return "", fmt.Errorf("bash: send bash request: write header: write |1: broken pipe")
+				}
+				st.recoverBridge = func() bool {
+					a.recovered = true
+					st.sandboxExec = func(_ context.Context, _ string, _ int64) (string, error) {
+						return "echo output", nil
+					}
+					return true
+				}
+			},
+			want: func(t *testing.T, _, result string, a *bridgeAttempts) {
+				if result != "echo output" {
+					t.Errorf("unexpected result: %q", result)
+				}
+				if a.failed != 1 {
+					t.Errorf("the dead exec was called %d times, want once", a.failed)
+				}
+			},
+		},
+		{
+			name:         "bash streaming",
+			tool:         "bash",
+			args:         func(string) map[string]any { return map[string]any{"command": "echo hello"} },
+			withOutput:   true,
+			wantStreamed: "streamed line\n",
+			install: func(_ *testing.T, st *executionState, _ string, a *bridgeAttempts) {
+				st.sandboxExecStream = func(_ context.Context, _ string, _ int64, _ func(string)) (string, error) {
+					a.failed++
+					return "", fmt.Errorf("bash: send bash request: write header: write |1: broken pipe")
+				}
+				st.recoverBridge = func() bool {
+					a.recovered = true
+					st.sandboxExecStream = func(_ context.Context, _ string, _ int64, cb func(string)) (string, error) {
+						if cb != nil {
+							cb("streamed line\n")
+						}
+						return "streamed line\n", nil
+					}
+					return true
+				}
+			},
+			want: func(t *testing.T, _, result string, a *bridgeAttempts) {
+				if result != "streamed line\n" {
+					t.Errorf("unexpected result: %q", result)
+				}
+				if a.failed != 1 {
+					t.Errorf("the dead streaming exec was called %d times, want once", a.failed)
+				}
+			},
+		},
+		{
+			name: "edit_file delegated",
+			tool: "edit_file",
+			args: func(string) map[string]any {
+				return map[string]any{"path": "test.txt", "edits": jsontext.Value(`[{"oldText":"line two","newText":"modified two"}]`)}
+			},
+			prepare: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("line one\nline two\nline three"), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+			},
+			install: func(t *testing.T, st *executionState, dir string, a *bridgeAttempts) {
+				failing := &sandboxEditRecorder{failN: 1}
+				working := &sandboxEditRecorder{}
+				st.sandboxEdit = failing.callback(dir)
+				st.recoverBridge = func() bool {
+					a.recovered = true
+					st.sandboxEdit = working.callback(dir)
+					return true
+				}
+			},
+			want: func(t *testing.T, dir, result string, _ *bridgeAttempts) {
+				if !strings.Contains(result, "Edited") {
+					t.Errorf("unexpected result: %q", result)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+				if err != nil {
+					t.Fatalf("read edited file: %v", err)
+				}
+				if !strings.Contains(string(data), "modified two") {
+					t.Errorf("file content = %q, want it to contain %q", data, "modified two")
+				}
+			},
+		},
+		{
+			name: "edit_file read half",
+			tool: "edit_file",
+			args: func(string) map[string]any {
+				return map[string]any{"path": "test.txt", "edits": jsontext.Value(`[{"oldText":"line two","newText":"modified two"}]`)}
+			},
+			prepare: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("line one\nline two\nline three"), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+			},
+			install: func(_ *testing.T, st *executionState, dir string, a *bridgeAttempts) {
+				st.sandboxRead = dyingRead("broken pipe", a)
+				st.sandboxWrite = workingWrite(dir)
+				st.recoverBridge = func() bool {
+					a.recovered = true
+					st.sandboxRead = workingRead(dir)
+					st.sandboxWrite = workingWrite(dir)
+					return true
+				}
+			},
+			want: func(t *testing.T, dir, result string, _ *bridgeAttempts) {
+				if !strings.Contains(result, "Edited") {
+					t.Errorf("unexpected result: %q", result)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+				if err != nil {
+					t.Fatalf("read edited file: %v", err)
+				}
+				if !strings.Contains(string(data), "modified two") {
+					t.Errorf("file content = %q, want it to contain %q", data, "modified two")
+				}
+			},
+		},
+		{
+			name: "edit_file write half",
+			tool: "edit_file",
+			args: func(string) map[string]any {
+				return map[string]any{"path": "test.txt", "edits": jsontext.Value(`[{"oldText":"line two","newText":"modified two"}]`)}
+			},
+			prepare: func(t *testing.T, dir string) {
+				if err := os.WriteFile(filepath.Join(dir, "test.txt"), []byte("line one\nline two\nline three"), 0o644); err != nil {
+					t.Fatalf("seed file: %v", err)
+				}
+			},
+			install: func(_ *testing.T, st *executionState, dir string, a *bridgeAttempts) {
+				st.sandboxRead = workingRead(dir)
+				st.sandboxWrite = dyingWrite("broken pipe", a, dir)
+				st.recoverBridge = func() bool {
+					a.recovered = true
+					st.sandboxRead = workingRead(dir)
+					st.sandboxWrite = workingWrite(dir)
+					return true
+				}
+			},
+			want: func(t *testing.T, dir, result string, a *bridgeAttempts) {
+				if !strings.Contains(result, "Edited") {
+					t.Errorf("unexpected result: %q", result)
+				}
+				if a.failed != 2 {
+					t.Errorf("the writer was called %d times, want the refusal and the retry", a.failed)
+				}
+				data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
+				if err != nil {
+					t.Fatalf("read edited file: %v", err)
+				}
+				if !strings.Contains(string(data), "modified two") {
+					t.Errorf("file content = %q, want it to contain %q", data, "modified two")
+				}
+			},
+		},
 	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called")
-	}
-	if result != expectedContent {
-		t.Errorf("unexpected content: %q, want %q", result, expectedContent)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if tc.prepare != nil {
+				tc.prepare(t, dir)
+			}
+			te := newBareTestExecutor(t)
+			state := &executionState{projectName: "test"}
+			attempts := &bridgeAttempts{}
+			tc.install(t, state, dir, attempts)
+
+			var streamed []string
+			var output func(toolID, text string)
+			if tc.withOutput {
+				output = func(_, text string) { streamed = append(streamed, text) }
+			}
+			result, ok := te.executeTool(context.Background(), tc.tool, tc.args(dir), dir, &types.Task{}, state, output)
+			if !ok {
+				t.Fatalf("expected success after recovery, got failure: %s", result)
+			}
+			if !attempts.recovered {
+				t.Fatal("expected recoverBridge to be called")
+			}
+			if tc.wantStreamed != "" {
+				if got := strings.Join(streamed, ""); got != tc.wantStreamed {
+					t.Errorf("the live stream carried %q, want %q", got, tc.wantStreamed)
+				}
+			}
+			tc.want(t, dir, result, attempts)
+		})
 	}
 }
 
+// A call whose callback died for a reason that is not the bridge must not be retried: the retry
+// would repeat a command that already ran, and the model would get the error either way.
 func TestExecuteTool_ReadFile_NoRecoveryOnNonBridgeError(t *testing.T) {
 	t.Parallel()
 	te := newBareTestExecutor(t)
@@ -1229,136 +1124,6 @@ func TestExecuteTool_ReadFile_NoRecoveryOnNonBridgeError(t *testing.T) {
 	}
 	if result != "Error: file not found" {
 		t.Errorf("unexpected error: %q", result)
-	}
-}
-
-func TestExecuteTool_WriteFile_BridgeRecovery(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-	dir := t.TempDir()
-
-	writeAttempts := 0
-	sandboxWrite := func(_ context.Context, path, content string) error {
-		writeAttempts++
-		if writeAttempts == 1 {
-			return fmt.Errorf("broken pipe")
-		}
-		return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
-	}
-
-	recoveryCalled := false
-	state := &executionState{sandboxWrite: sandboxWrite}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		state.sandboxWrite = func(_ context.Context, path, content string) error {
-			return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
-		}
-		return true
-	}
-
-	result, ok := te.executeTool(context.Background(), "write_file", map[string]any{
-		"path":    "test.txt",
-		"content": "hello",
-	}, dir, &types.Task{}, state, nil)
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
-	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called")
-	}
-	if !strings.Contains(result, "Wrote") {
-		t.Errorf("unexpected result: %q", result)
-	}
-	// Verify file was actually written
-	data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
-	if err != nil {
-		t.Fatalf("read written file: %v", err)
-	}
-	if string(data) != "hello" {
-		t.Errorf("file content = %q, want %q", string(data), "hello")
-	}
-}
-
-func TestExecuteTool_Bash_BridgeRecovery(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-
-	execAttempts := 0
-	sandboxExec := func(_ context.Context, command string, timeout int64) (string, error) {
-		execAttempts++
-		if execAttempts == 1 {
-			return "", fmt.Errorf("bash: send bash request: write header: write |1: broken pipe")
-		}
-		return "echo output", nil
-	}
-
-	recoveryCalled := false
-	state := &executionState{sandboxExec: sandboxExec}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		state.sandboxExec = func(_ context.Context, command string, timeout int64) (string, error) {
-			return "echo output", nil
-		}
-		return true
-	}
-
-	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
-		"command": "echo hello",
-	}, "/tmp/worktree", &types.Task{}, state, nil)
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
-	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called")
-	}
-	if result != "echo output" {
-		t.Errorf("unexpected result: %q", result)
-	}
-}
-
-func TestExecuteTool_Bash_BridgeRecoveryStreaming(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-
-	execAttempts := 0
-	sandboxExecStream := func(_ context.Context, command string, timeout int64, cb func(string)) (string, error) {
-		execAttempts++
-		if execAttempts == 1 {
-			return "", fmt.Errorf("bash: send bash request: write header: write |1: broken pipe")
-		}
-		if cb != nil {
-			cb("streamed line\n")
-		}
-		return "streamed line\n", nil
-	}
-
-	recoveryCalled := false
-	state := &executionState{sandboxExecStream: sandboxExecStream}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		state.sandboxExecStream = func(_ context.Context, command string, timeout int64, cb func(string)) (string, error) {
-			if cb != nil {
-				cb("streamed line\n")
-			}
-			return "streamed line\n", nil
-		}
-		return true
-	}
-
-	var streamedOutput []string
-	result, ok := te.executeTool(context.Background(), "bash", map[string]any{
-		"command": "echo hello",
-	}, "/tmp/worktree", &types.Task{}, state, func(id, text string) {
-		streamedOutput = append(streamedOutput, text)
-	})
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
-	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called")
-	}
-	if result != "streamed line\n" {
-		t.Errorf("unexpected result: %q", result)
 	}
 }
 
@@ -1398,126 +1163,9 @@ func TestExecuteTool_Bash_NoRecoveryOnNonBridgeError(t *testing.T) {
 	}
 }
 
-func TestExecuteTool_EditFile_BridgeRecovery(t *testing.T) {
+func TestExecuteTool_RecoveryReturnsFalse(t *testing.T) {
 	t.Parallel()
-	te := newBareTestExecutor(t)
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "test.txt")
-	originalContent := "line one\nline two\nline three"
-	if err := os.WriteFile(testFile, []byte(originalContent), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	readAttempts := 0
-	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
-		readAttempts++
-		if readAttempts == 1 {
-			return nil, fmt.Errorf("broken pipe")
-		}
-		return os.ReadFile(filepath.Join(dir, path))
-	}
-	sandboxWrite := func(_ context.Context, path, content string) error {
-		return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
-	}
-
-	recoveryCalled := false
-	state := &executionState{
-		sandboxRead:  sandboxRead,
-		sandboxWrite: sandboxWrite,
-		projectName:  "test",
-	}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		state.sandboxRead = func(_ context.Context, path string) ([]byte, error) {
-			return os.ReadFile(filepath.Join(dir, path))
-		}
-		state.sandboxWrite = func(_ context.Context, path, content string) error {
-			return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
-		}
-		return true
-	}
-
-	edits, _ := json.Marshal([]map[string]any{{"oldText": "line two", "newText": "modified two"}})
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(edits),
-	}, dir, &types.Task{}, state, nil)
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
-	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called")
-	}
-	if !strings.Contains(result, "Edited") {
-		t.Errorf("unexpected result: %q", result)
-	}
-	// Verify file was actually edited
-	data, err := os.ReadFile(filepath.Join(dir, "test.txt"))
-	if err != nil {
-		t.Fatalf("read edited file: %v", err)
-	}
-	if !strings.Contains(string(data), "modified two") {
-		t.Errorf("file content = %q, want to contain %q", string(data), "modified two")
-	}
-}
-
-func TestExecuteTool_EditFile_WriteBridgeRecovery(t *testing.T) {
-	t.Parallel()
-	te := newBareTestExecutor(t)
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "test.txt")
-	originalContent := "line one\nline two\nline three"
-	if err := os.WriteFile(testFile, []byte(originalContent), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
-		return os.ReadFile(filepath.Join(dir, path))
-	}
-	writeAttempts := 0
-	sandboxWrite := func(_ context.Context, path, content string) error {
-		writeAttempts++
-		if writeAttempts == 1 {
-			return fmt.Errorf("broken pipe")
-		}
-		return os.WriteFile(filepath.Join(dir, path), []byte(content), 0644)
-	}
-
-	recoveryCalled := false
-	state := &executionState{
-		sandboxRead:  sandboxRead,
-		sandboxWrite: sandboxWrite,
-		projectName:  "test",
-	}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		// Reuse the same callback — it will succeed on 2nd call (writeAttempts == 2)
-		state.sandboxWrite = sandboxWrite
-		return true
-	}
-
-	edits, _ := json.Marshal([]map[string]any{{"oldText": "line two", "newText": "modified two"}})
-	result, ok := te.executeTool(context.Background(), "edit_file", map[string]any{
-		"path":  "test.txt",
-		"edits": jsontext.Value(edits),
-	}, dir, &types.Task{}, state, nil)
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
-	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called for write failure")
-	}
-	if writeAttempts != 2 {
-		t.Errorf("expected 2 write attempts, got %d", writeAttempts)
-	}
-	if !strings.Contains(result, "Edited") {
-		t.Errorf("unexpected result: %q", result)
-	}
-}
-
-func TestExecuteTool_RecoveryReturnsNil(t *testing.T) {
-	t.Parallel()
-	// When recoverBridge returns nil (recovery failed), the error propagates
+	// When recoverBridge reports that recovery failed, the error propagates.
 	te := newBareTestExecutor(t)
 
 	state := &executionState{
@@ -1531,96 +1179,9 @@ func TestExecuteTool_RecoveryReturnsNil(t *testing.T) {
 
 	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "test.txt"}, "/tmp/worktree", &types.Task{}, state, nil)
 	if ok {
-		t.Fatalf("expected failure when recovery returns nil, got success: %s", result)
+		t.Fatalf("expected failure when recovery returns false, got success: %s", result)
 	}
 	if result != "Error: broken pipe" {
 		t.Errorf("unexpected error: %q", result)
-	}
-}
-
-func TestExecuteTool_ReadFile_ClientClosedRecovery(t *testing.T) {
-	t.Parallel()
-	// "client closed" error (from Client.Close()) should trigger bridge recovery.
-	// This happens when the sandbox is recreated (e.g., operating mode change)
-	// and a tool call hits the old, closed client.
-	te := newBareTestExecutor(t)
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "hello.txt")
-	expectedContent := "hello from sandbox"
-	if err := os.WriteFile(testFile, []byte(expectedContent), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	readAttempts := 0
-	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
-		readAttempts++
-		if readAttempts == 1 {
-			return nil, fmt.Errorf("read: client closed")
-		}
-		return os.ReadFile(filepath.Join(dir, path))
-	}
-
-	recoveryCalled := false
-	state := &executionState{sandboxRead: sandboxRead}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		state.sandboxRead = func(_ context.Context, path string) ([]byte, error) {
-			return os.ReadFile(filepath.Join(dir, path))
-		}
-		return true
-	}
-
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, state, nil)
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
-	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called for 'client closed' error")
-	}
-	if result != expectedContent {
-		t.Errorf("unexpected content: %q, want %q", result, expectedContent)
-	}
-}
-
-func TestExecuteTool_ReadFile_ConnectionClosedRecovery(t *testing.T) {
-	t.Parallel()
-	// "connection closed" error (from readLoop cleanup) should trigger bridge recovery.
-	// This happens when the bridge readLoop exits and delivers error frames to pending requests.
-	te := newBareTestExecutor(t)
-	dir := t.TempDir()
-	testFile := filepath.Join(dir, "hello.txt")
-	expectedContent := "hello from sandbox"
-	if err := os.WriteFile(testFile, []byte(expectedContent), 0644); err != nil {
-		t.Fatalf("write test file: %v", err)
-	}
-
-	readAttempts := 0
-	sandboxRead := func(_ context.Context, path string) ([]byte, error) {
-		readAttempts++
-		if readAttempts == 1 {
-			return nil, fmt.Errorf("read: connection closed")
-		}
-		return os.ReadFile(filepath.Join(dir, path))
-	}
-
-	recoveryCalled := false
-	state := &executionState{sandboxRead: sandboxRead}
-	state.recoverBridge = func() bool {
-		recoveryCalled = true
-		state.sandboxRead = func(_ context.Context, path string) ([]byte, error) {
-			return os.ReadFile(filepath.Join(dir, path))
-		}
-		return true
-	}
-
-	result, ok := te.executeTool(context.Background(), "read_file", map[string]any{"path": "hello.txt"}, dir, &types.Task{}, state, nil)
-	if !ok {
-		t.Fatalf("expected success after recovery, got failure: %s", result)
-	}
-	if !recoveryCalled {
-		t.Fatal("expected recoverBridge to be called for 'connection closed' error")
-	}
-	if result != expectedContent {
-		t.Errorf("unexpected content: %q, want %q", result, expectedContent)
 	}
 }

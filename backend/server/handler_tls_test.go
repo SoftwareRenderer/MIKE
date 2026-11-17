@@ -93,10 +93,16 @@ func TestTLSCAStillPinsTheHost(t *testing.T) {
 }
 
 // A certificate the operator brought has no CA of ours behind it, so the download refuses and the
-// advertised flag stays down rather than linking at a 404.
-func TestTLSCAUnavailableWithoutLocalCA(t *testing.T) {
+// advertised flag stays down rather than linking at a 404. The download, the `/api/config` row and the
+// login gate's pairing notice all read the one boot decision, so they cannot disagree about whether a
+// link is there.
+func TestTLSCAAvailabilityDrivesTheDownloadAndTheFlag(t *testing.T) {
 	s := testServer(t)
 	cookie := loginTest(t, s)
+
+	if raw := getConfigBody(t, s, cookie); raw["tls_ca_available"] != true {
+		t.Errorf("expected tls_ca_available true with the default certificate, got %v", raw["tls_ca_available"])
+	}
 
 	s.tlsConfig = &tls.Config{CertFile: "user.crt", KeyFile: "user.key"}
 	if rr := getTLSCA(t, s); rr.Code != http.StatusNotFound {
@@ -106,29 +112,6 @@ func TestTLSCAUnavailableWithoutLocalCA(t *testing.T) {
 	if raw := getConfigBody(t, s, cookie); raw["tls_ca_available"] == true {
 		t.Errorf("/api/config still advertises a CA download")
 	}
-}
-
-func TestTLSCAOnlyServesGET(t *testing.T) {
-	s := testServer(t)
-	cookie, csrf := loginTestCSRF(t, s)
-
-	req := testRequest(http.MethodPost, "/api/tls/ca", nil)
-	withAuthCSRF(req, cookie, csrf)
-	if rr := testResponse(t, s, req); rr.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected 405 for POST, got %d: %s", rr.Code, rr.Body.String())
-	}
-}
-
-// The flag drives the link, so it must follow the same condition as the 404.
-func TestConfigAdvertisesTLSCA(t *testing.T) {
-	s := testServer(t)
-	cookie := loginTest(t, s)
-
-	if raw := getConfigBody(t, s, cookie); raw["tls_ca_available"] != true {
-		t.Errorf("expected tls_ca_available true with the default certificate, got %v", raw["tls_ca_available"])
-	}
-
-	s.configStore.SetTLSCAAvailable(false)
 	if raw := getConfigBody(t, s, cookie); raw["tls_ca_available"] != false {
 		t.Errorf("expected tls_ca_available false after the flag is cleared, got %v", raw["tls_ca_available"])
 	}

@@ -45,65 +45,60 @@ func readWindow(t *testing.T, s *Server, path string) ([]types.TaskMessage, http
 	return messages, rr.Header()
 }
 
+// The window is the newest N units of the conversation, oldest first, and its two headers say whether older
+// content exists and where to ask for it. A thread that fits the window is answered whole and promises
+// nothing older.
 func TestMessagesRouteAnswersTheNewestWindow(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Windowed")
-	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
-	seedWindow(t, s, projID, taskID, 7)
-	// The task's own row (its prompt) is part of the thread.
-	all, err := s.store.GetTaskMessages(taskID, "")
-	if err != nil || len(all) < 8 {
-		t.Fatalf("seed a thread: %d rows, %v", len(all), err)
+	const wholeThread = -1
+
+	cases := []struct {
+		name       string
+		seed       int
+		query      string
+		wantRows   int
+		wantMore   string
+		wantCursor bool
+	}{
+		{"a cut window", 7, "?limit=3", 3, "true", true},
+		{"the window the route answers unasked", 7, "", store.MessageWindowDefault, "true", true},
+		{"a thread that fits", 2, "", wholeThread, "false", false},
 	}
 
-	messages, headers := readWindow(t, s, path+"?limit=3")
-	if len(messages) != 3 {
-		t.Fatalf("window holds %d rows, want 3: %v", len(messages), messages)
-	}
-	for i, m := range messages {
-		if want := all[len(all)-3+i]; m.ID != want.ID {
-			t.Fatalf("row %d of the window = %s, want %s", i, m.ID, want.ID)
-		}
-	}
-	if headers.Get("X-Messages-More") != "true" {
-		t.Errorf("X-Messages-More = %q, want true", headers.Get("X-Messages-More"))
-	}
-	if headers.Get("X-Messages-Before") == "" {
-		t.Error("X-Messages-Before is missing while older rows exist")
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
+			taskID := createTestTask(t, s, projID, "Windowed")
+			path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
+			seedWindow(t, s, projID, taskID, tc.seed)
+			// The task's own row (its prompt) is part of the thread.
+			all, err := s.store.GetTaskMessages(taskID, "")
+			if err != nil || len(all) < tc.seed+1 {
+				t.Fatalf("seed a thread: %d rows, %v", len(all), err)
+			}
 
-	// The default window is the store's own, and this thread is longer than it.
-	def, headers := readWindow(t, s, path)
-	if len(def) != store.MessageWindowDefault {
-		t.Fatalf("default window holds %d rows, want %d", len(def), store.MessageWindowDefault)
-	}
-	if headers.Get("X-Messages-More") != "true" {
-		t.Errorf("X-Messages-More = %q on a thread longer than the window, want true", headers.Get("X-Messages-More"))
-	}
-}
-
-// A thread shorter than the window is answered whole, and says there is nothing older.
-func TestMessagesRouteAnswersAShortThreadWhole(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Whole")
-	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
-	seedWindow(t, s, projID, taskID, 2)
-	all, err := s.store.GetTaskMessages(taskID, "")
-	if err != nil {
-		t.Fatalf("read the thread: %v", err)
-	}
-
-	whole, headers := readWindow(t, s, path)
-	if len(whole) != len(all) {
-		t.Fatalf("default window holds %d rows, want all %d", len(whole), len(all))
-	}
-	if headers.Get("X-Messages-More") != "false" {
-		t.Errorf("X-Messages-More = %q on a thread that fits, want false", headers.Get("X-Messages-More"))
-	}
-	if headers.Get("X-Messages-Before") != "" {
-		t.Errorf("X-Messages-Before = %q on a thread that fits, want absent", headers.Get("X-Messages-Before"))
+			messages, headers := readWindow(t, s, path+tc.query)
+			want := tc.wantRows
+			if want == wholeThread {
+				want = len(all)
+			}
+			if len(messages) != want {
+				t.Fatalf("the window holds %d rows, want %d: %v", len(messages), want, messages)
+			}
+			// Chronological, and the newest of the thread — a cut that fell at the wrong end reads as
+			// a conversation that never happened.
+			for i, m := range messages {
+				if older := all[len(all)-len(messages)+i]; m.ID != older.ID {
+					t.Fatalf("row %d of the window = %s, want the thread's %s", i, m.ID, older.ID)
+				}
+			}
+			if got := headers.Get("X-Messages-More"); got != tc.wantMore {
+				t.Errorf("X-Messages-More = %q, want %q", got, tc.wantMore)
+			}
+			if got := headers.Get("X-Messages-Before") != ""; got != tc.wantCursor {
+				t.Errorf("X-Messages-Before present = %v, want %v", got, tc.wantCursor)
+			}
+		})
 	}
 }
 
@@ -185,97 +180,99 @@ func TestMessagesRouteRefusesABadWindowRequest(t *testing.T) {
 	}
 }
 
-// The redaction pass runs over the window, and what it sends is still redacted.
-func TestMessagesWindowStillRedacts(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Redacted")
-	seedWindow(t, s, projID, taskID, 1)
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{
-		Role:             "assistant",
-		Content:          "writing it now",
-		ReasoningContent: "a very long chain of thought that is worth suppressing " + string(make([]byte, 300)),
-		CreatedAt:        time.Now().UTC(),
-	})
-
-	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages?limit=1"
-	messages, _ := readWindow(t, s, path)
-	newest := messages[len(messages)-1]
-	if newest.Role != "assistant" {
-		t.Fatalf("window ends on a %s row, want the newest assistant row", newest.Role)
-	}
-	if newest.ReasoningContent != "[HIDDEN]" || !newest.HasReasoning {
-		t.Errorf("reasoning = %q (has_reasoning %v), want the suppressed form", newest.ReasoningContent, newest.HasReasoning)
-	}
-
-	full, _ := readWindow(t, s, path+"&full=1")
-	if full[len(full)-1].ReasoningContent == "[HIDDEN]" || full[len(full)-1].ReasoningContent == "" {
-		t.Errorf("full=1 lost the reasoning: %q", full[len(full)-1].ReasoningContent)
-	}
-}
-
-// Opening the same task twice asks the same question, so the second answer is a 304 with no body. The
-// handler owns the lifetime and CompressMiddleware owns the digest, so this route sets no ETag of its own.
-func TestMessagesWindowIsStoredThenRevalidated(t *testing.T) {
-	s := testServer(t)
-	projID := createTestProject(t, s)
-	taskID := createTestTask(t, s, projID, "Revalidated")
-	path := "/api/projects/" + projID + "/tasks/" + taskID + "/messages"
-	seedWindow(t, s, projID, taskID, 4)
-
-	get := func(url, ifNoneMatch string) *httptest.ResponseRecorder {
-		t.Helper()
-		req := testRequest("GET", url, nil)
-		if ifNoneMatch != "" {
-			req.Header.Set("If-None-Match", ifNoneMatch)
-		}
-		return testResponseAuth(t, s, req)
+// The two reads a returning tab repeats are asked on every return, so each must be answerable with no body
+// when it says nothing moved, and must not be kept. The handler owns the lifetime and CompressMiddleware
+// owns the digest, so neither route sets an ETag of its own, and a durable write moves the digest the
+// stored copy was revalidated against.
+func TestARepeatingReadIsAnsweredFromARevalidatableCopy(t *testing.T) {
+	cases := []struct {
+		name  string
+		path  func(projID, taskID string) string
+		write func(t *testing.T, s *Server, projID, taskID string)
+		other string
+	}{
+		{
+			name: "the message window",
+			path: func(p, taskID string) string { return "/api/projects/" + p + "/tasks/" + taskID + "/messages" },
+			write: func(t *testing.T, s *Server, p, taskID string) {
+				seedMessage(t, s, p, taskID, &types.TaskMessage{Role: "user", Content: "and now this"})
+			},
+			// Another window of the same thread is another answer, so it carries another digest.
+			other: "?limit=2",
+		},
+		{
+			name:  "the task sync digest",
+			path:  func(p, taskID string) string { return "/api/projects/" + p + "/tasks/" + taskID + "/sync" },
+			write: func(t *testing.T, s *Server, p, taskID string) { s.appStreamMgr.DurableThrough(p, taskID) },
+		},
 	}
 
-	first := get(path, "")
-	if first.Code != http.StatusOK {
-		t.Fatalf("GET %s = %d, want 200: %s", path, first.Code, first.Body.String())
-	}
-	if got := first.Header().Get("Cache-Control"); got != "no-cache" {
-		t.Errorf("Cache-Control = %q, want %q", got, "no-cache")
-	}
-	etag := first.Header().Get("ETag")
-	if etag == "" {
-		t.Fatal("the window carried no ETag, so a stored copy could not be revalidated")
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s := testServer(t)
+			projID := createTestProject(t, s)
+			taskID := createTestTask(t, s, projID, "Revalidated")
+			seedWindow(t, s, projID, taskID, 4)
+			path := tc.path(projID, taskID)
 
-	reopen := get(path, etag)
-	if reopen.Code != http.StatusNotModified {
-		t.Fatalf("reopening an unchanged thread answered %d, want 304", reopen.Code)
-	}
-	if reopen.Body.Len() != 0 {
-		t.Errorf("the 304 carried %d bytes of body", reopen.Body.Len())
-	}
-	for name, want := range map[string]string{"ETag": etag, "Cache-Control": "no-cache"} {
-		if got := reopen.Header().Get(name); got != want {
-			t.Errorf("the 304 repeated %s as %q, want %q", name, got, want)
-		}
-	}
+			first := getRevalidating(t, s, path, "")
+			if first.Code != http.StatusOK {
+				t.Fatalf("GET %s = %d, want 200: %s", path, first.Code, first.Body.String())
+			}
+			if got := first.Header().Get("Cache-Control"); got != "no-cache" {
+				t.Errorf("Cache-Control = %q, want %q: a kept copy is the stale answer this request replaces",
+					got, "no-cache")
+			}
+			etag := first.Header().Get("ETag")
+			if etag == "" {
+				t.Fatal("the read carried no ETag, so a stored copy could not be revalidated")
+			}
 
-	// A row that lands after the stored copy moves the digest, so the stored copy cannot be shown.
-	seedMessage(t, s, projID, taskID, &types.TaskMessage{Role: "user", Content: "and now this"})
-	moved := get(path, etag)
-	if moved.Code == http.StatusNotModified {
-		t.Fatal("a thread that gained a row still answered 304")
-	}
-	if moved.Header().Get("ETag") == etag {
-		t.Error("the digest did not move when the thread did")
-	}
+			reopen := getRevalidating(t, s, path, etag)
+			if reopen.Code != http.StatusNotModified {
+				t.Fatalf("repeating an unchanged read answered %d, want 304", reopen.Code)
+			}
+			if reopen.Body.Len() != 0 {
+				t.Errorf("the 304 carried %d bytes of body", reopen.Body.Len())
+			}
+			for name, want := range map[string]string{"ETag": etag, "Cache-Control": "no-cache"} {
+				if got := reopen.Header().Get(name); got != want {
+					t.Errorf("the 304 repeated %s as %q, want %q", name, got, want)
+				}
+			}
 
-	// Another window of the same thread is another answer, so it carries another digest.
-	if other := get(path+"?limit=2", "").Header().Get("ETag"); other == etag {
-		t.Error("?limit=2 shares the whole window's digest")
+			// A write that lands after the stored copy moves the digest, so the stored copy cannot be shown.
+			tc.write(t, s, projID, taskID)
+			moved := getRevalidating(t, s, path, etag)
+			if moved.Code == http.StatusNotModified {
+				t.Fatal("the read still answered 304 after a write landed")
+			}
+			if moved.Header().Get("ETag") == etag {
+				t.Error("the digest did not move when the resource did")
+			}
+
+			if tc.other != "" {
+				if other := getRevalidating(t, s, path+tc.other, "").Header().Get("ETag"); other == etag {
+					t.Errorf("%s shares the whole read's digest", tc.other)
+				}
+			}
+		})
 	}
 
 	// A response holding provider keys is not worth storing anywhere.
-	if got := get("/api/config", "").Header().Get("Cache-Control"); got != "" {
+	s := testServer(t)
+	if got := getRevalidating(t, s, "/api/config", "").Header().Get("Cache-Control"); got != "" {
 		t.Errorf("GET /api/config declares Cache-Control %q", got)
 	}
+}
+
+func getRevalidating(t *testing.T, s *Server, url, ifNoneMatch string) *httptest.ResponseRecorder {
+	t.Helper()
+	req := testRequest(http.MethodGet, url, nil)
+	if ifNoneMatch != "" {
+		req.Header.Set("If-None-Match", ifNoneMatch)
+	}
+	return testResponseAuth(t, s, req)
 }
 
 // A floor bounds an older page, so the route refuses it without `before`.

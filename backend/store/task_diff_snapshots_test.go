@@ -5,6 +5,8 @@ import (
 	"time"
 )
 
+// One snapshot per task, read whole and replaced whole: the cached diff a reviewer sees is the bytes that
+// were written, and deleting it is what makes the next run recompute rather than re-show.
 func TestTaskDiffSnapshot_RoundTrip(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
@@ -39,6 +41,17 @@ func TestTaskDiffSnapshot_RoundTrip(t *testing.T) {
 	}
 	if got.CreatedAt.IsZero() {
 		t.Fatal("expected CreatedAt to be set")
+	}
+
+	if err := s.DeleteTaskDiffSnapshot("task-1"); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	got, err = s.GetTaskDiffSnapshot("task-1")
+	if err != nil {
+		t.Fatalf("get after delete: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("expected nil after delete, got %+v", got)
 	}
 }
 
@@ -91,33 +104,6 @@ func TestTaskDiffSnapshot_UpsertReplaces(t *testing.T) {
 	}
 	if got.CreatedAt.Format(time.RFC3339) == first {
 		t.Fatal("expected a fresh created_at on replace")
-	}
-}
-
-func TestTaskDiffSnapshot_Delete(t *testing.T) {
-	s := testStore(t)
-	proj := newProject("proj-1", "test", "/tmp/test")
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	if err := s.CreateTask(newTask("task-1", "proj-1")); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	if err := s.UpsertTaskDiffSnapshot(&TaskDiffSnapshot{
-		TaskID: "task-1", ProjectID: "proj-1", BaseCommit: "aaa", BranchTip: "bbb",
-		StatsJSON: `{}`, DiffJSON: `{}`,
-	}); err != nil {
-		t.Fatalf("upsert: %v", err)
-	}
-	if err := s.DeleteTaskDiffSnapshot("task-1"); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-	got, err := s.GetTaskDiffSnapshot("task-1")
-	if err != nil {
-		t.Fatalf("get after delete: %v", err)
-	}
-	if got != nil {
-		t.Fatalf("expected nil after delete, got %+v", got)
 	}
 }
 

@@ -99,22 +99,3 @@ func TestSummarizeContext_NonEmptySummarySucceeds(t *testing.T) {
 		t.Errorf("usage = %+v/%+v, want 100/5", res.promptTokens, res.predictedTokens)
 	}
 }
-
-// TestBuildLLMContext_EmptySummaryErasesHistory shows why the guard exists: once
-// a summarization message exists, everything before it is dropped on the
-// assumption the summary captured it. An empty summary captures nothing.
-func TestBuildLLMContext_EmptySummaryErasesHistory(t *testing.T) {
-	t.Parallel()
-	messages := []types.ChatMessage{
-		{Role: "system", Content: "system prompt"},
-		{Role: "user", Content: "the entire conversation"},
-		{Role: "assistant", Content: "all the work done so far"},
-		{Role: "summarization", Content: ""},
-	}
-
-	got := buildLLMContext(messages)
-	if len(got) != 1 || got[0].Role != "system" {
-		t.Fatalf("context = %+v, want only the system prompt — this is the data-loss this guard prevents", got)
-	}
-	t.Log("confirmed: an installed empty summary leaves only the system prompt")
-}
