@@ -1,176 +1,142 @@
 package extensions
 
+// A changelog is published text, and it is best-effort: nothing in the update path may fail because a
+// line was unparseable or the file is absent. So the two decisions are that usable lines survive in
+// the order the file holds them (oldest → newest) whatever the noise around them, and that the slice
+// shown is anchored on the installed commit's hash — the first match, so a duplicated hash cannot
+// anchor the reader on the newer copy and hide the entries in between.
+
 import (
 	"strings"
 	"testing"
 )
 
-func TestParseChangelog_Valid(t *testing.T) {
-	data := `{"hash":"aaa","version":"1.0.0","description":"Initial release"}
-{"hash":"bbb","version":"1.1.0","description":"Added feature"}`
-	entries := ParseChangelog(data)
-	if len(entries) != 2 {
-		t.Fatalf("len = %d, want 2", len(entries))
-	}
-	// File order (oldest → newest) must be preserved.
-	want := []struct {
-		hash, version, desc string
+func TestParseChangelog(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		want []ChangelogEntry
 	}{
-		{"aaa", "1.0.0", "Initial release"},
-		{"bbb", "1.1.0", "Added feature"},
+		{
+			name: "file order (oldest → newest) is preserved",
+			data: `{"hash":"aaa","version":"1.0.0","description":"Initial release"}` + "\n" +
+				`{"hash":"bbb","version":"1.1.0","description":"Added feature"}`,
+			want: []ChangelogEntry{
+				{Hash: "aaa", Version: "1.0.0", Description: "Initial release"},
+				{Hash: "bbb", Version: "1.1.0", Description: "Added feature"},
+			},
+		},
+		{
+			name: "blank and whitespace-only lines are skipped",
+			data: "\n{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\n\n   \n{\"hash\":\"bbb\",\"version\":\"1.1.0\",\"description\":\"y\"}\n",
+			want: []ChangelogEntry{
+				{Hash: "aaa", Version: "1.0.0", Description: "x"},
+				{Hash: "bbb", Version: "1.1.0", Description: "y"},
+			},
+		},
+		{
+			name: "a CRLF file parses",
+			data: "{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\r\n{\"hash\":\"bbb\",\"version\":\"1.1.0\",\"description\":\"y\"}\r\n",
+			want: []ChangelogEntry{
+				{Hash: "aaa", Version: "1.0.0", Description: "x"},
+				{Hash: "bbb", Version: "1.1.0", Description: "y"},
+			},
+		},
+		{
+			name: "a malformed line never takes the good ones with it",
+			data: "not json\n{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\n{\"hash\":\n[1,2,3]",
+			want: []ChangelogEntry{
+				{Hash: "aaa", Version: "1.0.0", Description: "x"},
+			},
+		},
+		{
+			name: "an optional field stays empty rather than failing the line",
+			data: "{\"hash\":\"aaa\",\"version\":\"1.0.0\"}",
+			want: []ChangelogEntry{{Hash: "aaa", Version: "1.0.0"}},
+		},
+		{name: "no data", data: "", want: nil},
+		{name: "only whitespace", data: "   \n\t  \n", want: nil},
 	}
-	for i, w := range want {
-		if entries[i].Hash != w.hash || entries[i].Version != w.version || entries[i].Description != w.desc {
-			t.Errorf("entries[%d] = %+v, want %+v", i, entries[i], w)
-		}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ParseChangelog(tc.data)
+			if len(got) != len(tc.want) {
+				t.Fatalf("len = %d, want %d (%+v)", len(got), len(tc.want), got)
+			}
+			for i, w := range tc.want {
+				if got[i] != w {
+					t.Errorf("entries[%d] = %+v, want %+v", i, got[i], w)
+				}
+			}
+		})
 	}
 }
 
-func TestParseChangelog_SkipsBlankLines(t *testing.T) {
-	data := "\n{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\n\n   \n{\"hash\":\"bbb\",\"version\":\"1.1.0\",\"description\":\"y\"}\n"
-	entries := ParseChangelog(data)
-	if len(entries) != 2 {
-		t.Fatalf("len = %d, want 2", len(entries))
-	}
-	if entries[0].Hash != "aaa" || entries[1].Hash != "bbb" {
-		t.Errorf("entries = %+v", entries)
-	}
-}
-
-func TestParseChangelog_HandlesCRLF(t *testing.T) {
-	data := "{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\r\n{\"hash\":\"bbb\",\"version\":\"1.1.0\",\"description\":\"y\"}\r\n"
-	entries := ParseChangelog(data)
-	if len(entries) != 2 {
-		t.Fatalf("len = %d, want 2", len(entries))
-	}
-}
-
-func TestParseChangelog_SkipsMalformedLines(t *testing.T) {
-	data := "not json\n{\"hash\":\"aaa\",\"version\":\"1.0.0\",\"description\":\"x\"}\n{\"hash\":\n[1,2,3]"
-	entries := ParseChangelog(data)
-	if len(entries) != 1 {
-		t.Fatalf("len = %d, want 1", len(entries))
-	}
-	if entries[0].Hash != "aaa" {
-		t.Errorf("entries[0] = %+v", entries[0])
-	}
-}
-
-func TestParseChangelog_Empty(t *testing.T) {
-	if got := ParseChangelog(""); got != nil {
-		t.Errorf("ParseChangelog(\"\") = %+v, want nil", got)
-	}
-	if got := ParseChangelog("   \n\t  \n"); got != nil {
-		t.Errorf("ParseChangelog(whitespace) = %+v, want nil", got)
-	}
-}
-
-func TestParseChangelog_PartialFields(t *testing.T) {
-	// Lines may omit optional fields; parsing must not fail.
-	data := "{\"hash\":\"aaa\",\"version\":\"1.0.0\"}"
-	entries := ParseChangelog(data)
-	if len(entries) != 1 {
-		t.Fatalf("len = %d, want 1", len(entries))
-	}
-	if entries[0].Description != "" {
-		t.Errorf("Description = %q, want empty", entries[0].Description)
-	}
-}
-
-func TestChangelogSince_AfterMatch(t *testing.T) {
-	entries := []ChangelogEntry{
+func TestChangelogSince(t *testing.T) {
+	three := []ChangelogEntry{
 		{Hash: "aaa", Version: "1.0.0", Description: "one"},
 		{Hash: "bbb", Version: "1.1.0", Description: "two"},
 		{Hash: "ccc", Version: "2.0.0", Description: "three"},
 	}
-	got := ChangelogSince(entries, "bbb")
-	if len(got) != 1 {
-		t.Fatalf("len = %d, want 1", len(got))
+	tests := []struct {
+		name    string
+		entries []ChangelogEntry
+		since   string
+		want    []ChangelogEntry
+	}{
+		{"everything after the match", three, "bbb",
+			[]ChangelogEntry{{Hash: "ccc", Version: "2.0.0", Description: "three"}}},
+		{"a match at the start reports the rest", three, "aaa", []ChangelogEntry{
+			{Hash: "bbb", Version: "1.1.0", Description: "two"},
+			{Hash: "ccc", Version: "2.0.0", Description: "three"},
+		}},
+		{"a match at the end reports nothing", three, "ccc", nil},
+		{"the hash is compared case-insensitively", three, "BBB",
+			[]ChangelogEntry{{Hash: "ccc", Version: "2.0.0", Description: "three"}}},
+		{"no match shows nothing", three, "zzz", nil},
+		{"no installed hash shows nothing", three, "", nil},
+		{
+			// A duplicated hash anchors on the FIRST (oldest) occurrence, or the entries between
+			// the two copies stay hidden from the person who is on the older one.
+			name:    "the first match wins",
+			entries: []ChangelogEntry{{Hash: "aaa"}, {Hash: "aaa"}, {Hash: "bbb"}},
+			since:   "aaa",
+			want:    []ChangelogEntry{{Hash: "aaa"}, {Hash: "bbb"}},
+		},
 	}
-	if got[0].Hash != "ccc" || got[0].Description != "three" {
-		t.Errorf("got[0] = %+v, want ccc/three", got[0])
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ChangelogSince(tc.entries, tc.since)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %+v, want %+v", got, tc.want)
+			}
+			for i, want := range tc.want {
+				if got[i] != want {
+					t.Errorf("got[%d] = %+v, want %+v", i, got[i], want)
+				}
+			}
+		})
 	}
 }
 
-func TestChangelogSince_MatchAtStart(t *testing.T) {
-	entries := []ChangelogEntry{
-		{Hash: "aaa"}, {Hash: "bbb"}, {Hash: "ccc"},
-	}
-	got := ChangelogSince(entries, "aaa")
-	if len(got) != 2 || got[0].Hash != "bbb" || got[1].Hash != "ccc" {
-		t.Errorf("got = %+v, want [bbb ccc]", got)
-	}
-}
-
-func TestChangelogSince_MatchAtEnd(t *testing.T) {
-	entries := []ChangelogEntry{{Hash: "aaa"}, {Hash: "bbb"}}
-	if got := ChangelogSince(entries, "bbb"); len(got) != 0 {
-		t.Errorf("got = %+v, want empty", got)
-	}
-}
-
-func TestChangelogSince_CaseInsensitive(t *testing.T) {
-	entries := []ChangelogEntry{
-		{Hash: "AAAA"},
-		{Hash: "bbb", Version: "1.1.0", Description: "newer"},
-	}
-	got := ChangelogSince(entries, "aaaa")
-	if len(got) != 1 || got[0].Hash != "bbb" {
-		t.Errorf("got = %+v, want [bbb]", got)
-	}
-}
-
-func TestChangelogSince_NoMatch(t *testing.T) {
-	entries := []ChangelogEntry{{Hash: "aaa"}, {Hash: "bbb"}}
-	// No matching hash → show nothing (per spec).
-	if got := ChangelogSince(entries, "zzz"); len(got) != 0 {
-		t.Errorf("got = %+v, want empty", got)
-	}
-}
-
-func TestChangelogSince_EmptySinceHash(t *testing.T) {
-	entries := []ChangelogEntry{{Hash: "aaa"}}
-	if got := ChangelogSince(entries, ""); len(got) != 0 {
-		t.Errorf("got = %+v, want empty", got)
-	}
-}
-
-func TestChangelogSince_FirstMatchWins(t *testing.T) {
-	// Duplicate hashes: anchor on the FIRST (oldest) occurrence.
-	entries := []ChangelogEntry{
-		{Hash: "aaa"},
-		{Hash: "aaa"},
-		{Hash: "bbb"},
-	}
-	got := ChangelogSince(entries, "aaa")
-	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2 (entries after the first aaa)", len(got))
-	}
-	if got[0].Hash != "aaa" || got[1].Hash != "bbb" {
-		t.Errorf("got = %+v, want [aaa bbb]", got)
-	}
-}
-
-func TestParseChangelog_ChangelogSince_RoundTrip(t *testing.T) {
-	// End-to-end: parse a realistic file, then filter by installed hash.
-	lines := []string{}
-	hashes := []string{
-		strings.Repeat("a", 64),
-		strings.Repeat("b", 64),
-		strings.Repeat("c", 64),
-	}
+// A realistic file read end to end: the published text through the parser, then filtered by the
+// installed commit — the pair `GET /api/extensions/check-updates` runs on every row.
+func TestChangelogRoundTripOfAPublishedFile(t *testing.T) {
+	hashes := []string{strings.Repeat("a", 64), strings.Repeat("b", 64), strings.Repeat("c", 64)}
 	versions := []string{"1.0.0", "1.1.0", "2.0.0"}
 	descs := []string{"initial", "v1.1", "v2.0"}
+	lines := make([]string, 0, len(hashes))
 	for i, h := range hashes {
 		lines = append(lines, `{"hash":"`+h+`","version":"`+versions[i]+`","description":"`+descs[i]+`"}`)
 	}
-	data := strings.Join(lines, "\n")
-	entries := ParseChangelog(data)
-	got := ChangelogSince(entries, strings.Repeat("a", 64))
+
+	got := ChangelogSince(ParseChangelog(strings.Join(lines, "\n")), hashes[0])
 	if len(got) != 2 {
-		t.Fatalf("len = %d, want 2", len(got))
+		t.Fatalf("len = %d, want 2 (%+v)", len(got), got)
 	}
 	if got[0].Description != "v1.1" || got[1].Description != "v2.0" {
-		t.Errorf("got = %+v", got)
+		t.Errorf("got = %+v, want v1.1 then v2.0", got)
 	}
 }

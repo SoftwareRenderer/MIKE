@@ -14,6 +14,14 @@ import (
 	"mike/pkg/agent"
 )
 
+// What this file owns is the host side of the WASM boundary: the production loader finding and starting
+// the module, and every exported call surviving the wazero allocation pattern (Alloc → Write → Call →
+// Free) with the store_result callback handing the answer back. What the module says — its JSONL, its
+// tool names, its event shapes — is the Pi adapter's own contract and is tested natively in
+// ../MIKE-extensions/agent/pi/adapter_test.go, which runs the same adapter code without the host under
+// it. Nothing here reads a protocol field: this package knows no agent protocols, and a test that named
+// one would make that untrue.
+
 // withProjectRoot changes the working directory to a scratch directory holding the built module under
 // its bare name, which is the last candidate resolveWasmPath tries. It restores the original directory
 // on test cleanup.
@@ -67,192 +75,62 @@ func loadPiWasm(t *testing.T) agent.AgentAdapter {
 	return adapter
 }
 
-// TestWasmPiAdapter_Integration loads the actual pi.wasm module via
-// loadWasmAdapter and verifies all exported functions work end-to-end.
-// This exercises the wazero allocation pattern (Alloc → Write → Call → Free)
-// and the store_result callback (WASM → host) as described in the
-// wazero allocation/tinygo/greet.go guide.
-func TestWasmPiAdapter_Integration(t *testing.T) {
-	adapter := loadPiWasm(t)
-
-	// --- Init ---
+// initAdapter runs the adapter's Init over the RunnerConfig JSON, which is the first call the host makes
+// and the one that exercises _initialize plus a string written into guest memory.
+func initAdapter(t *testing.T, adapter agent.AgentAdapter, session string) {
+	t.Helper()
 	cfg := RunnerConfig{
 		ExtensionName: "pi",
-		SessionName:   "test-session",
+		SessionName:   session,
 		WorktreePath:  t.TempDir(),
-		Sandbox:       false,
 		Config:        map[string]any{},
 	}
-	cfgBytes, _ := json.Marshal(cfg)
-
+	cfgBytes, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("marshal the runner config: %v", err)
+	}
 	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
 		t.Fatalf("Init: %v", err)
 	}
+}
 
-	// --- SubprocessConfig ---
-	spCfg := adapter.SubprocessConfig(context.Background())
-	if spCfg.Binary != "pi" {
-		t.Errorf("Binary = %q, want %q", spCfg.Binary, "pi")
-	}
-	hasMode := false
-	for _, arg := range spCfg.Args {
-		if arg == "--mode" {
-			hasMode = true
-		}
-	}
-	if !hasMode {
-		t.Errorf("expected --mode in args, got %v", spCfg.Args)
-	}
+// TestWasmPiAdapter_EveryExportedCallRoundTripsThroughTheHost loads the module through the production
+// loader and calls each exported entry point once. A guest that cannot be allocated, called or read back
+// fails here on every endpoint at once, whatever the protocol says.
+func TestWasmPiAdapter_EveryExportedCallRoundTripsThroughTheHost(t *testing.T) {
+	adapter := loadPiWasm(t)
+	ctx := context.Background()
+	initAdapter(t, adapter, "host-round-trip")
 
-	// --- EncodeCommand: compact ---
-	compactCmd := adapter.EncodeCommand(context.Background(), agent.CommandCompact, nil)
-	if len(compactCmd) == 0 {
-		t.Fatal("EncodeCommand(compact) returned empty")
-	}
-	if !strings.Contains(string(compactCmd), `"type":"compact"`) {
-		t.Errorf("compact: expected type compact, got %s", string(compactCmd))
+	// SubprocessConfig: the sole source of the executable's name, read back across the boundary.
+	if binary := adapter.SubprocessConfig(ctx).Binary; binary == "" {
+		t.Error("SubprocessConfig answered no binary: the host read guest memory wrongly, or the module never initialized")
 	}
 
-	// --- EncodeCommand: prompt with behavior ---
-	promptData, _ := json.Marshal(map[string]any{"message": "hello", "behavior": "steer"})
-	promptCmd := adapter.EncodeCommand(context.Background(), agent.CommandPrompt, promptData)
-	if !strings.Contains(string(promptCmd), `"type":"prompt"`) {
-		t.Errorf("prompt: expected type prompt, got %s", string(promptCmd))
-	}
-	if !strings.Contains(string(promptCmd), `"message":"hello"`) {
-		t.Errorf("prompt: expected message, got %s", string(promptCmd))
-	}
-	if !strings.Contains(string(promptCmd), `"streamingBehavior":"steer"`) {
-		t.Errorf("prompt: expected streamingBehavior, got %s", string(promptCmd))
+	// EncodeCommand: a string in, bytes out.
+	encoded := adapter.EncodeCommand(ctx, agent.CommandPrompt, nil)
+	if len(encoded) == 0 {
+		t.Error("EncodeCommand returned no bytes")
 	}
 
-	// --- EncodeCommand: get_state ---
-	stateCmd := adapter.EncodeCommand(context.Background(), agent.CommandGetState, nil)
-	if !strings.Contains(string(stateCmd), `"type":"get_state"`) {
-		t.Errorf("get_state: expected type, got %s", string(stateCmd))
+	// ParseOutput: bytes in, events out — the answer arrives through the store_result callback, so an
+	// event here is the only proof that callback still fires, and its text coming back whole is the proof
+	// that the bytes were read out of guest memory as they went in.
+	const delta = "hello from the host round trip"
+	events := adapter.ParseOutput(ctx, []byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"`+delta+`"}}
+`))
+	if len(events) == 0 {
+		t.Fatal("ParseOutput answered no event: store_result never reached the host")
+	}
+	if events[0].Text != delta {
+		t.Errorf("the text came back altered: got %q, want %q (%+v)", events[0].Text, delta, events[0])
 	}
 
-	// --- ParseOutput: text delta ---
-	textInput := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello world"}}
-`)
-	events := adapter.ParseOutput(context.Background(), textInput)
-	if len(events) != 1 {
-		t.Fatalf("text delta: got %d events, want 1", len(events))
-	}
-	if events[0].Type != agent.EventTypeToken || events[0].Text != "hello world" {
-		t.Errorf("text delta: unexpected event %+v", events[0])
-	}
-
-	// --- ParseOutput: thinking delta ---
-	thinkInput := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"let me think"}}
-`)
-	events = adapter.ParseOutput(context.Background(), thinkInput)
-	if len(events) != 1 || events[0].Type != agent.EventTypeReasoning {
-		t.Fatalf("thinking delta: unexpected events %+v", events)
-	}
-	if events[0].Thinking != "let me think" {
-		t.Errorf("thinking delta: text = %q", events[0].Thinking)
-	}
-
-	// --- ParseOutput: tool execution start + end ---
-	toolInput := []byte(`{"type":"tool_execution_start","toolName":"read","toolCallId":"call-1","args":{"path":"test.go"}}
-{"type":"tool_execution_end","toolName":"read","toolCallId":"call-1","isError":false,"result":{"content":[{"type":"text","text":"# test.go"}]}}
-`)
-	events = adapter.ParseOutput(context.Background(), toolInput)
-	if len(events) != 2 {
-		t.Fatalf("tool execution: got %d events, want 2", len(events))
-	}
-	if events[0].Type != agent.EventTypeToolCall {
-		t.Errorf("tool start: expected tool_call, got %s", events[0].Type)
-	}
-	if events[0].ToolCall.Name != "read_file" {
-		t.Errorf("tool start: name = %q, want read_file", events[0].ToolCall.Name)
-	}
-	if events[0].ToolCall.ID != "call-1" {
-		t.Errorf("tool start: id = %q", events[0].ToolCall.ID)
-	}
-	if events[1].Type != agent.EventTypeToolResult {
-		t.Errorf("tool end: expected tool_result, got %s", events[1].Type)
-	}
-	if events[1].ToolResult.Output != "# test.go" {
-		t.Errorf("tool end: output = %q", events[1].ToolResult.Output)
-	}
-	if !events[1].ToolResult.Success {
-		t.Error("tool end: expected success=true")
-	}
-
-	// --- ParseOutput: agent_end with persistence ---
-	agentEndInput := []byte(`{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":100,"output":10}}]}
-`)
-	events = adapter.ParseOutput(context.Background(), agentEndInput)
-	if len(events) != 1 || events[0].Type != agent.EventTypePersist {
-		t.Fatalf("agent_end: unexpected events %+v", events)
-	}
-	if len(events[0].PersistEntries) != 1 {
-		t.Fatalf("persist entries: got %d, want 1", len(events[0].PersistEntries))
-	}
-	entry := events[0].PersistEntries[0]
-	if entry.Role != "assistant" || entry.Content != "done" {
-		t.Errorf("persist entry: role=%q content=%q", entry.Role, entry.Content)
-	}
-	if entry.PromptTokens != 100 || entry.PredictedTokens != 10 {
-		t.Errorf("persist entry: pt=%d ptok=%d", entry.PromptTokens, entry.PredictedTokens)
-	}
-	if entry.ModelName != "pi" || entry.ProviderName != "Pi Coding Agent" {
-		t.Errorf("persist entry: model=%q provider=%q", entry.ModelName, entry.ProviderName)
-	}
-
-	// --- ParseOutput: partial line buffering ---
-	partial := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hel`)
-	events = adapter.ParseOutput(context.Background(), partial)
-	if len(events) != 0 {
-		t.Errorf("partial line: expected 0 events, got %d", len(events))
-	}
-	rest := []byte(`lo"}}
-`)
-	events = adapter.ParseOutput(context.Background(), rest)
-	if len(events) != 1 {
-		t.Fatalf("completed line: expected 1 event, got %d", len(events))
-	}
-	if events[0].Text != "hello" {
-		t.Errorf("completed line: text = %q, want %q", events[0].Text, "hello")
-	}
-
-	// --- ParseOutput: multi-line (two text deltas in one chunk) ---
-	multiInput := []byte(`{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":"hello"}}
-{"type":"message_update","assistantMessageEvent":{"type":"text_delta","delta":" world"}}
-`)
-	events = adapter.ParseOutput(context.Background(), multiInput)
-	if len(events) != 2 {
-		t.Fatalf("multi-line: got %d events, want 2", len(events))
-	}
-	if events[0].Text != "hello" || events[1].Text != " world" {
-		t.Errorf("multi-line: texts = %q %q", events[0].Text, events[1].Text)
-	}
-
-	// --- ParseOutput: session stats ---
-	statsInput := []byte(`{"type":"response","command":"get_session_stats","success":true,"data":{"tokens":{"input":1000,"output":500,"cacheRead":100,"cacheWrite":50},"contextUsage":{"tokens":2000,"contextWindow":8000,"percent":25}}}` + "\n")
-	events = adapter.ParseOutput(context.Background(), statsInput)
-	if len(events) != 1 || events[0].Type != agent.EventTypeStats {
-		t.Fatalf("stats: unexpected events %+v", events)
-	}
-	if events[0].Stats.TotalInput != 1000 || events[0].Stats.TotalOutput != 500 {
-		t.Errorf("stats: input=%d output=%d", events[0].Stats.TotalInput, events[0].Stats.TotalOutput)
-	}
-	if events[0].Stats.ContextPercent != 25 {
-		t.Errorf("stats: percent = %f", events[0].Stats.ContextPercent)
-	}
-
-	// --- HandleUIRequest ---
-	resp := adapter.HandleUIRequest(context.Background(), "req-123", "confirm_action")
-	if !strings.Contains(string(resp), `"extension_ui_response"`) {
-		t.Errorf("ui response: missing type, got %s", string(resp))
-	}
-	if !strings.Contains(string(resp), `"id":"req-123"`) {
-		t.Errorf("ui response: missing id, got %s", string(resp))
-	}
-	if !strings.Contains(string(resp), `"cancelled":true`) {
-		t.Errorf("ui response: missing cancelled, got %s", string(resp))
+	// HandleUIRequest: the id is what must come back, because it is what the browser is waiting on.
+	const id = "req-123"
+	resp := adapter.HandleUIRequest(ctx, id, "confirm_action")
+	if !strings.Contains(string(resp), id) {
+		t.Errorf("HandleUIRequest(%q) = %s, want the id it was handed", id, resp)
 	}
 }
 
@@ -263,11 +141,7 @@ func TestWasmPiAdapter_Integration(t *testing.T) {
 func TestWasmPiAdapter_ConcurrentAccess(t *testing.T) {
 	adapter := loadPiWasm(t)
 
-	cfg := RunnerConfig{ExtensionName: "pi", SessionName: "conc-test", WorktreePath: t.TempDir()}
-	cfgBytes, _ := json.Marshal(cfg)
-	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
+	initAdapter(t, adapter, "conc-test")
 
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -318,86 +192,5 @@ func TestWasmPiAdapter_ConcurrentAccess(t *testing.T) {
 	close(errors)
 	for err := range errors {
 		t.Error(err)
-	}
-}
-
-// TestWasmPiAdapter_GetStateModelDiscovery verifies that the WASM module
-// correctly discovers the model name via get_state response and persists it
-// in subsequent agent_end events.
-func TestWasmPiAdapter_GetStateModelDiscovery(t *testing.T) {
-	adapter := loadPiWasm(t)
-
-	cfg := RunnerConfig{ExtensionName: "pi", SessionName: "test", WorktreePath: t.TempDir()}
-	cfgBytes, _ := json.Marshal(cfg)
-	if err := adapter.Init(context.Background(), cfgBytes); err != nil {
-		t.Fatalf("Init: %v", err)
-	}
-
-	getStateInput := []byte(`{"type":"response","command":"get_state","success":true,"data":{"model":{"provider":"openai","name":"gpt-4o"}}}
-`)
-	events := adapter.ParseOutput(context.Background(), getStateInput)
-	if len(events) != 1 || events[0].Type != agent.EventTypeStatus {
-		t.Fatalf("get_state: unexpected events %+v", events)
-	}
-	if mn, ok := events[0].RawData["model_name"]; !ok || mn != "openai/gpt-4o" {
-		t.Errorf("model_name = %v, want openai/gpt-4o", mn)
-	}
-
-	// After get_state, agent_end should persist the discovered model name
-	agentEndInput := []byte(`{"type":"agent_end","stopReason":"stop","messages":[{"role":"assistant","content":[{"type":"text","text":"done"}],"usage":{"input":50,"output":5}}]}
-`)
-	events = adapter.ParseOutput(context.Background(), agentEndInput)
-	if len(events) != 1 || events[0].Type != agent.EventTypePersist {
-		t.Fatalf("agent_end: unexpected events %+v", events)
-	}
-	if len(events[0].PersistEntries) != 1 {
-		t.Fatalf("persist entries: got %d, want 1", len(events[0].PersistEntries))
-	}
-	if events[0].PersistEntries[0].ModelName != "openai/gpt-4o" {
-		t.Errorf("persist model_name = %q, want openai/gpt-4o",
-			events[0].PersistEntries[0].ModelName)
-	}
-}
-
-// TestWasmPiAdapter_ToolNameMapping verifies that Pi tool names are mapped
-// to Kanban tool names through the actual WASM module.
-func TestWasmPiAdapter_ToolNameMapping(t *testing.T) {
-	adapter := loadPiWasm(t)
-
-	cfg := RunnerConfig{ExtensionName: "pi", SessionName: "test", WorktreePath: t.TempDir()}
-	cfgBytes, _ := json.Marshal(cfg)
-	adapter.Init(context.Background(), cfgBytes)
-
-	tests := []struct {
-		piTool      string
-		wantKanban  string
-		wantDisplay string
-	}{
-		{"read", "read_file", "Read File"},
-		{"write", "write_file", "Write File"},
-		{"edit", "edit_file", "Edit File"},
-		{"bash", "bash", "Bash"},
-		{"request_review", "request_review", "Request Review"},
-		{"final_answer", "request_review", "Request Review"},
-		{"unknown_tool", "unknown_tool", "Unknown_tool"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.piTool, func(t *testing.T) {
-			input := []byte(`{"type":"tool_execution_start","toolName":"` + tt.piTool + `","toolCallId":"cid","args":{}}
-`)
-			events := adapter.ParseOutput(context.Background(), input)
-			if len(events) != 1 || events[0].Type != agent.EventTypeToolCall {
-				t.Fatalf("unexpected events: %+v", events)
-			}
-			if events[0].ToolCall.Name != tt.wantKanban {
-				t.Errorf("name = %q, want %q",
-					events[0].ToolCall.Name, tt.wantKanban)
-			}
-			if events[0].ToolCall.DisplayName != tt.wantDisplay {
-				t.Errorf("display_name = %q, want %q",
-					events[0].ToolCall.DisplayName, tt.wantDisplay)
-			}
-		})
 	}
 }

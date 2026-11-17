@@ -137,15 +137,16 @@ func TestResolvePort(t *testing.T) {
 	}
 }
 
-// TestLogLevelResolution pins the --log-level / MIKE_LOG_LEVEL ladder and that a non-level value is
-// REFUSED rather than guessed at - a typo must not silently cost the operator the log.
+// TestLogLevelResolution pins the --log-level / MIKE_LOG_LEVEL ladder as Resolve answers it, and that a
+// non-level value is one the boot must not hand to the logger — a typo must not silently cost the
+// operator the log.
 func TestLogLevelResolution(t *testing.T) {
 	tests := []struct {
 		name      string
 		flagValue string
 		envValue  string
 		envSet    bool
-		want      string // effective name after the ladder
+		want      string // the level the resolved config carries
 		wantErr   bool
 	}{
 		{name: "nothing set defaults to info", want: "info"},
@@ -158,22 +159,23 @@ func TestLogLevelResolution(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Setenv(EnvLogLevel, "")
-			if !tt.envSet {
-				os.Unsetenv(EnvLogLevel)
-			} else {
+			clearResolverEnv(t)
+			if tt.envSet {
 				t.Setenv(EnvLogLevel, tt.envValue)
 			}
-			got := resolveString(tt.flagValue, EnvLogLevel, "info")
-			if got != tt.want {
-				t.Fatalf("resolveString = %q, want %q", got, tt.want)
+			c, err := resolveWithKey(t, Flags{LogLevel: tt.flagValue})
+			if err != nil {
+				t.Fatalf("Resolve: %v", err)
 			}
-			_, err := logging.ParseLevel(got)
+			if c.LogLevel != tt.want {
+				t.Fatalf("Config.LogLevel = %q, want %q", c.LogLevel, tt.want)
+			}
+			_, err = logging.ParseLevel(c.LogLevel)
 			if tt.wantErr && err == nil {
-				t.Errorf("ParseLevel(%q) accepted a value that is not a level; startup must refuse", got)
+				t.Errorf("ParseLevel(%q) accepted a value that is not a level; startup must refuse", c.LogLevel)
 			}
 			if !tt.wantErr && err != nil {
-				t.Errorf("ParseLevel(%q) rejected a valid level: %v", got, err)
+				t.Errorf("ParseLevel(%q) rejected a valid level: %v", c.LogLevel, err)
 			}
 		})
 	}

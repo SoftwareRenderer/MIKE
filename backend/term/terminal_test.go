@@ -288,135 +288,82 @@ func TestProjectTerminalStopsContainerOnExit(t *testing.T) {
 	}
 }
 
-func TestMultiClientResizeSmallestWidthWins(t *testing.T) {
-	dir := t.TempDir()
-	s, cs := newTestConfigStore(t)
-	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
+// TestMultiClientResizeSmallestConnectedClientWins: every client of one shell shares the one PTY, so
+// the size it takes is the smallest among the connections reading it — anything else clips a client
+// that asked for less and cannot scroll. As the smallest leaves, the shell hands over to the next
+// smallest, and with no reader left it returns to the size the session was opened at.
+func TestMultiClientResizeSmallestConnectedClientWins(t *testing.T) {
+	t.Run("two clients", func(t *testing.T) {
+		sess := resizeSession(t, "resize-task")
+		assertPtySize(t, sess, 40, 120, "the size the session opened at")
 
-	projID := "test-proj-resize"
-	proj := &types.Project{
-		ID:             projID,
-		Name:           "Test Project",
-		Path:           dir,
-		SandboxEnabled: true,
-	}
-	if err := s.CreateProject(proj); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
+		desktop, phone := newTestConn(t), newTestConn(t)
 
-	taskID := "resize-task"
-	sess, err := tm.getOrCreate(taskID, taskID, dir, projID)
-	if err != nil {
-		t.Fatalf("getOrCreate: %v", err)
-	}
+		sess.handleResize(desktop, 80, 200)
+		assertPtySize(t, sess, 80, 200, "after the desktop resize")
 
-	rows, cols, err := pty.Getsize(sess.ptmx)
-	if err != nil {
-		t.Fatalf("get initial winsize: %v", err)
-	}
-	if cols != 120 || rows != 40 {
-		t.Fatalf("initial size = %dx%d, want 120x40", cols, rows)
-	}
+		// Smaller on both axes, so the shell takes the phone's shape.
+		sess.handleResize(phone, 30, 100)
+		assertPtySize(t, sess, 30, 100, "after the phone resize")
 
-	// Real connections: each is a distinct map key.
-	desktopPtr := newTestConn(t)
-	phonePtr := newTestConn(t)
+		// The larger client growing further changes nothing: the smallest reader still clips it.
+		sess.handleResize(desktop, 50, 300)
+		assertPtySize(t, sess, 30, 100, "after the desktop grew past the phone")
 
-	// Simulate desktop client resize: 80x200
-	sess.handleResize(desktopPtr, 80, 200)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 200 || rows != 80 {
-		t.Fatalf("after desktop resize size = %dx%d, want 200x80", cols, rows)
-	}
+		sess.removeConnSize(phone)
+		assertPtySize(t, sess, 50, 300, "once the phone left, the desktop's own size")
 
-	// Simulate phone client resize: 30x100 — smaller width AND height should win
-	sess.handleResize(phonePtr, 30, 100)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 100 || rows != 30 {
-		t.Fatalf("after phone resize size = %dx%d, want 100x30 (smallest on both axes)", cols, rows)
-	}
+		sess.removeConnSize(desktop)
+		assertPtySize(t, sess, 40, 120, "with no client left, the size the session opened at")
+	})
 
-	// Desktop resizes again to even wider/taller — should NOT change PTY (phone is still smallest)
-	sess.handleResize(desktopPtr, 50, 300)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 100 || rows != 30 {
-		t.Fatalf("after desktop larger resize size = %dx%d, want 100x30 (phone still smallest)", cols, rows)
-	}
+	t.Run("three clients", func(t *testing.T) {
+		sess := resizeSession(t, "multi-task")
 
-	// Phone disconnects — desktop size should take over
-	sess.removeConnSize(phonePtr)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 300 || rows != 50 {
-		t.Fatalf("after phone disconnect size = %dx%d, want 300x50 (desktop now only client)", cols, rows)
-	}
+		desktop, tablet, phone := newTestConn(t), newTestConn(t), newTestConn(t)
+		sess.handleResize(desktop, 40, 120)
+		sess.handleResize(tablet, 30, 80)
+		sess.handleResize(phone, 20, 40)
+		assertPtySize(t, sess, 20, 40, "with three clients connected")
 
-	// Desktop also disconnects — should revert to default
-	sess.removeConnSize(desktopPtr)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 120 || rows != 40 {
-		t.Fatalf("after all disconnect size = %dx%d, want 120x40 (default)", cols, rows)
-	}
+		sess.removeConnSize(phone)
+		assertPtySize(t, sess, 30, 80, "once the phone left, the tablet's size")
+
+		sess.removeConnSize(tablet)
+		assertPtySize(t, sess, 40, 120, "once the tablet left, the desktop's size")
+
+		sess.removeConnSize(desktop)
+		assertPtySize(t, sess, 40, 120, "with no client left, the size the session opened at")
+	})
 }
 
-func TestMultiClientResizeMultipleClients(t *testing.T) {
+// resizeSession opens a task's terminal over the mock sandbox, whose shell starts at 120x40 so every
+// resize below is a change the test can see.
+func resizeSession(t *testing.T, taskID string) *taskTerminal {
+	t.Helper()
 	dir := t.TempDir()
 	s, cs := newTestConfigStore(t)
-	mock := newMockSandbox(t)
-	tm := NewTerminalManager(s, cs, mock, nil, dangerZoneForTest)
+	tm := NewTerminalManager(s, cs, newMockSandbox(t), nil, dangerZoneForTest)
 
-	projID := "test-proj-multi"
-	proj := &types.Project{
-		ID:             projID,
-		Name:           "Test Project",
-		Path:           dir,
-		SandboxEnabled: true,
-	}
-	if err := s.CreateProject(proj); err != nil {
+	const projID = "resize-proj"
+	if err := s.CreateProject(&types.Project{ID: projID, Name: "Resize Project", Path: dir, SandboxEnabled: true}); err != nil {
 		t.Fatalf("create project: %v", err)
 	}
-
-	taskID := "multi-task"
 	sess, err := tm.getOrCreate(taskID, taskID, dir, projID)
 	if err != nil {
 		t.Fatalf("getOrCreate: %v", err)
 	}
+	return sess
+}
 
-	// Create real websocket connections to get distinct map keys
-	aPtr := newTestConn(t) // desktop
-	bPtr := newTestConn(t) // tablet
-	cPtr := newTestConn(t) // phone
-
-	// Three clients connect with different sizes
-	sess.handleResize(aPtr, 40, 120) // desktop
-	sess.handleResize(bPtr, 30, 80)  // tablet
-	sess.handleResize(cPtr, 20, 40)  // phone
-
-	// PTY should match the smallest size on both axes (phone: 20 rows x 40 cols)
-	rows, cols, _ := pty.Getsize(sess.ptmx)
-	if cols != 40 || rows != 20 {
-		t.Fatalf("with 3 clients size = %dx%d, want 40x20 (smallest)", cols, rows)
+func assertPtySize(t *testing.T, sess *taskTerminal, wantRows, wantCols int, what string) {
+	t.Helper()
+	rows, cols, err := pty.Getsize(sess.ptmx)
+	if err != nil {
+		t.Fatalf("get winsize: %v", err)
 	}
-
-	// Phone disconnects → tablet should win (30x80)
-	sess.removeConnSize(cPtr)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 80 || rows != 30 {
-		t.Fatalf("after phone leaves size = %dx%d, want 80x30 (tablet)", cols, rows)
-	}
-
-	// Tablet disconnects → desktop should win (40x120)
-	sess.removeConnSize(bPtr)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 120 || rows != 40 {
-		t.Fatalf("after tablet leaves size = %dx%d, want 120x40 (desktop)", cols, rows)
-	}
-
-	// Last client disconnects → should revert to default
-	sess.removeConnSize(aPtr)
-	rows, cols, _ = pty.Getsize(sess.ptmx)
-	if cols != 120 || rows != 40 {
-		t.Fatalf("after all leave size = %dx%d, want 120x40 (default)", cols, rows)
+	if rows != wantRows || cols != wantCols {
+		t.Fatalf("%s: size = %d rows x %d cols, want %d x %d", what, rows, cols, wantRows, wantCols)
 	}
 }
 
