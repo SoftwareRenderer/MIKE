@@ -12,7 +12,7 @@ import (
 	"mike/backend/types"
 )
 
-// The sampler keys, so a "none of them present" test names all eight.
+// The sampler keys, so a "none of them present" case names all eight.
 var samplerKeys = []string{
 	"temperature", "top_p", "top_k", "min_p",
 	"frequency_penalty", "presence_penalty", "repetition_penalty", "seed",
@@ -55,108 +55,80 @@ func fullSampling() *types.ModelSampling {
 func ptrFloat(v float64) *float64 { return &v }
 func ptrInt(v int) *int           { return &v }
 
-// TestSamplingOverridesReachTheBody: every value typed in Settings arrives at the provider under the
-// key that provider reads.
-func TestSamplingOverridesReachTheBody(t *testing.T) {
+// everythingExcept is the blank half of an override set: a key nobody typed must not ride along.
+func everythingExcept(typed ...string) []string {
+	skip := make(map[string]bool, len(typed))
+	for _, k := range typed {
+		skip[k] = true
+	}
+	var absent []string
+	for _, key := range samplerKeys {
+		if !skip[key] {
+			absent = append(absent, key)
+		}
+	}
+	return absent
+}
+
+// TestSamplerKeysInTheBody: a value typed in Settings arrives under the key that provider reads, and a
+// blank field is the absence of that key — which is how the provider's own sampling survives. A zero is
+// a value somebody chose (greedy decoding), not a blank.
+func TestSamplerKeysInTheBody(t *testing.T) {
 	t.Parallel()
-	want := map[string]float64{
+	everything := map[string]float64{
 		"temperature": 0.7, "top_p": 0.9, "top_k": 40, "min_p": 0.05,
 		"frequency_penalty": -1.5, "presence_penalty": 0.25, "repetition_penalty": 1.1, "seed": 1234,
 	}
 
-	for _, stream := range []bool{false, true} {
-		name := "completion"
-		if stream {
-			name = "stream"
-		}
-		t.Run(name, func(t *testing.T) {
-			srv, got := bodyRecorder(t, stream)
+	for _, tc := range []struct {
+		name       string
+		stream     bool
+		sampling   *types.ModelSampling
+		want       map[string]float64
+		wantAbsent []string
+	}{
+		{name: "completion sends every override", sampling: fullSampling(), want: everything},
+		{name: "stream sends every override", stream: true, sampling: fullSampling(), want: everything},
+		{name: "a model with no overrides sends none of the keys", wantAbsent: samplerKeys},
+		{name: "an empty override set sends none of the keys", sampling: &types.ModelSampling{}, wantAbsent: samplerKeys},
+		{
+			name:       "a zero is a decision, not a blank",
+			sampling:   &types.ModelSampling{Temperature: ptrFloat(0), TopK: ptrInt(0)},
+			want:       map[string]float64{"temperature": 0, "top_k": 0},
+			wantAbsent: everythingExcept("temperature", "top_k"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, got := bodyRecorder(t, tc.stream)
 			c := NewLlamaClient(srv.URL, "test-model", "off", "")
-			c.SetSampling(fullSampling())
+			c.SetSampling(tc.sampling)
 
 			var err error
-			if stream {
+			if tc.stream {
 				_, err = c.ChatStream(context.Background(), testMessages(), nil, func(types.ChatChoice) {}, nil, nil)
 			} else {
 				_, _, err = c.ChatCompletion(context.Background(), testMessages(), nil)
 			}
 			if err != nil {
-				t.Fatalf("%s: %v", name, err)
+				t.Fatalf("%s: %v", tc.name, err)
 			}
 
-			for key, value := range want {
+			for key, value := range tc.want {
 				v, ok := (*got)[key]
 				if !ok {
 					t.Errorf("body carries no %q: %v", key, *got)
 					continue
 				}
-				n, isNum := v.(float64)
-				if !isNum || n != value {
+				if n, isNum := v.(float64); !isNum || n != value {
 					t.Errorf("%s = %v, want %v", key, v, value)
 				}
 			}
+			for _, key := range tc.wantAbsent {
+				if v, ok := (*got)[key]; ok {
+					t.Errorf("body carries %s=%v; a model with no override sends nothing for it", key, v)
+				}
+			}
 		})
-	}
-}
-
-// TestNoSamplingSendsNoSamplerKeys: a blank field is the absence of the key, which is how the
-// provider's own sampling survives.
-func TestNoSamplingSendsNoSamplerKeys(t *testing.T) {
-	t.Parallel()
-	t.Run("never set", func(t *testing.T) {
-		srv, got := bodyRecorder(t, false)
-		c := NewLlamaClient(srv.URL, "test-model", "off", "")
-		if _, _, err := c.ChatCompletion(context.Background(), testMessages(), nil); err != nil {
-			t.Fatalf("ChatCompletion: %v", err)
-		}
-		assertNoSamplerKeys(t, *got)
-	})
-
-	t.Run("set to an empty override set", func(t *testing.T) {
-		srv, got := bodyRecorder(t, false)
-		c := NewLlamaClient(srv.URL, "test-model", "off", "")
-		c.SetSampling(&types.ModelSampling{})
-		if _, _, err := c.ChatCompletion(context.Background(), testMessages(), nil); err != nil {
-			t.Fatalf("ChatCompletion: %v", err)
-		}
-		assertNoSamplerKeys(t, *got)
-	})
-}
-
-func assertNoSamplerKeys(t *testing.T, body map[string]any) {
-	t.Helper()
-	for _, key := range samplerKeys {
-		if v, ok := body[key]; ok {
-			t.Errorf("body carries %s=%v; a model with no override sends nothing for it", key, v)
-		}
-	}
-}
-
-// TestTemperatureZeroIsASentValue: temperature 0 is greedy decoding somebody chose, and dropping it
-// hands the turn back to the provider.
-func TestTemperatureZeroIsASentValue(t *testing.T) {
-	t.Parallel()
-	srv, got := bodyRecorder(t, false)
-	c := NewLlamaClient(srv.URL, "test-model", "off", "")
-	c.SetSampling(&types.ModelSampling{Temperature: ptrFloat(0), TopK: ptrInt(0)})
-
-	if _, _, err := c.ChatCompletion(context.Background(), testMessages(), nil); err != nil {
-		t.Fatalf("ChatCompletion: %v", err)
-	}
-	for _, key := range []string{"temperature", "top_k"} {
-		v, ok := (*got)[key]
-		if !ok {
-			t.Errorf("body carries no %q: %v", key, *got)
-			continue
-		}
-		if n, _ := v.(float64); n != 0 {
-			t.Errorf("%s = %v, want 0", key, v)
-		}
-	}
-	for _, key := range []string{"top_p", "min_p", "seed"} {
-		if _, ok := (*got)[key]; ok {
-			t.Errorf("body carries %q, which was never typed", key)
-		}
 	}
 }
 
