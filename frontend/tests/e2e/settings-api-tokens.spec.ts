@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import { openSettingsTab } from './helpers';
 
 // API tokens manager in Settings → About (GET/POST /api/tokens, DELETE /api/tokens/{id}) and the
 // bearer credential those routes hand out.
@@ -11,8 +12,6 @@ import { test, expect, type Page } from '@playwright/test';
 // Runs in the `isolated` project (settings UI + it changes server token state), and revokes every
 // token it creates so the lane server is left with none.
 
-const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
-const ABOUT_TAB = 'button.tab-btn:has-text("About")';
 const TOKENS_SECTION = '.tokens-section';
 const TOKEN_ROW = '.tokens-section .settings-row';
 const TOKEN_LABEL_INPUT = '.tokens-section input[type="text"]';
@@ -25,9 +24,7 @@ const CONFIRM_BTN = '.btn-confirm';
 /** Open Settings, switch to the About tab and scroll the API tokens section into view. */
 async function openTokensSection(page: Page) {
   await page.goto('/');
-  await page.waitForSelector('.add-task-btn, .icon-btn[aria-label="Settings"]', { timeout: 10000 });
-  await page.locator(SETTINGS_BTN).first().click();
-  await page.locator(ABOUT_TAB).click();
+  await openSettingsTab(page, 'About');
   await expect(page.locator(TOKENS_SECTION)).toBeVisible();
   await page.locator(TOKENS_SECTION).scrollIntoViewIfNeeded();
 }
@@ -86,8 +83,7 @@ test.describe.serial('Settings → About API tokens', () => {
     // reopening About shows the row by label with no way to see the value again. The Settings modal
     // renders two close buttons (its own header and BaseModal's), hence first().
     await page.locator('button.close-btn').first().click();
-    await page.locator(SETTINGS_BTN).first().click();
-    await page.locator(ABOUT_TAB).click();
+    await openSettingsTab(page, 'About');
     await page.locator(TOKENS_SECTION).scrollIntoViewIfNeeded();
     await expect(page.locator(TOKEN_ROW, { hasText: 'playwright importer' })).toBeVisible();
     await expect(page.locator(SECRET)).toHaveCount(0);

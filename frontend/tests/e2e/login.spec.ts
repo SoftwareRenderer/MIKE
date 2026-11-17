@@ -1,11 +1,10 @@
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import {
-    attachVirtualAuthenticator,
     laneOrigin,
     mintPairingCode,
     pairBrowser,
     signInBrowser,
-    signedOutContext,
+    signedOutDevice,
 } from '../helpers-auth.mjs';
 
 /**
@@ -27,14 +26,6 @@ const loginDialog = (page: Page) => page.locator('.login-modal');
  * `about:blank` before the test's first navigation.
  */
 const baseOf = () => laneOrigin();
-
-/** A signed-out browser that can answer a passkey prompt — no cookies, its own authenticator. */
-async function signedOutBrowser(browser: Browser) {
-    const context = await signedOutContext(browser);
-    const page = await context.newPage();
-    await attachVirtualAuthenticator(context, page);
-    return { context, page };
-}
 
 // One test at a time: a lane server holds three live pairing codes, and this file is the only thing on
 // that server that mints them, so running the file serially is what keeps a mint from meeting a full cap.
@@ -83,7 +74,7 @@ test.describe('Passkey login', () => {
         const base = baseOf();
         const pairing = await mintPairingCode(page, base);
 
-        const device = await signedOutBrowser(browser);
+        const device = await signedOutDevice(browser);
         try {
             await pairBrowser(device.page, base, pairing.code);
             await expect(device.page.locator('.project-item').first()).toBeVisible({ timeout: 10000 });
@@ -103,7 +94,7 @@ test.describe('Passkey login', () => {
         const name = `Probe tablet ${Date.now()}`;
         const pairing = await mintPairingCode(page, base);
 
-        const device = await signedOutBrowser(browser);
+        const device = await signedOutDevice(browser);
         try {
             await pairBrowser(device.page, base, pairing.code, { name });
 
@@ -119,7 +110,7 @@ test.describe('Passkey login', () => {
         const base = baseOf();
         const pairing = await mintPairingCode(page, base);
 
-        const device = await signedOutBrowser(browser);
+        const device = await signedOutDevice(browser);
         try {
             await pairBrowser(device.page, base, pairing.code);
             const csrf = (await (await device.page.request.get(`${base}/api/auth/session`)).json()).csrf_token;
@@ -142,7 +133,7 @@ test.describe('Passkey login', () => {
     test('a browser whose authenticator holds nothing stays signed out', async ({ page, browser }) => {
         // A ctap2 authenticator with no resident credential has nothing to answer with. That is a
         // dismissal, not a fault, and it must not open a session either way.
-        const device = await signedOutBrowser(browser);
+        const device = await signedOutDevice(browser);
         try {
             await device.page.goto(`${baseOf()}/`, { waitUntil: 'commit' });
             await device.page.click('.login-btn');
@@ -158,14 +149,14 @@ test.describe('Passkey login', () => {
         const base = baseOf();
         const pairing = await mintPairingCode(page, base);
 
-        const first = await signedOutBrowser(browser);
+        const first = await signedOutDevice(browser);
         try {
             await pairBrowser(first.page, base, pairing.code);
         } finally {
             await first.context.close();
         }
 
-        const second = await signedOutBrowser(browser);
+        const second = await signedOutDevice(browser);
         try {
             await second.page.goto(`${base}/#pair=${pairing.code}`, { waitUntil: 'commit' });
             await second.page.waitForSelector('#login-code', { timeout: 20000 });
@@ -183,7 +174,7 @@ test.describe('Passkey login', () => {
         const base = baseOf();
         const pairing = await mintPairingCode(page, base);
 
-        const device = await signedOutBrowser(browser);
+        const device = await signedOutDevice(browser);
         try {
             await device.page.goto(base + '/', { waitUntil: 'commit' });
             await device.page.getByText('I have a pairing code').click();

@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { getProjectId, createTaskViaApi, csrfFetch, getTaskData, isolatedProject, gotoProject } from './helpers';
+import { getProjectId, createTaskViaApi, csrfFetch, getTaskData, isolatedProject, gotoProject, signedInPage } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -77,10 +77,7 @@ test.describe.serial('subtask autostart chain', () => {
   }
 
   test.beforeAll(async ({ browser }) => {
-    const context = await browser.newContext({
-      storageState: '/tmp/kanban-test-storage-state.json',
-    });
-    const page = await context.newPage();
+    const { context, page } = await signedInPage(browser, { landing: null });
     await gotoProject(page);
     projectId = await getProjectId(page);
 
@@ -104,10 +101,7 @@ test.describe.serial('subtask autostart chain', () => {
     // Best-effort cleanup: stop the chain and delete the root (descendants
     // are deleted recursively).
     try {
-      const context = await browser.newContext({
-        storageState: '/tmp/kanban-test-storage-state.json',
-      });
-      const page = await context.newPage();
+      const { context, page } = await signedInPage(browser, { landing: null });
       if (parentId) {
         await csrfFetch(page, `/api/projects/${projectId}/tasks/${parentId}/stop`, { method: 'POST' });
         await csrfFetch(page, `/api/projects/${projectId}/tasks/${parentId}`, { method: 'DELETE' });

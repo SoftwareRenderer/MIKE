@@ -2,6 +2,7 @@ import { test, expect, type Page, type Locator } from '@playwright/test';
 import {
   getProjectId, createTaskViaApi, navigateToTask, ensureTaskStarted, isolatedProject, gotoProject,
   sendMessage, waitForTurnAnswered, waitForTaskState, notInFlight, waitForSendButton, clearTasksAfterEach,
+  readStored,
 } from './helpers';
 
 // The drafts store holds what the input box holds, empty included. Both directions are asked here: text the
@@ -21,16 +22,7 @@ function openTaskId(page: Page): string {
 
 /** What the `drafts` store holds for this task: the text, or null when it holds nothing. */
 function storedDraft(page: Page, taskId: string): Promise<string | null> {
-  return page.evaluate(async (tid) => new Promise<string | null>((resolve) => {
-    const open = indexedDB.open('kanban-storage');
-    open.onsuccess = () => {
-      const db = open.result;
-      const request = db.transaction('drafts', 'readonly').objectStore('drafts').get(tid);
-      request.onsuccess = () => resolve(request.result === undefined ? null : request.result);
-      request.onerror = () => resolve(null);
-    };
-    open.onerror = () => resolve(null);
-  }), taskId);
+  return readStored<string>(page, 'drafts', taskId);
 }
 
 /** The value of the chat input, or `absent` while the task view shows something else in its place. */

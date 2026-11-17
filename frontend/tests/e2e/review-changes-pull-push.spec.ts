@@ -1,8 +1,8 @@
-import { test, expect, type Browser, type Page } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { csrfFetch } from './helpers';
+import { csrfFetch, gitIn, openChangesPanel, signedInPage } from './helpers';
 
 // Review Changes panel: the Commit button must always be visible (disabled
 // when nothing is staged), and Pull/Push must work against a real remote.
@@ -15,32 +15,6 @@ import { csrfFetch } from './helpers';
 const REPO = '/tmp/kanban-test-repo-pullpush';
 const REMOTE = '/tmp/kanban-test-remote-pullpush';
 const CLONE = '/tmp/kanban-test-clone-pullpush';
-const PROJECT_NAME = 'kanban-test-repo-pullpush';
-
-function git(dir: string, args: string) {
-    execSync(`git ${args}`, { cwd: dir, stdio: 'pipe' });
-}
-
-// `page` fixtures aren't available in beforeAll/afterAll — create a dedicated
-// context (with the harness's logged-in storage state) for setup/teardown.
-async function setupPage(browser: Browser) {
-    const context = await browser.newContext({
-        storageState: '/tmp/kanban-test-storage-state.json',
-    });
-    const page = await context.newPage();
-    await page.goto('/');
-    return { context, page };
-}
-
-/** Open the dedicated project's Review Changes panel. */
-async function openChangesPanel(page: Page) {
-    await page.locator('.project-item', { hasText: PROJECT_NAME }).first().click();
-    await page.waitForSelector('.top-bar', { timeout: 10000 });
-    await page.locator('.explorer-btn').click();
-    await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 10000 });
-    await page.locator('.git-status-btn').click();
-    await expect(page.locator('.panel-title:has-text("Changes")')).toBeVisible({ timeout: 10000 });
-}
 
 // The panel's Pull/Push buttons. Their accessible names carry a count only once the panel has fetched,
 // so each is matched by the words it starts with.
@@ -57,19 +31,19 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
         rmSync(CLONE, { recursive: true, force: true });
         mkdirSync(REPO, { recursive: true });
         writeFileSync(join(REPO, 'README.md'), 'pullpush fixture repo\n');
-        git(REPO, 'init');
-        git(REPO, 'config user.email "test@kanban.local"');
-        git(REPO, 'config user.name "Test"');
-        git(REPO, 'add README.md');
-        git(REPO, 'commit -m "Initial commit"');
+        gitIn(REPO, 'init');
+        gitIn(REPO, 'config user.email "test@kanban.local"');
+        gitIn(REPO, 'config user.name "Test"');
+        gitIn(REPO, 'add README.md');
+        gitIn(REPO, 'commit -m "Initial commit"');
 
         // Bare remote with the initial commit (upstream tracking configured).
         mkdirSync(REMOTE, { recursive: true });
-        git(REMOTE, 'init --bare');
-        git(REPO, `remote add origin ${REMOTE}`);
-        git(REPO, 'push -u origin HEAD');
+        gitIn(REMOTE, 'init --bare');
+        gitIn(REPO, `remote add origin ${REMOTE}`);
+        gitIn(REPO, 'push -u origin HEAD');
 
-        const { context, page } = await setupPage(browser);
+        const { context, page } = await signedInPage(browser);
         try {
             const res = await csrfFetch(page, '/api/projects', {
                 method: 'POST',
@@ -83,7 +57,7 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
     });
 
     test.afterAll(async ({ browser }) => {
-        const { context, page } = await setupPage(browser);
+        const { context, page } = await signedInPage(browser);
         try {
             if (projectId) {
                 await csrfFetch(page, `/api/projects/${projectId}`, { method: 'DELETE' });
@@ -98,9 +72,7 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
 
     test.beforeEach(async ({ page }) => {
         test.setTimeout(60000);
-        await page.goto('/');
-        await page.waitForSelector('.project-item', { timeout: 10000 });
-        await openChangesPanel(page);
+        await openChangesPanel(page, projectId);
     });
 
     // A clean tree answers with the Commit button present, disabled and titled `Nothing staged to commit`,
@@ -117,7 +89,7 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
         const uniqueId = Date.now();
         const file = `push-${uniqueId}.txt`;
         writeFileSync(join(REPO, file), 'push test\n');
-        git(REPO, `add ${file}`);
+        gitIn(REPO, `add ${file}`);
 
         // Browser-refresh reloads the panel (restored via view=review) with fresh git state.
         await page.reload();
@@ -133,7 +105,7 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
 
         // Commit via CLI (the commit dialog flow is covered by commit-dialog.spec.ts),
         // then push through the panel's Push button.
-        git(REPO, `commit -m "push fixture ${uniqueId}"`);
+        gitIn(REPO, `commit -m "push fixture ${uniqueId}"`);
         await pushButton(page).click();
         await expect(page.locator('.toast.success', { hasText: 'Pushed to remote' })).toBeVisible({ timeout: 15000 });
 
@@ -149,13 +121,13 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
         const file = `pull-${uniqueId}.txt`;
 
         // Advance the remote via a second clone.
-        git(REPO, `clone ${REMOTE} ${CLONE}`);
-        git(CLONE, 'config user.email "test@kanban.local"');
-        git(CLONE, 'config user.name "Test"');
+        gitIn(REPO, `clone ${REMOTE} ${CLONE}`);
+        gitIn(CLONE, 'config user.email "test@kanban.local"');
+        gitIn(CLONE, 'config user.name "Test"');
         writeFileSync(join(CLONE, file), 'from remote\n');
-        git(CLONE, `add ${file}`);
-        git(CLONE, `commit -m "remote fixture ${uniqueId}"`);
-        git(CLONE, 'push');
+        gitIn(CLONE, `add ${file}`);
+        gitIn(CLONE, `commit -m "remote fixture ${uniqueId}"`);
+        gitIn(CLONE, 'push');
 
         await pullButton(page).click();
         await expect(page.locator('.toast.success', { hasText: 'Pulled from remote' })).toBeVisible({ timeout: 15000 });
@@ -165,7 +137,7 @@ test.describe.serial('Review Changes: commit button + pull/push', () => {
     });
 
     test('Push without upstream shows an error toast and keeps the panel open', async ({ page }) => {
-        git(REPO, 'branch --unset-upstream');
+        gitIn(REPO, 'branch --unset-upstream');
 
         await pushButton(page).click();
         const errorToast = page.locator('.toast.error');

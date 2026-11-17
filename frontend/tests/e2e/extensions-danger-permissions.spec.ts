@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { identityKey } from '../../src/lib/utils/extension-identity';
+import { openSettingsTab } from './helpers';
 
 /**
  * Dangerous-permission display — Settings → Extensions.
@@ -48,9 +49,7 @@ test.describe.serial('Dangerous permission warnings in Extensions tab', () => {
     }
 
     // Open Settings → Extensions (Installed view) — fresh mount loads the list.
-    await page.click('.icon-btn[aria-label="Settings"]');
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-    await page.click('text=Extensions');
+    await openSettingsTab(page, 'Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 
     // Open the HTML Preview card's capability details.

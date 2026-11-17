@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { apiPutConfig, apiGetConfig, waitForConfig, createTaskViaApi, navigateToTask, waitForChatForm, getTaskData, waitForSendButton } from './helpers';
+import { apiPutConfig, apiGetConfig, waitForConfig, createTaskViaApi, navigateToTask, waitForChatForm, getTaskData, waitForSendButton, openSettingsTab } from './helpers';
 
 /**
  * Seeds the given providers and then sets the worker/utility refs by the
@@ -33,9 +33,7 @@ async function seedProvidersByIds(
  * — possibly between two clicks of one test. A spec that works inside a provider card names the tab.
  */
 async function openProviders(page: Page): Promise<void> {
-    await page.locator('.icon-btn[aria-label="Settings"]').click();
-    await page.locator('[role="dialog"]').first().waitFor({ state: 'visible', timeout: 5000 });
-    await page.locator('button.tab-btn:has-text("Providers")').click();
+    await openSettingsTab(page, 'Providers');
 }
 
 // ─── Model Switcher Tests ───────────────────────────────────────────────────

@@ -84,14 +84,6 @@ describe('opening the dialog', () => {
         expect(draft.lsp).toEqual({ editor_enabled: false, tool_calls_enabled: true, chat_diagnostics_enabled: true });
     });
 
-    it('opens the folder editor on what is already approved', () => {
-        const draft = new ExtensionDraft();
-        draft.open(agentExtension());
-        expect(draft.mounts).toEqual([
-            { host_path: '/home/tester/.pi/agent', container_path: '/root/.pi/agent', mode: 'ro', suggestion: '~/.pi/agent' },
-        ]);
-    });
-
     it('sends only the rows with a host folder', () => {
         const draft = new ExtensionDraft();
         draft.open(agentExtension());

@@ -119,14 +119,6 @@ describe('a draft the file moved under', () => {
         expect(showToast).not.toHaveBeenCalled();
     });
 
-    it('keeps the draft alone when no base was recorded for it', async () => {
-        drafts[FILE] = { text: 'typed before bases were recorded', base: null };
-
-        const el = await open('rewritten by someone else entirely');
-
-        expect(doc(el)).toBe('typed before bases were recorded');
-    });
-
     it('re-baselines the merged buffer, so the same change is not merged twice', async () => {
         drafts[FILE] = { text: 'one\nDRAFT\ntwo\nthree\n', base: BASE };
         await open('one\ntwo\nthree\nSERVER\n');

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { identityKey } from '../../src/lib/utils/extension-identity';
-import { apiGetJson, csrfFetch } from './helpers';
+import { apiGetJson, csrfFetch, openSettingsTab } from './helpers';
 
 // ============================================================
 // Extensions Tab — Settings → Extensions, and the CSS extension it installs
@@ -68,9 +68,7 @@ const installedCard = (page: Page, author: string, name: string) =>
   page.locator(`.extension-card[data-identity="${identityKey(author, name)}"]`);
 
 async function openExtensionsTab(page: Page) {
-  await page.click('.icon-btn[aria-label="Settings"]');
-  await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-  await page.click('text=Extensions');
+  await openSettingsTab(page, 'Extensions');
   await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 }
 

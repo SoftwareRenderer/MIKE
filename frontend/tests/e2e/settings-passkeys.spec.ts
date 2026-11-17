@@ -1,5 +1,6 @@
 import { test, expect, type Browser, type Page } from '@playwright/test';
-import { attachVirtualAuthenticator, laneOrigin, mintPairingCode, pairBrowser, signedOutContext } from '../helpers-auth.mjs';
+import { attachVirtualAuthenticator, laneOrigin, mintPairingCode, pairBrowser, signedOutDevice } from '../helpers-auth.mjs';
+import { openSettingsTab } from './helpers';
 
 /**
  * Settings → About: the two credential sections of one screen.
@@ -31,8 +32,6 @@ import { attachVirtualAuthenticator, laneOrigin, mintPairingCode, pairBrowser, s
  * Ceremonies are rate limited per address; the lane server raises that budget for the browser suite
  * (tests/global-setup.ts), and the limit a real install gets is held by the Go tests.
  */
-const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
-const ABOUT_TAB = 'button.tab-btn:has-text("About")';
 // Confirm button of the app-wide ConfirmationDialog (unique class).
 const CONFIRM_BTN = '.btn-confirm';
 const TOAST = '.toast';
@@ -60,9 +59,7 @@ const LOGIN_BUTTON = '.login-btn';
 /** Open Settings and name the tab this file works in. */
 async function openAboutTab(page: Page) {
   await page.goto('/');
-  await page.waitForSelector('.add-task-btn, .icon-btn[aria-label="Settings"]', { timeout: 10000 });
-  await page.locator(SETTINGS_BTN).first().click();
-  await page.locator(ABOUT_TAB).click();
+  await openSettingsTab(page, 'About');
 }
 
 async function openPasskeysSection(page: Page) {
@@ -90,15 +87,13 @@ function rowSessionId(page: Page, id: string) {
 /**
  * Pair one more device with this install, through the login form a person uses.
  *
- * The new browser is signed out when it opens — `signedOutContext` empties what `browser.newContext()`
+ * The new browser is signed out when it opens — `signedOutDevice` empties what `browser.newContext()`
  * would otherwise inherit from the project — spends `code`, and is closed once it is in. Closing it
  * revokes nothing: the passkey stays on the list, and so does the session it opened.
  */
 async function pairDevice(browser: Browser, code: string, opts: { name?: string; link?: string } = {}) {
-  const context = await signedOutContext(browser);
+  const { context, page: device } = await signedOutDevice(browser);
   try {
-    const device = await context.newPage();
-    await attachVirtualAuthenticator(context, device);
     await pairBrowser(device, laneOrigin(), code, opts);
   } finally {
     await context.close();

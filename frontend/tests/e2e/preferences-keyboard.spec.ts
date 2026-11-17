@@ -1,5 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaApi } from './helpers';
+import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaApi, openSettingsTab } from './helpers';
 
 // Settings → Preferences, and the one Save flow every row on it shares: a control is moved, the form is
 // saved, the server holds the new value, and the app changes without a reload. Keyboard shortcuts are the
@@ -13,8 +13,6 @@ import { apiPutConfig, apiGetConfig, waitForConfig, getProjectId, createTaskViaA
 //
 // Runs in the `isolated` project: mutates server config via the UI Save flow.
 
-const SETTINGS_BTN = '.icon-btn[aria-label="Settings"]';
-const PREFERENCES_TAB = 'button.tab-btn:has-text("Preferences")';
 // Rows in the Preferences tab (two shortcuts share class/aria names).
 const CREATE_ROW = '.shortcut-row[data-shortcut="create_task"]';
 const SUBMIT_ROW = '.shortcut-row[data-shortcut="create_task_submit"]';
@@ -108,8 +106,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
 
         // Open Settings → Preferences and capture a new key
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(KEY_CHIP)).toHaveText('C');
 
         await page.locator(KEY_CHIP).click();
@@ -136,8 +133,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
 
     test('reset restores the default binding', async ({ page }) => {
         // Carries over from the rebind test: binding is Shift+K
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(KEY_CHIP)).toHaveText('Shift+K');
 
         await page.locator(RESET_BTN).click();
@@ -154,8 +150,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
     });
 
     test('clearing disables the shortcut and hides the key hint', async ({ page }) => {
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(KEY_CHIP)).toHaveText('C');
 
         await page.locator(CLEAR_BTN).click();
@@ -183,8 +178,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
 
         // Linux test env: the submit row shows the Ctrl+Enter default
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(SUBMIT_CHIP)).toHaveText('Ctrl+Enter');
 
         await page.locator(SUBMIT_CHIP).click();
@@ -221,8 +215,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator(BOARD_BTN)).toHaveAttribute('title', 'Create a new task (C)');
 
         // Enable "Hide shortcut hints"
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await page.locator('button[aria-label="Hide shortcut hints"]').click();
         await page.locator(SAVE_BTN).click();
         await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
@@ -241,8 +234,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator(CREATE_MODAL)).not.toBeVisible({ timeout: 5000 });
 
         // Toggle off -> keycaps return
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await page.locator('button[aria-label="Hide shortcut hints"]').click();
         await page.locator(SAVE_BTN).click();
         await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
@@ -259,8 +251,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator(BOARD_BTN).locator('.key-hint')).toHaveText('C');
 
         // With Settings open, "c" must not open the create-task modal
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await page.keyboard.press('c');
         await page.waitForTimeout(300);
         await expect(page.locator(CREATE_MODAL)).not.toBeVisible();
@@ -280,8 +271,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
     // `terminal-shortcut.spec.ts`'s board test; what this test adds is that the Preferences row shows the
     // default and that a captured combo replaces it in the server's row.
     test('rebinding open_terminal persists and the new combo opens the terminal', async ({ page }) => {
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(TERMINAL_CHIP)).toHaveText('Ctrl+`');
 
         await page.locator(TERMINAL_CHIP).click();
@@ -305,8 +295,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
 
     test('reset and clear work for open_terminal', async ({ page }) => {
         // Carries over from the rebind test: binding is Shift+Alt+T
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
 
         await page.locator(TERMINAL_RESET).click();
         await expect(page.locator(TERMINAL_CHIP)).toHaveText('Ctrl+`');
@@ -314,8 +303,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator('.config-modal')).not.toBeVisible({ timeout: 5000 });
         await waitForConfig(page, c => c.keyboard_shortcuts?.open_terminal === undefined);
 
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await page.locator(TERMINAL_CLEAR).click();
         await expect(page.locator(TERMINAL_CHIP)).toHaveText('None');
         await page.locator(SAVE_BTN).click();
@@ -337,8 +325,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.waitForSelector(BOARD_BTN, { timeout: 10000 });
 
         // The Preferences row shows the default
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(FULLSCREEN_CHIP)).toHaveText('Ctrl+Up');
 
         // Close settings via Cancel (no changes)
@@ -358,8 +345,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
 
     test('rebinding toggle_fullscreen changes the trigger and reset restores the default', async ({ page }) => {
         // Carries over from the previous test: binding is the default
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(FULLSCREEN_CHIP)).toHaveText('Ctrl+Up');
 
         await page.locator(FULLSCREEN_CHIP).click();
@@ -389,8 +375,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await expect(page.locator(TERMINAL_PANEL)).not.toBeVisible({ timeout: 5000 });
 
         // Reset restores the default
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await page.locator(FULLSCREEN_RESET).click();
         await expect(page.locator(FULLSCREEN_CHIP)).toHaveText('Ctrl+Up');
         await page.locator(SAVE_BTN).click();
@@ -422,8 +407,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         const card = page.locator(`.card[data-task-id="${taskId}"]`);
         await expect(card).toBeVisible({ timeout: 5000 });
 
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         // Platform default (Chromium here is Linux): Ctrl+Click.
         await expect(page.locator(MULTI_CHIP)).toHaveText(/Click$/);
 
@@ -454,8 +438,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await tab.close();
 
         // Reset returns the binding (and Ctrl+Click) to the default
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await page.locator(`${MULTI_ROW} button[aria-label="Reset to default"]`).click();
         await expect(page.locator(MULTI_CHIP)).toHaveText(/Click$/);
         await page.locator(SAVE_BTN).click();
@@ -473,8 +456,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
     test('toggling hides the model badge on task cards and persists', async ({ page }) => {
         await ensureCardWithModelBadge(page);
 
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(HIDE_MODEL_BADGE_TOGGLE)).toBeVisible();
         await expect(page.locator(HIDE_MODEL_BADGE_TOGGLE)).toHaveAttribute('aria-checked', 'false');
 
@@ -496,8 +478,7 @@ test.describe.serial('Keyboard shortcut preferences', () => {
         await page.waitForSelector('.card', { timeout: 10000 });
         await expect(page.locator(MODEL_BADGE)).toHaveCount(0);
 
-        await page.locator(SETTINGS_BTN).first().click();
-        await page.locator(PREFERENCES_TAB).click();
+        await openSettingsTab(page, 'Preferences');
         await expect(page.locator(HIDE_MODEL_BADGE_TOGGLE)).toHaveAttribute('aria-checked', 'true');
 
         await page.locator(HIDE_MODEL_BADGE_TOGGLE).click();

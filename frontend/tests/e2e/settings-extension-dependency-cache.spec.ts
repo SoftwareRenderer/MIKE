@@ -3,6 +3,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { identityKey } from '../../src/lib/utils/extension-identity';
+import { openSettingsTab } from './helpers';
 
 /**
  * Granting a language server its dependency directory, end to end: what the field shows is what lands in the
@@ -67,9 +68,7 @@ async function api(page: import('@playwright/test').Page, method: string, url: s
 async function openExtensionsTab(page: import('@playwright/test').Page) {
     await page.goto('/');
     await page.waitForSelector('.project-item', { timeout: 15000 });
-    await page.click('.icon-btn[aria-label="Settings"]');
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-    await page.click('text=Extensions');
+    await openSettingsTab(page, 'Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
 }
 

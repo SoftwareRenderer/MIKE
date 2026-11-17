@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { openSettingsTab } from './helpers';
 
 // ============================================================
 // Extension update row layout
@@ -37,9 +38,7 @@ test.describe('Extension update row layout', () => {
     await page.waitForSelector('.project-item', { timeout: 10000 });
 
     // Open Settings → Extensions.
-    await page.click('.icon-btn[aria-label="Settings"]');
-    await page.waitForSelector('[role="dialog"]', { timeout: 5000 });
-    await page.click('text=Extensions');
+    await openSettingsTab(page, 'Extensions');
     await page.waitForSelector('.extensions-tab', { timeout: 5000 });
     await page.click('button:has-text("Check for Updates")');
     await expect(page.locator('.update-item')).toHaveCount(1, { timeout: 10000 });

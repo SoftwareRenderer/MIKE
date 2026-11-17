@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
-  getProjectId, createTaskViaApi, csrfFetch, isolatedProject, gotoProject, storageStatePath,
+  getProjectId, createTaskViaApi, csrfFetch, isolatedProject, gotoProject, storageStatePath, readStored,
 } from './helpers';
 
 /**
@@ -28,32 +28,14 @@ const SLOW_SESSION_MS = 6000; // past the 2 s offer, with room for the click in 
 
 /** Read one task's status out of the mirrored board, as the next offline load will see it. */
 async function mirroredStatus(page: Page, projectId: string, taskId: string): Promise<string | null> {
-  return page.evaluate(({ pid, tid }) => new Promise<string | null>((resolve) => {
-    const db = indexedDB.open('kanban-storage');
-    db.onsuccess = () => {
-      const store = db.result.transaction('board-cache', 'readonly').objectStore('board-cache');
-      const req = store.get(`board:${pid}`);
-      req.onsuccess = () => {
-        const tasks = (req.result?.data as { tasks?: { id: string; status: string }[] })?.tasks;
-        resolve(tasks?.find(t => t.id === tid)?.status ?? null);
-      };
-      req.onerror = () => resolve(null);
-    };
-    db.onerror = () => resolve(null);
-  }), { pid: projectId, tid: taskId });
+  const board = await readStored<{ data?: { tasks?: { id: string; status: string }[] } }>(
+    page, 'board-cache', `board:${projectId}`);
+  return board?.data?.tasks?.find(t => t.id === taskId)?.status ?? null;
 }
 
-function mirrored(page: Page, key: string) {
-  return page.evaluate((k) => new Promise<unknown>((resolve) => {
-    const db = indexedDB.open('kanban-storage');
-    db.onsuccess = () => {
-      const store = db.result.transaction('board-cache', 'readonly').objectStore('board-cache');
-      const req = store.get(k);
-      req.onsuccess = () => resolve(req.result?.data ?? null);
-      req.onerror = () => resolve(null);
-    };
-    db.onerror = () => resolve(null);
-  }), key);
+/** What the mirror holds under a key, unwrapped from the envelope `storage.ts` writes. */
+async function mirrored(page: Page, key: string): Promise<unknown> {
+  return (await readStored<{ data?: unknown }>(page, 'board-cache', key))?.data ?? null;
 }
 
 /** Note every screen painted from now on, so a brief flash of the empty one is still caught. */

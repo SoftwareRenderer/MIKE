@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import {
   isolatedProject, createTaskViaApi, navigateToTask, waitForChatForm,
   waitForTaskState, getProjectId, gotoProject, getTaskData, apiGetJson,
-  runHasEnded, notInFlight, stopReading, comeBack, sendTurn,
+  runHasEnded, notInFlight, stopReading, comeBack, sendTurn, watchTheReturn,
   PENDING_TOOL_STATUS as PENDING,
 } from './helpers';
 
@@ -27,38 +27,6 @@ const ROW_LIMIT = 25;
 const isEntryRow = (role: string) => role !== 'title' && role !== 'tool_call';
 
 interface Row { id: string; role: string }
-
-/**
- * While `window.__away` no frame reaches the app and `document.hasFocus()` answers false. The listener goes in
- * the wrapped constructor because the app assigns `onmessage` later.
- */
-async function watchTheReturn(page: Page): Promise<void> {
-  await page.addInitScript(() => {
-    const w = window as any;
-    w.__away = false;
-    w.__unfocused = false;
-    w.__swallowed = 0;
-    Object.defineProperty(document, 'hasFocus', {
-      configurable: true,
-      get: () => () => !w.__unfocused,
-    });
-    const RealWebSocket = window.WebSocket;
-    window.WebSocket = class extends RealWebSocket {
-      constructor(url: string | URL, protocols?: string | string[]) {
-        super(url, protocols);
-        if (!String(url).includes('/api/stream')) return;
-        this.addEventListener('message', (e: MessageEvent) => {
-          if (!w.__away) return;
-          let frame: any;
-          try { frame = JSON.parse(String(e.data)); } catch { return; }
-          if (frame?.type === 'ping') return; // a ping is not content: the socket stays live
-          w.__swallowed++;
-          e.stopImmediatePropagation();
-        });
-      }
-    };
-  });
-}
 
 /**
  * The harder variant: while `__away` every frame naming this task is taken off the socket and KEPT, and

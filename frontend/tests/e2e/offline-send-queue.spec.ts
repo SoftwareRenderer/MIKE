@@ -1,6 +1,7 @@
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import {
   getProjectId, createTaskViaApi, navigateToTask, csrfFetch, isolatedProject, gotoProject, editTaskTitle, goOnline,
+  queuedActionCount,
 } from './helpers';
 // Each test file gets its own project, because it starts a turn: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -17,22 +18,6 @@ isolatedProject();
  * - Once the network is restored and the queue flushes, the message is sent, the applied row is on
  *   screen (not only on the server), and the notice is gone.
  */
-
-/** Read the offline-queue action count from IndexedDB. */
-async function queuedActionCount(page: Page): Promise<number> {
-    return page.evaluate(() => {
-        return new Promise<number>((resolve) => {
-            const db = indexedDB.open('kanban-storage');
-            db.onsuccess = () => {
-                const s = db.result.transaction('offline-queue', 'readonly').objectStore('offline-queue');
-                const req = s.get('actions');
-                req.onsuccess = () => resolve(Array.isArray(req.result) ? req.result.length : 0);
-                req.onerror = () => resolve(0);
-            };
-            db.onerror = () => resolve(0);
-        });
-    });
-}
 
 test.describe.serial('Offline send queue', () => {
     test.beforeEach(async ({ page }) => {

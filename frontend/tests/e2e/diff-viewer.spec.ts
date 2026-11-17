@@ -4,7 +4,7 @@ import { writeFileSync, unlinkSync, rmSync } from 'fs';
 import { join } from 'path';
 import { getProjectId, createTaskViaApi, navigateToTask, csrfFetch, ensureTaskStarted, getWorktreePath,
   waitForWorktree, isolatedProject, gotoProject, apiGetJson, sendTurn, messageRows,
-  projectDirPath, selectProject } from './helpers';
+  projectDirPath, selectProject, writeFileInWorktree, writeStored } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -31,19 +31,7 @@ async function expectNarrowDiffColumn(page: Page): Promise<void> {
  * boot, so a spec that wants the other answer seeds it and reloads.
  */
 async function seedAutoMaximizeCodeViewer(page: Page, enabled: boolean): Promise<void> {
-    await page.evaluate(async ([key, value]: [string, boolean]) => {
-        const db = await new Promise<IDBDatabase>((resolve, reject) => {
-            const rq = indexedDB.open('kanban-storage');
-            rq.onsuccess = () => resolve(rq.result);
-            rq.onerror = () => reject(rq.error);
-        });
-        await new Promise<void>((resolve, reject) => {
-            const tx = db.transaction('app-settings', 'readwrite');
-            tx.objectStore('app-settings').put(value, key);
-            tx.oncomplete = () => resolve();
-            tx.onerror = () => reject(tx.error);
-        });
-    }, ['auto-maximize-code-viewer', enabled]);
+    await writeStored(page, 'app-settings', 'auto-maximize-code-viewer', enabled);
 }
 
 
@@ -165,15 +153,9 @@ async function gitWithRetry(worktreePath: string, cmd: string, attempts = 6): Pr
 }
 
 // --- Thread-switch utilities ---
-// (getWorktreePath / worktreeExists come from ./helpers — the path is
+// (getWorktreePath / worktreeExists / writeFileInWorktree come from ./helpers — the path is
 //  /tmp/kanban-test-worktrees/<projectId>/<taskId>, matching the backend's
 //  worktreesDir/projectID/taskID layout.)
-
-function writeFileInWorktree(projectId: string, taskId: string, filePath: string, content: string) {
-    const worktreePath = getWorktreePath(projectId, taskId);
-    execSync(`mkdir -p ${worktreePath}`);
-    execSync(`echo "${content}" > ${worktreePath}/${filePath}`);
-}
 
 /**
  * Poll the diff API until the file appears, then re-navigate until the panel shows it. The panel
@@ -529,7 +511,7 @@ test.describe.serial('Diff panel user interactions', () => {
         const mainThreadId = threadsResult[0]?.id;
         expect(mainThreadId, `the task has no main thread: ${JSON.stringify(threadsResult)}`).toBeTruthy();
 
-        writeFileInWorktree(projectId, taskId, 'file-a.txt', 'hello friend');
+        writeFileInWorktree(projectId, taskId, 'file-a.txt', 'hello friend\n', { stage: false });
         await waitForDiffFile(page, projectId, taskId, 'file-a.txt');
 
         const msgResult = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/messages`, {
@@ -548,7 +530,7 @@ test.describe.serial('Diff panel user interactions', () => {
         const forkThreadId = forkResult.data?.id;
         expect(forkThreadId, 'the fork route accepted the fork and returned no thread id').toBeTruthy();
 
-        writeFileInWorktree(projectId, taskId, 'file-b.txt', 'hello choom');
+        writeFileInWorktree(projectId, taskId, 'file-b.txt', 'hello choom\n', { stage: false });
         await waitForDiffFile(page, projectId, taskId, 'file-b.txt');
 
         // Round-trip switches (matches backend TestThreadSwitchWorktreeContent)
