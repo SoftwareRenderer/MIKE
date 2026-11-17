@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json/jsontext"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -96,66 +95,6 @@ func TestGitSourceRoundTrip(t *testing.T) {
 	if len(listed) != 1 || listed[0].Commit != ext.Commit {
 		t.Errorf("List git source: %+v", listed)
 	}
-}
-
-func TestCreateAndGetExtension(t *testing.T) {
-	es := testStore(t)
-	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeLSP)
-	if err := es.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	got, err := es.GetByID("ext-1")
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	if got.ID != "ext-1" {
-		t.Errorf("ID = %v, want ext-1", got.ID)
-	}
-	if got.Name != "test-ext" {
-		t.Errorf("Name = %v, want test-ext", got.Name)
-	}
-	if got.Type != ExtensionTypeLSP {
-		t.Errorf("Type = %v, want lsp", got.Type)
-	}
-	if !got.Enabled {
-		t.Error("Enabled = false, want true")
-	}
-}
-
-func TestUIConfigSandboxPermissionsRoundTrip(t *testing.T) {
-	es := testStore(t)
-	ext := makeTestExt("ui-ext", "importer", ExtensionTypeUI)
-	ext.Manifest.Capabilities = &Capabilities{
-		UI: &UIConfig{
-			InjectionPoints: []string{"createTask"},
-			Permissions: []string{
-				"createTask.description.insertText",
-				"createTask.events.paste",
-				"network.proxy",
-				"config.get",
-			},
-		},
-	}
-	if err := es.Create(ext); err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	got, err := es.GetByID("ui-ext")
-	if err != nil {
-		t.Fatalf("GetByID: %v", err)
-	}
-	ui := got.Manifest.Capabilities.UI
-	if ui == nil {
-		t.Fatal("Capabilities.UI = nil, want non-nil")
-	}
-	if len(ui.Permissions) != 4 {
-		t.Fatalf("len(Permissions) = %d, want 4", len(ui.Permissions))
-	}
-	if ui.Permissions[0] != "createTask.description.insertText" {
-		t.Errorf("Permissions[0] = %q", ui.Permissions[0])
-	}
-
 }
 
 func TestGetByIDNotFound(t *testing.T) {
@@ -298,12 +237,32 @@ func TestUpdateExtension(t *testing.T) {
 	}
 }
 
-func TestUpdateNotFound(t *testing.T) {
+// Every write that names a row runs through execOne, whose RowsAffected check is what stops a
+// statement that matched nothing from answering "done": an update that silently hit no row leaves the
+// Settings card showing a value that was never stored, and a delete that hit no row reports the
+// extension gone while its files keep being served.
+func TestWriteToAnAbsentRowIsAnError(t *testing.T) {
 	es := testStore(t)
-	ext := makeTestExt("ext-1", "test-ext", ExtensionTypeLSP)
-	err := es.Update("nonexistent", ext)
-	if err == nil {
-		t.Error("Update(nonexistent) = nil, want error")
+
+	for _, tc := range []struct {
+		name string
+		call func() error
+	}{
+		{"Update", func() error { return es.Update("nonexistent", makeTestExt("x", "x", ExtensionTypeLSP)) }},
+		{"Delete", func() error { return es.Delete("nonexistent") }},
+		{"SetEnabled", func() error { return es.SetEnabled("nonexistent", true) }},
+		{"SetImageRef", func() error { return es.SetImageRef("nonexistent", "localhost/x:1", ContainerConfig{}) }},
+		{"SetBuiltAt", func() error { return es.SetBuiltAt("nonexistent") }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.call()
+			if err == nil {
+				t.Fatalf("%s of an absent row = nil, want an error", tc.name)
+			}
+			if !strings.Contains(err.Error(), "nonexistent") {
+				t.Errorf("%s error = %q, want it to name the row", tc.name, err)
+			}
+		})
 	}
 }
 
@@ -326,14 +285,6 @@ func TestDeleteExtension(t *testing.T) {
 	extensions, _ := es.List()
 	if len(extensions) != 0 {
 		t.Errorf("List count after Delete = %v, want 0", len(extensions))
-	}
-}
-
-func TestDeleteNotFound(t *testing.T) {
-	es := testStore(t)
-	err := es.Delete("nonexistent")
-	if err == nil {
-		t.Error("Delete(nonexistent) = nil, want error")
 	}
 }
 
@@ -363,14 +314,6 @@ func TestSetEnabled(t *testing.T) {
 	}
 }
 
-func TestSetEnabledNotFound(t *testing.T) {
-	es := testStore(t)
-	err := es.SetEnabled("nonexistent", true)
-	if err == nil {
-		t.Error("SetEnabled(nonexistent) = nil, want error")
-	}
-}
-
 func TestExtensionWithFullConfig(t *testing.T) {
 	es := testStore(t)
 	ext := &Extension{
@@ -392,6 +335,17 @@ func TestExtensionWithFullConfig(t *testing.T) {
 					InitParamsOverride: map[string]any{
 						"usePlaceholders": true,
 						"staticcheck":     true,
+					},
+				},
+				// The UI half rides in the same manifest blob, and its permission list is
+				// what the host grants at runtime — order and all.
+				UI: &UIConfig{
+					InjectionPoints: []string{"createTask"},
+					Permissions: []string{
+						"createTask.description.insertText",
+						"createTask.events.paste",
+						"network.proxy",
+						"config.get",
 					},
 				},
 			},
@@ -462,16 +416,20 @@ func TestExtensionWithFullConfig(t *testing.T) {
 	if got.InstallSource != "registry" {
 		t.Errorf("InstallSource = %q, want registry", got.InstallSource)
 	}
-}
-
-func TestEmptyList(t *testing.T) {
-	es := testStore(t)
-	extensions, err := es.List()
-	if err != nil {
-		t.Fatalf("List: %v", err)
+	if !got.Enabled {
+		t.Error("Enabled = false, want true")
 	}
-	if len(extensions) != 0 {
-		t.Errorf("List count = %v, want 0", len(extensions))
+	if got.Type != ExtensionTypeLSP {
+		t.Errorf("Type = %q, want %q", got.Type, ExtensionTypeLSP)
+	}
+
+	// Verify the UI half of the manifest came back as it was written, in order.
+	ui := got.Manifest.Capabilities.UI
+	if ui == nil {
+		t.Fatal("Capabilities.UI = nil, want non-nil")
+	}
+	if len(ui.Permissions) != 4 || ui.Permissions[0] != "createTask.description.insertText" {
+		t.Errorf("UI permissions = %v, want the four as declared", ui.Permissions)
 	}
 }
 
@@ -508,26 +466,6 @@ func TestConcurrentAccess(t *testing.T) {
 	if count.Load() == 0 {
 		t.Error("Concurrent reads returned 0 results")
 	}
-}
-
-func TestTempDirCleanup(t *testing.T) {
-	// Verify that temp DB files are cleaned up
-	dir := t.TempDir()
-	db, err := store.NewStore(filepath.Join(dir, "test.db"))
-	if err != nil {
-		t.Fatalf("create test store: %v", err)
-	}
-	db.Close()
-
-	// Check that files exist
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("ReadDir: %v", err)
-	}
-	if len(entries) == 0 {
-		t.Error("No files in temp dir")
-	}
-	// t.TempDir() will clean up after test
 }
 
 func TestStorageRoundTrip(t *testing.T) {
@@ -584,47 +522,47 @@ func TestStorageNamespacesAreIsolated(t *testing.T) {
 	}
 }
 
-func TestStorageListPrefixIsLiteral(t *testing.T) {
+// A prefix is data, not a pattern: its LIKE wildcards must not widen the listing, and what it does
+// match comes back in key order, which is the only ordering the caller can page on.
+func TestStorageListMatchesAPrefixLiterallyAndInOrder(t *testing.T) {
 	es := testStore(t)
 	es.StorageSet("ext1", "ns", "a%c", jsontext.Value(`1`))
 	es.StorageSet("ext1", "ns", "axc", jsontext.Value(`2`))
 	es.StorageSet("ext1", "ns", `a\c`, jsontext.Value(`3`))
 	es.StorageSet("ext1", "ns", "a_c", jsontext.Value(`4`))
+	es.StorageSet("ext1", "ns", "b", jsontext.Value(`5`))
+	es.StorageSet("ext1", "ns", "abc", jsontext.Value(`6`))
+	es.StorageSet("ext1", "ns", "abd", jsontext.Value(`7`))
+	es.StorageSet("ext1", "ns", "x", jsontext.Value(`8`))
 
 	for _, tc := range []struct {
 		prefix string
-		want   string
+		want   []string
 	}{
-		{"a%", "a%c"},
-		{"a_", "a_c"},
-		{`a\`, `a\c`},
+		{"a%", []string{"a%c"}},
+		{"a_", []string{"a_c"}},
+		{`a\`, []string{`a\c`}},
+		{"ab", []string{"abc", "abd"}},
+		{"a", []string{"a%c", `a\c`, "a_c", "abc", "abd", "axc"}},
 	} {
 		entries, err := es.StorageList("ext1", "ns", tc.prefix)
 		if err != nil {
 			t.Fatalf("list %q: %v", tc.prefix, err)
 		}
-		if len(entries) != 1 || entries[0].Key != tc.want {
-			t.Errorf("prefix %q listed %+v, want only %q", tc.prefix, entries, tc.want)
+		var got []string
+		for _, e := range entries {
+			got = append(got, e.Key)
 		}
-	}
-}
-
-func TestStorageListWithPrefix(t *testing.T) {
-	es := testStore(t)
-	es.StorageSet("ext1", "ns", "b", jsontext.Value(`1`))
-	es.StorageSet("ext1", "ns", "abc", jsontext.Value(`2`))
-	es.StorageSet("ext1", "ns", "abd", jsontext.Value(`3`))
-	es.StorageSet("ext1", "ns", "x", jsontext.Value(`4`))
-
-	entries, err := es.StorageList("ext1", "ns", "ab")
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	if len(entries) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(entries))
-	}
-	if entries[0].Key != "abc" || entries[1].Key != "abd" {
-		t.Fatalf("unexpected ordering: %+v", entries)
+		if len(got) != len(tc.want) {
+			t.Errorf("prefix %q listed %v, want %v", tc.prefix, got, tc.want)
+			continue
+		}
+		for i, w := range tc.want {
+			if got[i] != w {
+				t.Errorf("prefix %q listed %v, want %v", tc.prefix, got, tc.want)
+				break
+			}
+		}
 	}
 }
 
