@@ -150,7 +150,7 @@
     {/if}
 {/snippet}
 
-<BaseModal width="420px" modalClass="login-modal" overlayClass="login-modal-overlay" closeOnOverlayClick={false} footer={footer} onClose={() => { }} header={header}>
+<BaseModal width="420px" modalClass="login-modal" overlayClass="login-modal-overlay" footer={footer} onClose={() => { }} header={header}>
     {#if form.error}
         <div class="login-message" class:login-message-note={form.tone === 'note'} role={form.tone === 'note' ? 'status' : 'alert'}>
             {form.error}
