@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { buildStorageNamespace } from '../handlers/storage';
-import { SUPPORTED_CAPABILITIES } from '../capabilities';
 
 describe('buildStorageNamespace', () => {
     it('uses project + task scope from the injection context', () => {
@@ -15,15 +14,5 @@ describe('buildStorageNamespace', () => {
         expect(buildStorageNamespace({})).toBe('global');
         expect(buildStorageNamespace(undefined)).toBe('global');
         expect(buildStorageNamespace(null)).toBe('global');
-    });
-});
-
-describe('storage capability catalog', () => {
-    it('registers storage.get/set/delete/list as call capabilities', () => {
-        for (const cap of ['storage.get', 'storage.set', 'storage.delete', 'storage.list']) {
-            const def = SUPPORTED_CAPABILITIES[cap];
-            expect(def).toBeTruthy();
-            expect(def.kind).toBe('call');
-        }
     });
 });

@@ -175,30 +175,22 @@ describe('LSP connection manager — message routing', () => {
   describe('notifications — multi-workspace', () => {
     beforeEach(() => setupMultiWorkspace(['/tmp/project-a', '/tmp/project-b', '/tmp/project-a']));
 
-    it('scopes diagnostics to channels in the matching workspace', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'textDocument/publishDiagnostics',
-        params: { textDocument: { uri: 'file:///tmp/project-a/main.go' }, diagnostics: [] },
-      }));
+    it.each([
+      ['file:///tmp/project-a/main.go', [1, 0, 1]],
+      ['file:///tmp/project-b/app.ts', [0, 1, 0]],
+    ] as Array<[string, number[]]>)(
+      'scopes diagnostics to the channels of the workspace the uri names (%s)',
+      (uri, expected) => {
+        dispatchMessage(channels, JSON.stringify({
+          jsonrpc: '2.0',
+          method: 'textDocument/publishDiagnostics',
+          params: { textDocument: { uri }, diagnostics: [] },
+        }));
 
-      // Channels 1 and 3 are in project-a, channel 2 is in project-b
-      expect(received[0]).toHaveLength(1); // project-a
-      expect(received[1]).toHaveLength(0); // project-b — no match
-      expect(received[2]).toHaveLength(1); // project-a
-    });
-
-    it('scopes diagnostics to the other workspace', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'textDocument/publishDiagnostics',
-        params: { textDocument: { uri: 'file:///tmp/project-b/app.ts' }, diagnostics: [] },
-      }));
-
-      expect(received[0]).toHaveLength(0); // project-a — no match
-      expect(received[1]).toHaveLength(1); // project-b
-      expect(received[2]).toHaveLength(0); // project-a — no match
-    });
+        // Channels 1 and 3 are in project-a, channel 2 is in project-b.
+        expect(expected.map((_count, i) => received[i].length)).toEqual(expected);
+      },
+    );
 
     it('broadcasts global notifications to all channels regardless of workspace', () => {
       // The branch is "no textDocument.uri", so any method without one takes this path — `$/progress`
@@ -218,48 +210,33 @@ describe('LSP connection manager — message routing', () => {
   describe('response routing by _ch hint', () => {
     beforeEach(() => setup(3));
 
-    it('routes to channel 1', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1001,
-        _ch: 1,
-        result: { items: [] },
-      }));
+    it.each([
+      [1, { items: [] }],
+      [2, { items: ['a'] }],
+      [3, null],
+    ] as Array<[number, unknown]>)(
+      'routes a response to the channel its _ch names, and to no other (channel %i)',
+      (channel, result) => {
+        dispatchMessage(channels, JSON.stringify({
+          jsonrpc: '2.0',
+          id: 1000 + channel,
+          _ch: channel,
+          result,
+        }));
 
-      expect(received[0]).toHaveLength(1);
-      const parsed = JSON.parse(received[0][0]);
-      expect(parsed.id).toBe(1001);
-      expect(parsed._ch).toBeUndefined(); // stripped
-      expect(parsed.result).toEqual({ items: [] });
-      expect(received[1]).toHaveLength(0);
-      expect(received[2]).toHaveLength(0);
-    });
-
-    it('routes to channel 2', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 2001,
-        _ch: 2,
-        result: { items: ['a'] },
-      }));
-
-      expect(received[0]).toHaveLength(0);
-      expect(received[1]).toHaveLength(1);
-      expect(received[2]).toHaveLength(0);
-    });
-
-    it('routes to channel 3', () => {
-      dispatchMessage(channels, JSON.stringify({
-        jsonrpc: '2.0',
-        id: 3001,
-        _ch: 3,
-        result: null,
-      }));
-
-      expect(received[0]).toHaveLength(0);
-      expect(received[1]).toHaveLength(0);
-      expect(received[2]).toHaveLength(1);
-    });
+        for (let i = 0; i < channels.length; i++) {
+          if (i + 1 === channel) {
+            expect(received[i]).toHaveLength(1);
+            const parsed = JSON.parse(received[i][0]);
+            expect(parsed.id).toBe(1000 + channel);
+            expect(parsed._ch).toBeUndefined(); // stripped
+            expect(parsed.result).toEqual(result);
+          } else {
+            expect(received[i]).toHaveLength(0);
+          }
+        }
+      },
+    );
 
     it('drops a response for an unknown channel, and says so once', () => {
       // A dropped response looks like a server that never answered, so it is reported — once,

@@ -81,8 +81,9 @@ test.describe.serial('Commit and move to done excludes unstaged files', () => {
     // Click "Commit and move to done"
     await commitBtn.click();
 
-    // Commit dialog should appear
-    const commitDialog = page.locator('[role="dialog"]');
+    // Commit dialog should appear — `[role="dialog"]` is never unique, so the dialog is picked out by
+    // the field only it draws.
+    const commitDialog = page.locator('[role="dialog"]').filter({ has: page.locator('.commit-textarea') });
     await expect(commitDialog).toBeVisible({ timeout: 60000 });
 
     // Fill the commit message (also cancels streaming generation)

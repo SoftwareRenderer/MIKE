@@ -111,179 +111,143 @@ function renderCard({ task, columnId, childrenMap, inline = false, showSubtaskBo
     };
 }
 
+/** One card, and what the padding calc is told about it. `count` is the number of buttons drawn and
+ *  `--actions` the reserve the title pads itself with; the two agreeing is the whole contract. */
+interface Row {
+    name: string;
+    task?: Partial<Task>;
+    columnId: string;
+    inline?: boolean;
+    showSubtaskBorder?: boolean;
+    multiSelect?: unknown;
+    /** Whether the card has a subtask to draw actions for. */
+    children?: boolean;
+    count: number;
+    includes?: string[];
+    excludes?: string[];
+    /** The full class list, for the rows whose shape is the finding. */
+    classes?: string[];
+    hasIdle?: boolean;
+    idleVar?: string;
+}
+
+function childOf(id: string, parentId: string): Task {
+    return makeTask({ id, parent_task_id: parentId });
+}
+
+function checkRow(row: Row) {
+    const result = renderCard({
+        task: makeTask(row.task),
+        columnId: row.columnId,
+        childrenMap: row.children ? new Map([['sub-1', [childOf('gc-1', 'sub-1')]]]) : undefined,
+        inline: row.inline,
+        showSubtaskBorder: row.showSubtaskBorder,
+        multiSelect: row.multiSelect,
+    });
+
+    expect(result.elements.length, row.name).toBe(row.count);
+    expect(result.actionsVar, `${row.name}: the reserve counts every button drawn`).toBe(String(row.count));
+    for (const cls of row.includes ?? []) expect(result.classes.some(c => c.includes(cls)), `${row.name}: ${cls}`).toBe(true);
+    for (const cls of row.excludes ?? []) expect(result.classes.some(c => c.includes(cls)), `${row.name}: ${cls}`).toBe(false);
+    if (row.classes) expect(result.classes, row.name).toEqual(row.classes);
+    if (row.hasIdle !== undefined) expect(result.hasIdle, row.name).toBe(row.hasIdle);
+    if (row.idleVar !== undefined) expect(result.idleVar, row.name).toBe(row.idleVar);
+}
+
 describe('Card action count (title padding calc)', () => {
-    it('counts the Idle badge for an in-progress idle subtask (create + edit + idle)', () => {
-        const child = makeTask({ id: 'gc-1', parent_task_id: 'sub-1' });
-        const result = renderCard({
-            task: makeTask({ status: 'in_progress', execution_state: 'idle' }),
+    it.each([
+        {
+            name: 'an in-progress idle subtask counts the Idle badge',
+            task: { status: 'in_progress', execution_state: 'idle' },
+            columnId: 'in_progress', inline: true, children: true,
+            count: 3, hasIdle: true, idleVar: '1', includes: ['action-add'],
+        },
+        {
+            name: 'a running subtask counts the pause button',
+            task: { status: 'in_progress', execution_state: 'running' },
+            columnId: 'in_progress', inline: true, children: true,
+            count: 3, includes: ['action-icon'],
+        },
+        {
+            name: 'a stopped subtask counts the resume button',
+            task: { status: 'in_progress', execution_state: 'stopped' },
+            columnId: 'in_progress', inline: true, children: true,
+            count: 3,
+        },
+        {
+            // A done task keeps the + like every other card, so the padding counts two.
+            name: 'a done subtask in the done column',
+            task: { status: 'done', execution_state: 'completed' },
+            columnId: 'done', inline: true,
+            count: 2, includes: ['action-delete', 'action-add'],
+        },
+        {
+            name: 'a backlog subtask with children has no third action',
+            task: { status: 'backlog' },
+            columnId: 'backlog', inline: true, children: true,
+            count: 2,
+        },
+        {
+            name: 'an in-progress idle top-level card counts the Idle badge',
+            task: { id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: 'idle' },
             columnId: 'in_progress',
-            childrenMap: new Map([['sub-1', [child]]]),
-            inline: true,
-        });
-        expect(result.hasIdle).toBe(true);
-        expect(result.idleVar).toBe('1');
-        expect(result.classes.some(c => c.includes('action-add'))).toBe(true);
-        expect(result.elements.length).toBe(3);
-        expect(result.actionsVar).toBe('3');
-    });
-
-    it('counts the pause button for a running subtask (create + edit + pause)', () => {
-        const child = makeTask({ id: 'gc-1', parent_task_id: 'sub-1' });
-        const result = renderCard({
-            task: makeTask({ status: 'in_progress', execution_state: 'running' }),
-            columnId: 'in_progress',
-            childrenMap: new Map([['sub-1', [child]]]),
-            inline: true,
-        });
-        expect(result.elements.length).toBe(3);
-        expect(result.classes.some(c => c.includes('action-icon'))).toBe(true);
-        expect(result.actionsVar).toBe('3');
-    });
-
-    it('counts the resume button for a stopped subtask (create + edit + resume)', () => {
-        const child = makeTask({ id: 'gc-1', parent_task_id: 'sub-1' });
-        const result = renderCard({
-            task: makeTask({ status: 'in_progress', execution_state: 'stopped' }),
-            columnId: 'in_progress',
-            childrenMap: new Map([['sub-1', [child]]]),
-            inline: true,
-        });
-        expect(result.elements.length).toBe(3);
-        expect(result.actionsVar).toBe('3');
-    });
-
-    it('counts create + delete for a done subtask in the done column', () => {
-        // A done task keeps the + like every other card, so the padding counts two.
-        const result = renderCard({
-            task: makeTask({ status: 'done', execution_state: 'completed' }),
-            columnId: 'done',
-            inline: true,
-        });
-        expect(result.classes.some(c => c.includes('action-delete'))).toBe(true);
-        expect(result.classes.some(c => c.includes('action-add'))).toBe(true);
-        expect(result.elements.length).toBe(2);
-        expect(result.actionsVar).toBe('2');
-    });
-
-    it('keeps create + edit for a backlog subtask with children (no third action)', () => {
-        const child = makeTask({ id: 'gc-1', parent_task_id: 'sub-1' });
-        const result = renderCard({
-            task: makeTask({ status: 'backlog' }),
+            count: 3, hasIdle: true,
+        },
+        {
+            name: 'a backlog top-level card',
+            task: { id: 'top-1', parent_task_id: '', status: 'backlog' },
             columnId: 'backlog',
-            childrenMap: new Map([['sub-1', [child]]]),
-            inline: true,
-        });
-        expect(result.elements.length).toBe(2);
-        expect(result.actionsVar).toBe('2');
-    });
-
-    it('counts the Idle badge for an in-progress idle top-level card (create + edit + idle)', () => {
-        const result = renderCard({
-            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: 'idle' }),
-            columnId: 'in_progress',
-            inline: false,
-        });
-        expect(result.hasIdle).toBe(true);
-        expect(result.elements.length).toBe(3);
-        expect(result.actionsVar).toBe('3');
-    });
-
-    it('counts create + edit + move for a backlog top-level card', () => {
-        const result = renderCard({
-            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'backlog' }),
-            columnId: 'backlog',
-            inline: false,
-        });
-        expect(result.classes.some(c => c.includes('action-move'))).toBe(true);
-        expect(result.elements.length).toBe(3);
-        expect(result.actionsVar).toBe('3');
-    });
-
-    it('counts create + edit + move (delete swapped for move) in multi-select on a done card', () => {
-        const multiSelect = { isSelected: () => true };
-        const result = renderCard({
-            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'done', execution_state: 'completed' }),
-            columnId: 'done',
-            inline: false,
-            multiSelect,
-        });
-        expect(result.classes.some(c => c.includes('action-delete'))).toBe(false);
-        expect(result.classes.some(c => c.includes('action-move'))).toBe(true);
-        expect(result.elements.length).toBe(3);
-        expect(result.actionsVar).toBe('3');
-    });
-
-    it('shows the create-subtask button and counts it for sidebar subtasks', () => {
-        const result = renderCard({
-            task: makeTask({ status: 'backlog' }),
-            columnId: 'backlog',
-            inline: false,
-            showSubtaskBorder: true,
-        });
-        expect(result.classes.some(c => c.includes('action-add'))).toBe(true);
-        expect(result.elements.length).toBe(3);
-        expect(result.actionsVar).toBe('3');
-    });
+            count: 3, includes: ['action-move'],
+        },
+        {
+            name: 'a done top-level card in multi-select swaps delete for move',
+            task: { id: 'top-1', parent_task_id: '', status: 'done', execution_state: 'completed' },
+            columnId: 'done', multiSelect: { isSelected: () => true },
+            count: 3, includes: ['action-move'], excludes: ['action-delete'],
+        },
+        {
+            name: 'a sidebar subtask row shows the create-subtask button',
+            task: { status: 'backlog' },
+            columnId: 'backlog', showSubtaskBorder: true,
+            count: 3, includes: ['action-add'],
+        },
+    ])('counts the buttons of $name', checkRow);
 });
 
 describe('Card action count on a narrow (mobile) viewport', () => {
     beforeEach(() => { mobileMatches = true; });
     afterEach(() => { mobileMatches = false; });
 
-    it('counts the overflow menu alone for an inline subtask (not create + edit + move)', () => {
-        const result = renderCard({
-            task: makeTask({ status: 'backlog' }),
-            columnId: 'backlog',
-            inline: true,
-        });
-        expect(result.classes).toEqual(['action-icon action-overflow']);
-        expect(result.elements.length).toBe(1);
-        expect(result.actionsVar).toBe('1');
-    });
-
-    it('draws no Idle word on a narrow viewport: an idle subtask is the overflow menu alone', () => {
-        const result = renderCard({
-            task: makeTask({ status: 'in_progress', execution_state: 'idle' }),
+    it.each([
+        {
+            name: 'an inline subtask is the overflow menu alone',
+            task: { status: 'backlog' },
+            columnId: 'backlog', inline: true,
+            count: 1, classes: ['action-icon action-overflow'],
+        },
+        {
+            name: 'an idle subtask draws no Idle word beside the overflow menu',
+            task: { status: 'in_progress', execution_state: 'idle' },
+            columnId: 'in_progress', inline: true,
+            count: 1, classes: ['action-icon action-overflow'], hasIdle: false, idleVar: '0',
+        },
+        {
+            name: 'an idle top-level card leaves the third slot empty rather than gaining a button',
+            task: { id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: 'idle' },
             columnId: 'in_progress',
-            inline: true,
-        });
-        expect(result.hasIdle).toBe(false);
-        expect(result.classes).toEqual(['action-icon action-overflow']);
-        expect(result.elements.length).toBe(1);
-        expect(result.actionsVar).toBe('1');
-        expect(result.idleVar).toBe('0');
-    });
-
-    it('leaves the third slot empty for an idle top-level card, rather than gaining a button', () => {
-        const result = renderCard({
-            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: 'idle' }),
+            count: 2, classes: ['action-icon action-add', 'action-icon'], hasIdle: false, idleVar: '0',
+        },
+        {
+            name: 'a top-level card still counts every button, having no overflow menu',
+            task: { id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: 'paused' },
             columnId: 'in_progress',
-            inline: false,
-        });
-        expect(result.hasIdle).toBe(false);
-        expect(result.classes).toEqual(['action-icon action-add', 'action-icon']);
-        expect(result.elements.length).toBe(2);
-        expect(result.actionsVar).toBe('2');
-        expect(result.idleVar).toBe('0');
-    });
-
-    it('still counts every button for a top-level card, which has no overflow menu', () => {
-        const result = renderCard({
-            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: 'paused' }),
+            count: 3,
+        },
+        {
+            name: 'a card that draws no Idle badge claims no Idle slot',
+            task: { id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: '' },
             columnId: 'in_progress',
-            inline: false,
-        });
-        expect(result.elements.length).toBe(3);
-        expect(result.actionsVar).toBe('3');
-    });
-
-    it('does not claim an Idle slot for a card that draws no Idle badge', () => {
-        const result = renderCard({
-            task: makeTask({ id: 'top-1', parent_task_id: '', status: 'in_progress', execution_state: '' }),
-            columnId: 'in_progress',
-            inline: false,
-        });
-        expect(result.hasIdle).toBe(false);
-        expect(result.idleVar).toBe('0');
-    });
+            count: 2, hasIdle: false, idleVar: '0',
+        },
+    ])('counts the buttons of $name', checkRow);
 });

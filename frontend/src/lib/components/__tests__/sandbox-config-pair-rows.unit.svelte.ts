@@ -94,35 +94,24 @@ describe('a saved pair', () => {
 describe('a port mapping, which is short enough to be one token', () => {
     const row = (c: HTMLElement) => visible(one(c, '.port-item'));
 
-    it('reads host:container while a task publishes it', () => {
-        const { container } = render(PortsSection, {
-            props: { draft: portDraft([{ container_port: 3000 }], new Map([[3000, 32789]])), locked: false },
-        });
-        expect(row(container)).toBe('32789:3000');
-    });
-
-    it('puts the chosen interface in front of the host port, never in front of the container port', () => {
-        const { container } = render(PortsSection, {
-            props: {
-                draft: portDraft([{ container_port: 3000, host_ip: '127.0.0.1' }], new Map([[3000, 32789]])),
-                locked: false,
-            },
-        });
-        expect(row(container)).toBe('127.0.0.1:32789:3000');
-    });
-
-    it('shows the container port alone until something publishes it', () => {
-        const { container } = render(PortsSection, {
-            props: { draft: portDraft([{ container_port: 3000 }]), locked: false },
-        });
-        expect(row(container)).toBe('3000');
-    });
-
-    it('keeps the interface with the container port when no host port exists to carry it', () => {
-        const { container } = render(PortsSection, {
-            props: { draft: portDraft([{ container_port: 3000, host_ip: '127.0.0.1' }]), locked: false },
-        });
-        expect(row(container)).toBe('127.0.0.1:3000');
+    // The interface belongs in front of the host port, and the host port only exists once something
+    // publishes it — so the token grows from the container port outward.
+    it.each([
+        { name: 'a published port', ports: [{ container_port: 3000 }], assigned: new Map([[3000, 32789]]), shown: '32789:3000' },
+        {
+            name: 'a published port on one interface',
+            ports: [{ container_port: 3000, host_ip: '127.0.0.1' }], assigned: new Map([[3000, 32789]]),
+            shown: '127.0.0.1:32789:3000',
+        },
+        { name: 'an unpublished port', ports: [{ container_port: 3000 }], assigned: undefined, shown: '3000' },
+        {
+            name: 'an unpublished port on one interface',
+            ports: [{ container_port: 3000, host_ip: '127.0.0.1' }], assigned: undefined,
+            shown: '127.0.0.1:3000',
+        },
+    ])('reads $name as $shown', ({ ports, assigned, shown }) => {
+        const { container } = render(PortsSection, { props: { draft: portDraft(ports, assigned), locked: false } });
+        expect(row(container)).toBe(shown);
     });
 
     it('reads the same way while the screen is locked to a running task', () => {

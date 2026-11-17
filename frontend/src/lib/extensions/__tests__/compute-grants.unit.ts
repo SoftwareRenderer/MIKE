@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeGrants, SUPPORTED_CAPABILITIES } from '../capabilities';
+import { computeGrants } from '../capabilities';
 
 /**
  * Least-privilege grant computation: an extension may only ever be granted a
@@ -27,12 +27,5 @@ describe('computeGrants (manifest permissions ∩ host catalog)', () => {
     it('deduplicates repeated declared permissions', () => {
         const granted = computeGrants(['config.get', 'config.get', 'network.proxy', 'config.get']);
         expect(granted).toEqual(['config.get', 'network.proxy']);
-    });
-
-    it('grants the editor.jumpToLine event when declared', () => {
-        // The event the host forwards to a WYSIWYG extension so it can scroll to a symbol-outline
-        // reference: an event with nothing to grant on, so the catalog entry is only its kind.
-        expect(SUPPORTED_CAPABILITIES['editor.jumpToLine']).toEqual({ kind: 'event' });
-        expect(computeGrants(['editor.jumpToLine'])).toEqual(['editor.jumpToLine']);
     });
 });

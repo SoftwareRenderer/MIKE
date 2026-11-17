@@ -1,7 +1,9 @@
-import { describe, it, expect, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/svelte';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { render, fireEvent, cleanup } from '@testing-library/svelte';
 
-// Which phrase lands for which notice is what the reader depends on.
+// Which of the three screens the transcript region shows, and the phrase each one lands on, is what the
+// reader depends on: the loading screen, the empty state, the rows, and the notice that names the gap
+// between them.
 vi.mock('$lib/components/Chat/ChatMessage.svelte', () => ({
     default: () => '<div class="mock-chat-message"></div>',
 }));
@@ -51,6 +53,8 @@ function props(over: Record<string, unknown> = {}) {
     };
 }
 
+afterEach(cleanup);
+
 function noticeLine(container: HTMLElement): HTMLElement | null {
     return container.querySelector('.history-notice');
 }
@@ -72,6 +76,28 @@ function heldRows(n = 2) {
 }
 
 describe('ChatEntries — what the transcript says about itself', () => {
+    // Which of the three screens the region shows, and what it says, is one decision: the read, the rows it
+    // holds, and the notice that names the gap between them.
+    it('labels the region and shows the loading screen only over an empty transcript', () => {
+        const { container } = render(ChatEntries, props({ historyLoading: true }));
+        expect(container.querySelector('.chat-messages')?.getAttribute('aria-label')).toBe('Chat messages');
+        const loading = container.querySelector('.chat-loading');
+        expect(loading?.querySelector('p')?.textContent).toBe('Loading conversation…');
+        expect(loading?.querySelector('.spinner')).toBeTruthy();
+
+        const held = render(ChatEntries, props({ historyLoading: true, ...heldRows() }));
+        expect(held.container.querySelector('.chat-loading')).toBeNull();
+        expect(held.container.querySelector('.empty-state')).toBeNull();
+    });
+
+    it('shows the empty state only when the read answered with nothing', () => {
+        const { container } = render(ChatEntries, props({ historyLoading: false }));
+        expect(container.querySelector('.empty-state .title')?.textContent).toBe('No messages yet');
+        expect(container.querySelector('.empty-state .hint')?.textContent)
+            .toBe('Send a message to start the conversation');
+        expect(container.querySelector('.chat-loading')).toBeNull();
+    });
+
     it('says the running turn is all it has when the server still owes this client', () => {
         const { container } = render(ChatEntries, props({ historyNotice: 'owing' }));
         const line = noticeLine(container);

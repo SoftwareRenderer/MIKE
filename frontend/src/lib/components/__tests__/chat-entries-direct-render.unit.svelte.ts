@@ -85,8 +85,13 @@ describe('ChatEntries — direct (non-virtualized) rendering', () => {
         const entryEls = container.querySelectorAll('.chat-entry');
         expect(entryEls.length).toBe(15);
 
-        // A single shared scroll container holds them all.
+        // A single shared scroll container holds them all, and one content element inside it
+        // carries the rows the tracker measures.
         expect(container.querySelectorAll('.chat-messages').length).toBe(1);
+        const content = container.querySelector('.chat-content');
+        expect(content).toBeTruthy();
+        expect(container.querySelector('.chat-messages')?.contains(content ?? null)).toBe(true);
+        expect(content?.querySelectorAll('.chat-entry').length).toBe(15);
     });
 
     it('attaches the real scroll container to the shared follow tracker', async () => {

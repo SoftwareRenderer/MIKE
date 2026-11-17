@@ -70,59 +70,37 @@ describe('EditorFooter LSP sandbox memory row', () => {
         expect(fetchMock).not.toHaveBeenCalled();
     });
 
-    it('fetches once when the tooltip opens and shows the formatted usage', async () => {
+    it('fetches once when the tooltip opens, for this editor’s workspace and file', async () => {
         fetchMock.mockResolvedValue(stats({ memory_current_mb: 128, memory_limit_mb: 256 }));
         renderFooter();
         await openTooltip();
         expect(fetchMock).toHaveBeenCalledTimes(1);
         expect(fetchMock).toHaveBeenCalledWith('/tmp/workspace', '/tmp/workspace/main.go');
         expect(memoryRow()).not.toBeNull();
-        await vi.waitFor(() => expect(memoryValue()?.textContent).toBe('128 / 256 MB'));
     });
 
-    it('renders "—" when the fetch fails (resolves null)', async () => {
-        fetchMock.mockResolvedValue(null);
+    it.each([
+        ['the usage the container reports', stats({ memory_current_mb: 128, memory_limit_mb: 256 }), '128 / 256 MB'],
+        ['no limit to compare against', stats({ memory_current_mb: 42, memory_limit_mb: 0 }), '42 MB (no limit)'],
+        ['a sandbox that is not running', stats({ running: false, memory_current_mb: 0 }), 'Not running'],
+        ['no answer at all', null, '—'],
+    ])('writes %s into the row in one grammar', async (_name, answer, text) => {
+        fetchMock.mockResolvedValue(answer);
         renderFooter();
         await openTooltip();
-        await vi.waitFor(() => expect(memoryValue()?.textContent).toBe('—'));
+        await vi.waitFor(() => expect(memoryValue()?.textContent).toBe(text));
     });
 
-    it('renders "Not running" when the sandbox is not running', async () => {
-        fetchMock.mockResolvedValue(stats({ running: false, memory_current_mb: 0 }));
+    it.each([
+        ['usage near the limit', stats({ memory_current_mb: 250, memory_limit_mb: 256 }), '250 / 256 MB', true],
+        ['an OOM kill at low usage', stats({ memory_current_mb: 10, oom_kills: 1 }), '10 / 256 MB', true],
+        ['healthy usage', stats(), '128 / 256 MB', false],
+    ])('%s wears the alert class: %s', async (_name, answer, text, warned) => {
+        fetchMock.mockResolvedValue(answer);
         renderFooter();
         await openTooltip();
-        await vi.waitFor(() => expect(memoryValue()?.textContent).toBe('Not running'));
-    });
-
-    it('renders "N MB (no limit)" when the limit is unknown', async () => {
-        fetchMock.mockResolvedValue(stats({ memory_current_mb: 42, memory_limit_mb: 0 }));
-        renderFooter();
-        await openTooltip();
-        await vi.waitFor(() => expect(memoryValue()?.textContent).toBe('42 MB (no limit)'));
-    });
-
-    it('marks the value red when usage is near the limit', async () => {
-        fetchMock.mockResolvedValue(stats({ memory_current_mb: 250, memory_limit_mb: 256 }));
-        renderFooter();
-        await openTooltip();
-        const value = memoryValue();
-        await vi.waitFor(() => expect(memoryValue()?.textContent).toBe('250 / 256 MB'));
-        expect(value?.className).toContain('lsp-error');
-    });
-
-    it('marks the value red on OOM kills even at low usage', async () => {
-        fetchMock.mockResolvedValue(stats({ memory_current_mb: 10, oom_kills: 1 }));
-        renderFooter();
-        await openTooltip();
-        await vi.waitFor(() => expect(memoryValue()?.className).toContain('lsp-error'));
-    });
-
-    it('does not mark the value red for healthy usage', async () => {
-        fetchMock.mockResolvedValue(stats());
-        renderFooter();
-        await openTooltip();
-        await vi.waitFor(() => expect(memoryValue()?.textContent).toBe('128 / 256 MB'));
-        expect(memoryValue()?.className).not.toContain('lsp-error');
+        await vi.waitFor(() => expect(memoryValue()?.textContent).toBe(text));
+        expect(memoryValue()?.className.includes('lsp-error')).toBe(warned);
     });
 
     it('fetches again when the tooltip is closed and reopened', async () => {
