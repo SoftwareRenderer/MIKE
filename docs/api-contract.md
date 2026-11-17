@@ -328,8 +328,9 @@ it. That is a route-verb rule rather than a styling preference: a catch-all patt
 `ServeMux` outranks that mux's own verb-mismatch answer. A `GET` on a POST-only `/api` route would
 be served the application document — a 200 that reads to a caller as a route which accepted the request. Behind the
 mux, an unmatched path outside `/api/` is the SPA's and everything under `/api/` keeps the mux's answer,
-405 and `Allow` included. `TestSPAServesNothingToAWrongVerbOnAnAPIPath` and
-`TestMuxRefusesAnUnregisteredVerbWhileTheSPAServes` pin the two directions.
+405 and `Allow` included. `TestTheSPANeverSwallowsTheMuxsVerbRefusal`
+(`backend/server/handler_static_test.go`) pins both directions: a wrong verb under the frontend chain, and
+a wrong verb through the chain the server actually runs.
 
 A handler that switches on `r.Method` is not a methodless route and is not stale either. Nine branches
 across six files (`api/task.go`, `api/project.go`, `config/config.go`, `extensions/handler.go`,

@@ -198,56 +198,50 @@ func TestUpdateCheckRefusedWhileDisabled(t *testing.T) {
 
 // The loopback spelling of the manifest URL is a real path through the egress rule: a host the operator
 // named is the only way a non-public address is dialled, and a mirror or a test fixture is exactly that.
+// The daily pass says so with `?auto=1`, and the install's day gates it: the second browser to boot today
+// is answered from the fetch the first one's pass caused. The button sends no flag, because a person who
+// asked is never told the day is spent. docs/auto-update.md.
 func TestUpdateCheckAgainstAHostTheOperatorNamed(t *testing.T) {
 	manifest := fixtureManifest(t, "9.9.9")
 	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
 	stageableUpdateService(t, s, updates.Options{ManifestURL: manifest.URL})
 	setPreference(t, s, true)
 
-	rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check", nil))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d body %s", rec.Code, rec.Body)
+	check := func(query string) map[string]any {
+		t.Helper()
+		rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check"+query, nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("POST /api/updates/check%s: %d %s", query, rec.Code, rec.Body)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("decode: %v\n%s", err, rec.Body)
+		}
+		return body
 	}
-	var body map[string]any
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode: %v\n%s", err, rec.Body)
-	}
+
+	// A check that reached its manifest answers with what that manifest said, and says nothing about an
+	// error. A release is offered only when the manifest names an archive for this machine's os and
+	// architecture; anything else has to be explained.
+	body := check("?auto=1")
 	if body["latest"] != "9.9.9" {
 		t.Errorf("latest = %v, want the manifest's answer", body["latest"])
 	}
 	if lastErr, _ := body["last_error"].(string); lastErr != "" {
 		t.Errorf("last_error = %q on a check that reached its manifest", lastErr)
 	}
-	// A release is offered only when the manifest names an archive for this machine's os and architecture.
 	if available, _ := body["available"].(bool); !available {
 		if note, _ := body["note"].(string); !strings.Contains(note, "names no archive") {
 			t.Errorf("note = %q with no release offered: the answer should say why", note)
 		}
 	}
-}
 
-// The daily pass says so with `?auto=1`, and the install's day gates it: the second browser to boot today
-// is answered from the fetch the first one's pass caused. The button sends no flag, because a person who
-// asked is never told the day is spent. docs/auto-update.md.
-func TestUpdateAutomaticCheckIsGatedByTheInstallDay(t *testing.T) {
-	manifest := fixtureManifest(t, "9.9.9")
-	s := testServerWith(t, func(c *startup.Config) { c.UpdateManifestURL = manifest.URL })
-	stageableUpdateService(t, s, updates.Options{ManifestURL: manifest.URL})
-	setPreference(t, s, true)
-
-	for _, who := range []string{"first", "second"} {
-		rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check?auto=1", nil))
-		if rec.Code != http.StatusOK {
-			t.Fatalf("%s automatic pass: %d %s", who, rec.Code, rec.Body)
-		}
-	}
+	check("?auto=1")
 	if got := manifest.hits(); got != 1 {
 		t.Errorf("two automatic passes made %d manifest requests, want 1", got)
 	}
 
-	if rec := testResponseAuth(t, s, testRequest(http.MethodPost, "/api/updates/check", nil)); rec.Code != http.StatusOK {
-		t.Fatalf("manual check: %d %s", rec.Code, rec.Body)
-	}
+	check("")
 	if got := manifest.hits(); got != 2 {
 		t.Errorf("a manual check left the manifest at %d requests, want 2", got)
 	}

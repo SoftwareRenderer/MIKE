@@ -37,6 +37,7 @@ func TestExtensionsStatic_NoDirectoryListings(t *testing.T) {
 	must("acme/alpha/app.js", "console.log(1)")
 	must("beta/plain/nested.txt", "nested file, no index anywhere")
 	must("gamma/widget/index.html", "<html>WIDGET</html>")
+	must("gamma/widget/font.woff2", strings.Repeat("x", 200))
 	secret := filepath.Join(root, "secret.txt")
 	if err := os.WriteFile(secret, []byte("do-not-leak"), 0o644); err != nil {
 		t.Fatal(err)
@@ -106,6 +107,14 @@ func TestExtensionsStatic_NoDirectoryListings(t *testing.T) {
 	}
 	if rr := get("/extensions/gamma/widget/index.html"); rr.Code != http.StatusMovedPermanently && rr.Code != http.StatusFound {
 		t.Errorf("index.html GET: expected the 301-to-directory, got %d", rr.Code)
+	}
+
+	// A font is fetched by byte range, and the jail is in the read path: a wrapper that lost the
+	// seekable reader behind it would answer a ranged font fetch with the whole file or a 200.
+	ranged := testRequest(http.MethodGet, "/extensions/gamma/widget/font.woff2", nil)
+	ranged.Header.Set("Range", "bytes=0-9")
+	if rr := testResponse(t, s, ranged); rr.Code != http.StatusPartialContent || rr.Body.Len() != 10 {
+		t.Errorf("ranged font GET: %d %d bytes, want 206 and 10", rr.Code, rr.Body.Len())
 	}
 
 	// Traversal stays blocked — whatever the redirect chain, the file

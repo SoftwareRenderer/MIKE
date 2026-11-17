@@ -28,42 +28,50 @@ func peakFixture(t *testing.T) (*store.Store, *types.Task) {
 	return st, task
 }
 
-func TestSandboxMemoryPeakSinkRecordsTheLastRun(t *testing.T) {
-	st, task := peakFixture(t)
-	sink := sandboxMemoryPeakSink(st)
-
-	sink(task.ID, 742, 2)
-	got, err := st.GetTaskByID(task.ID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
+// The sink is fed by every container the server started, task or project-level, so one decision covers
+// both: the row it writes is the one the container's own id names, and it writes the pair together — the
+// card shows the most recent run's peak beside that run's OOM kills.
+func TestSandboxMemoryPeakSinkWritesOnlyTheRowItsContainerNames(t *testing.T) {
+	cases := []struct {
+		name      string
+		scopedTo  string // "task" or "project": which family the container id names
+		writes    [][3]int64
+		wantPeak  int64
+		wantKills int64
+	}{
+		{
+			name:     "a task container records each run, last one standing",
+			scopedTo: "task",
+			writes:   [][3]int64{{742, 2}, {610, 0}},
+			wantPeak: 610, wantKills: 0,
+		},
+		{
+			name:     "the project's terminal container writes no task row",
+			scopedTo: "project",
+			writes:   [][3]int64{{999, 4}},
+			wantPeak: 0, wantKills: 0,
+		},
 	}
-	if got.SandboxMemoryPeakMB != 742 || got.SandboxOOMKills != 2 {
-		t.Fatalf("recorded peak = %d with %d kills, want 742 / 2", got.SandboxMemoryPeakMB, got.SandboxOOMKills)
-	}
-
-	sink(task.ID, 610, 0)
-	got, err = st.GetTaskByID(task.ID)
-	if err != nil {
-		t.Fatalf("get task after second run: %v", err)
-	}
-	if got.SandboxMemoryPeakMB != 610 || got.SandboxOOMKills != 0 {
-		t.Errorf("recorded peak = %d with %d kills, want 610 / 0 — the row shows the most recent run, both numbers together",
-			got.SandboxMemoryPeakMB, got.SandboxOOMKills)
-	}
-}
-
-func TestSandboxMemoryPeakSinkIgnoresContainersThatNameNoTask(t *testing.T) {
-	st, task := peakFixture(t)
-	sink := sandboxMemoryPeakSink(st)
-
-	sink("proj:"+task.ProjectID, 999, 4)
-
-	got, err := st.GetTaskByID(task.ID)
-	if err != nil {
-		t.Fatalf("get task: %v", err)
-	}
-	if got.SandboxMemoryPeakMB != 0 {
-		t.Errorf("project container wrote peak %d to a task row, want 0", got.SandboxMemoryPeakMB)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			st, task := peakFixture(t)
+			container := task.ID
+			if tc.scopedTo == "project" {
+				container = "proj:" + task.ProjectID
+			}
+			sink := sandboxMemoryPeakSink(st)
+			for _, w := range tc.writes {
+				sink(container, w[0], w[1])
+			}
+			got, err := st.GetTaskByID(task.ID)
+			if err != nil {
+				t.Fatalf("get task: %v", err)
+			}
+			if got.SandboxMemoryPeakMB != tc.wantPeak || got.SandboxOOMKills != tc.wantKills {
+				t.Errorf("recorded peak = %d with %d kills, want %d / %d",
+					got.SandboxMemoryPeakMB, got.SandboxOOMKills, tc.wantPeak, tc.wantKills)
+			}
+		})
 	}
 }
 
