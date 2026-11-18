@@ -125,6 +125,7 @@ export {
     getSwitchableBranches,
     checkoutBranch,
     getGitStatus,
+    getProjectGitAuthor,
     stageProjectPaths,
     commitProject,
     discardProjectPaths,

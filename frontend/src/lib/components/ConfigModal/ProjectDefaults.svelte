@@ -1,5 +1,6 @@
 <script lang="ts">
     import ToggleSwitch from '../ToggleSwitch.svelte';
+    import { getProjectGitAuthor } from '$lib/api';
     import { t } from '$lib/i18n';
     import type { MCPServer } from '$lib/types';
     import { projectEnablesMCPServer } from '$lib/utils/mcp-project';
@@ -11,6 +12,8 @@
         mcpServerIDs = $bindable<string[]>([]),
         mcpOptions = [] as MCPServer[],
         projectName = '',
+        projectId = '',
+        identityRevision = 0,
         onDirty,
     }: {
         commitAssistedBy?: boolean;
@@ -22,6 +25,10 @@
         /** The globally enabled servers — the only ones a project can be offered. */
         mcpOptions?: MCPServer[];
         projectName?: string;
+        /** Which project this form edits; its identity is what the placeholders show. */
+        projectId?: string;
+        /** Bumped by the Save beside these fields, which re-reads the preview with the row. */
+        identityRevision?: number;
         onDirty?: () => void;
     } = $props();
 
@@ -33,6 +40,27 @@
     // The ceiling the server refuses beyond (types.ValidateGitAuthorName / ValidateGitAuthorEmail),
     // typed here only so a paste cannot fill a field the Save will send back.
     const IDENTITY_FIELD_MAX = 255;
+
+    // The pair a commit carries while one of the fields is blank. The server resolves it, because the
+    // layering — row, then this server's stamp, then the repository's config — lives there.
+    let effectiveName = $state('');
+    let effectiveEmail = $state('');
+
+    $effect(() => {
+        const id = projectId;
+        // A Save that moved a half changes the fallback; nothing else wakes this read.
+        void identityRevision;
+        if (!id) return;
+        let live = true;
+        getProjectGitAuthor(id)
+            .then((pair) => {
+                if (!live) return;
+                effectiveName = pair.authorName;
+                effectiveEmail = pair.authorEmail;
+            })
+            .catch(() => { /* the preview is missing; the fields still take a value */ });
+        return () => { live = false; };
+    });
 </script>
 
 <fieldset class="settings-section project-defaults">
@@ -57,6 +85,7 @@
                 class="settings-text-input"
                 bind:value={gitAuthorName}
                 maxlength={IDENTITY_FIELD_MAX}
+                placeholder={effectiveName || t('settings.project.gitAuthorUnset')}
                 autocomplete="off"
                 spellcheck="false"
                 aria-describedby="project-git-author-desc"
@@ -70,6 +99,7 @@
                 class="settings-text-input"
                 bind:value={gitAuthorEmail}
                 maxlength={IDENTITY_FIELD_MAX}
+                placeholder={effectiveEmail || t('settings.project.gitAuthorUnset')}
                 autocomplete="off"
                 spellcheck="false"
                 aria-describedby="project-git-author-desc"
@@ -134,6 +164,11 @@
     .identity-label {
         font-size: var(--text-xs);
         color: var(--color-text-tertiary);
+    }
+    /* A preview, not an answer: it reads as the label above it. */
+    .identity-field :global(.settings-text-input::placeholder) {
+        color: var(--color-text-tertiary);
+        opacity: 1;
     }
     .mcp-row {
         display: flex;

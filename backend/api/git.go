@@ -389,6 +389,17 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// gitAuthorOf answers who a commit in this project would be authored as, layering through
+// git.ProjectAuthorIdentity with the repository at the row's Path as the config reader.
+func gitAuthorOf(project *types.Project) (string, string) {
+	return git.ProjectAuthorIdentity(project.GitAuthorName, project.GitAuthorEmail, func(key string) string {
+		if project.Path == "" {
+			return ""
+		}
+		return git.RepoConfig(project.Path, key)
+	})
+}
+
 // HandleStatus returns working tree status, HEAD, and author.
 func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	project, ok := resolveProject(w, r, h.store)
@@ -407,7 +418,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	if headOut, err := git.Command("", "-C", project.Path, "rev-parse", "HEAD").CombinedOutput(); err == nil {
 		headHash = strings.TrimSpace(string(headOut))
 	}
-	authorName, authorEmail := resolveGitAuthor(project.ID, h.store)
+	authorName, authorEmail := gitAuthorOf(project)
 	ahead, behind := remoteAheadBehind(project.Path)
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{
 		"clean":       clean,
@@ -417,6 +428,21 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 		"authorEmail": authorEmail,
 		"ahead":       ahead,
 		"behind":      behind,
+	})
+}
+
+// HandleGitAuthor answers who a commit in this project would be authored as, without the working-tree,
+// HEAD and ahead/behind readings HandleStatus also makes. Settings shows the pair as each identity
+// field's placeholder: what a commit carries while that field is blank.
+func (h *GitHandler) HandleGitAuthor(w http.ResponseWriter, r *http.Request) {
+	project, ok := resolveProject(w, r, h.store)
+	if !ok {
+		return
+	}
+	name, email := gitAuthorOf(project)
+	httputil.JSONResponse(w, http.StatusOK, map[string]any{
+		"authorName":  name,
+		"authorEmail": email,
 	})
 }
 

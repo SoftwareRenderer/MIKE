@@ -169,6 +169,7 @@ var requestScopedReads = []sideEffectEntry{
 	{"GET /api/fs/read", "one file's content, capped before it is read"},
 	{"GET /api/fs/search", "a search result set"},
 	{"GET /api/projects/{projectID}/git/status", "a snapshot of the working tree"},
+	{"GET /api/projects/{projectID}/git-author", "the identity a commit would carry"},
 	{"GET /api/projects/{projectID}/git/log", "commits already made"},
 	{"GET /api/projects/{projectID}/git/branches", "refs already made"},
 	{"GET /api/projects/{projectID}/git/diff", "a diff against HEAD"},

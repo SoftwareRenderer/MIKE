@@ -339,11 +339,16 @@ boot writes the identity while tasks are committing. A project answers ahead of 
   gitconfig's — the container environment is only what was configured, so nothing is injected there.
 - **Every screen that names a committer answers from the same pair**, through
   `git.ProjectAuthorIdentity`: the project's half first, then the server's, then one config reader the
-  caller scopes. `resolveGitAuthor` (`backend/api/task.go`) feeds the commit preview's metadata and the
-  project's git status. It answers an empty pair rather than a name no commit would carry: an identity
-  invented there is a promise the commit does not keep.
-- Tests: `TestStampCommitIdentityPutsTheEnvironmentOnEveryCommit` (root), `TestResolveGitAuthor*`
-  (`backend/api/`), `TestAuthorIdentityFromEnv*`, `TestProjectIdentityLayersEachHalfOnItsOwn` and
+  caller scopes. `gitAuthorOf` (`backend/api/git.go`) is its one caller in the API, and every caller
+  hands it the row it already holds. The project's git status, the commit preview's metadata and
+  `GET /api/projects/{projectID}/git-author` all answer from it; the last is what Settings shows as each
+  identity field's placeholder. The dedicated route is there so that form does not pay for the
+  status snapshot — a working-tree read, HEAD, the ahead/behind count — to ask who a commit is authored
+  as. When nothing names an identity the pair is empty, and the form says so in words.
+- Tests: `TestStampCommitIdentityPutsTheEnvironmentOnEveryCommit` (root),
+  `TestGitAuthorOfReadsTheProjectsOwnRepository` and
+  `TestHandleGitAuthor*` (`backend/api/`), `TestAuthorIdentityFromEnv*`,
+  `TestProjectIdentityLayersEachHalfOnItsOwn` and
   `TestCommandWithIdentityReplacesTheInheritedIdentity` (`backend/git/`),
   `TestUpdateProjectGitAuthor*` (`backend/api/`), `TestProjectGitAuthorRoundTrip` (`backend/store/`), and
   `TestCommitAndMerge_CarriesTheProjectsOwnIdentity` (`backend/exec/`), which is the one that commits for

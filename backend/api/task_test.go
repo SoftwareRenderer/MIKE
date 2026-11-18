@@ -1502,66 +1502,38 @@ func TestNestingATaskDropsItsBaseBranch(t *testing.T) {
 	}
 }
 
-// authorStore is a stand-in store for resolveGitAuthor, which reads only the project's path.
-type authorStore struct{ project *types.Project }
-
-func (s authorStore) GetProject(string) (*types.Project, error) { return s.project, nil }
-
-// TestResolveGitAuthorInventsNoCommitter covers a project whose repository sets no identity and
-// whose server sets none either: the answer is empty, so the commit dialog shows no name.
-func TestResolveGitAuthorInventsNoCommitter(t *testing.T) {
+// TestGitAuthorOfReadsTheProjectsOwnRepository: the config read is scoped to the repository at this
+// row's Path. The layering of the three sources is held by
+// TestProjectAuthorIdentityAnswersTheProjectFirst.
+func TestGitAuthorOfReadsTheProjectsOwnRepository(t *testing.T) {
 	origName, origEmail := git.AuthorIdentity()
 	defer git.SetAuthorIdentity(origName, origEmail)
-	git.SetAuthorIdentity("", "")
-	// HOME points at an empty directory so that the person running this test cannot answer through
-	// their own global git config.
+	// An empty HOME keeps this person's own global git config out of the answer.
 	t.Setenv("HOME", t.TempDir())
 
-	dir := testgit.EmptyRepo(t)
-	name, email := resolveGitAuthor("p1", authorStore{&types.Project{ID: "p1", Path: dir}})
-	if name != "" || email != "" {
-		t.Errorf("got %q <%q>, want an empty pair when nothing names an identity", name, email)
-	}
-}
+	mine := testgit.Repo(t)
+	testgit.Git(t, mine, "config", "user.name", "Repo Person")
+	testgit.Git(t, mine, "config", "user.email", "repo@example.com")
+	theirs := testgit.Repo(t)
+	testgit.Git(t, theirs, "config", "user.name", "Someone Else")
+	testgit.Git(t, theirs, "config", "user.email", "other@example.com")
 
-// TestResolveGitAuthorPrefersTheIdentityStampedAtBoot covers an identity configured for the server
-// winning over the one the repository sets for itself.
-func TestResolveGitAuthorPrefersTheIdentityStampedAtBoot(t *testing.T) {
-	origName, origEmail := git.AuthorIdentity()
-	defer git.SetAuthorIdentity(origName, origEmail)
-	t.Setenv("HOME", t.TempDir())
 	git.SetAuthorIdentity("Boot Person", "boot@example.com")
-
-	dir := testgit.Repo(t)
-	name, email := resolveGitAuthor("p1", authorStore{&types.Project{ID: "p1", Path: dir}})
-	if name != "Boot Person" || email != "boot@example.com" {
-		t.Errorf("got %q <%q>, want the stamped identity to outrank the repository's %q", name, email, testgit.AuthorName)
-	}
-}
-
-// TestResolveGitAuthorPrefersTheProjectsOwnIdentity: the identity a project's row names outranks the
-// one stamped at boot and the one the repository sets for itself, and each half falls through on its
-// own — the screen must not show a name the commit will not carry.
-func TestResolveGitAuthorPrefersTheProjectsOwnIdentity(t *testing.T) {
-	origName, origEmail := git.AuthorIdentity()
-	defer git.SetAuthorIdentity(origName, origEmail)
-	t.Setenv("HOME", t.TempDir())
-	git.SetAuthorIdentity("Boot Person", "boot@example.com")
-
-	dir := testgit.Repo(t)
-	name, email := resolveGitAuthor("p1", authorStore{&types.Project{ID: "p1", Path: dir, GitAuthorName: "Ada Lovelace"}})
-	if name != "Ada Lovelace" || email != "boot@example.com" {
-		t.Errorf("got %q <%q>, want the project's name over the stamped email", name, email)
+	if name, email := gitAuthorOf(&types.Project{ID: "p1", Path: mine, GitAuthorName: "Ada Lovelace"}); name != "Ada Lovelace" || email != "boot@example.com" {
+		t.Errorf("the row's half: got %q <%q>, want the row's name over the stamped email", name, email)
 	}
 
-	if name, email := resolveGitAuthor("p1", authorStore{&types.Project{ID: "p1", Path: dir}}); name != "Boot Person" || email != "boot@example.com" {
-		t.Errorf("a row naming nothing got %q <%q>, want the stamped identity", name, email)
-	}
-
-	// An unstamped server leaves the half neither the project nor the server named to the repository.
+	// Unstamped, each half the row does not name comes from its own repository.
 	git.SetAuthorIdentity("", "")
-	name, email = resolveGitAuthor("p1", authorStore{&types.Project{ID: "p1", Path: dir, GitAuthorEmail: "ada@example.com"}})
-	if name != testgit.AuthorName || email != "ada@example.com" {
-		t.Errorf("got %q <%q>, want the project's email over the repository's name", name, email)
+	if name, email := gitAuthorOf(&types.Project{ID: "p1", Path: mine, GitAuthorEmail: "ada@example.com"}); name != "Repo Person" || email != "ada@example.com" {
+		t.Errorf("an unnamed half: got %q <%q>, want this project's repository to name the person", name, email)
+	}
+	if name, email := gitAuthorOf(&types.Project{ID: "p2", Path: theirs}); name != "Someone Else" || email != "other@example.com" {
+		t.Errorf("a second project: got %q <%q>, want its own repository's identity, not the first project's", name, email)
+	}
+
+	// Nothing names an identity anywhere: the pair is empty.
+	if name, email := gitAuthorOf(&types.Project{ID: "p3", Path: testgit.EmptyRepo(t)}); name != "" || email != "" {
+		t.Errorf("nothing configured: got %q <%q>, want the empty pair", name, email)
 	}
 }

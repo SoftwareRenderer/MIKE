@@ -614,8 +614,8 @@ func TestCommitPreviewStream(t *testing.T) {
 	if metadata == nil {
 		t.Fatal("no metadata event — the dialog opens on author_name, author_email and merge_target")
 	}
-	// The dialog reads all three keys before the first token. resolveGitAuthor always answers an
-	// identity, so the author pair is non-empty; merge_target is empty until the task has a branch to
+	// The dialog reads all three keys before the first token. gitAuthorOf answers an
+	// identity here, so the author pair is non-empty; merge_target is empty until the task has a branch to
 	// merge into, so it is held to presence.
 	for _, key := range []string{"author_name", "author_email"} {
 		if v, ok := metadata[key].(string); !ok || v == "" {

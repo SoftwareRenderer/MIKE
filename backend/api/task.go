@@ -699,24 +699,6 @@ func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabl
 	}
 }
 
-// resolveGitAuthor returns the name and email that a commit in this project would carry: the half the
-// project's own row names, then this server's, then the repository's config. An empty result means
-// nothing configures an identity anywhere, and the caller then shows none rather than inventing one.
-func resolveGitAuthor(projectID string, s interface {
-	GetProject(id string) (*types.Project, error)
-}) (string, string) {
-	dir, projectName, projectEmail := "", "", ""
-	if proj, err := s.GetProject(projectID); err == nil {
-		dir, projectName, projectEmail = proj.Path, proj.GitAuthorName, proj.GitAuthorEmail
-	}
-	return git.ProjectAuthorIdentity(projectName, projectEmail, func(key string) string {
-		if dir == "" {
-			return ""
-		}
-		return git.RepoConfig(dir, key)
-	})
-}
-
 // HandleCommitPreviewStream streams commit message generation via SSE.
 func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
@@ -732,8 +714,12 @@ func (h *TaskHandler) HandleCommitPreviewStream(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Send metadata immediately (author + merge target)
-	authorName, authorEmail := resolveGitAuthor(projectID, h.store)
+	// Send metadata immediately (author + merge target). A row that cannot be read names nobody, so the
+	// dialog shows no author.
+	var authorName, authorEmail string
+	if project, err := h.store.GetProject(projectID); err == nil {
+		authorName, authorEmail = gitAuthorOf(project)
+	}
 	mergeTarget := h.executor.ResolveMergeTarget(projectID, task)
 	sse.EventJSON("metadata", map[string]string{
 		"author_name":  authorName,

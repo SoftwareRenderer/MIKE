@@ -2,13 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, fireEvent, cleanup, waitFor } from '@testing-library/svelte';
 import ConfigModal from '$lib/components/ConfigModal.svelte';
 import type { Config, Project } from '$lib/types';
-import { updateConfig, updateProject } from '$lib/api';
+import { updateConfig, updateProject, getProjectGitAuthor } from '$lib/api';
 import { appStore } from '$lib/stores';
 
-// Stub only the two writes; the rest of $lib/api keeps its behaviour.
+// Stub only the two writes and the identity preview; the rest of $lib/api keeps its behaviour.
 vi.mock('$lib/api', async (importOriginal) => {
     const actual = await importOriginal<typeof import('$lib/api')>();
-    return { ...actual, updateConfig: vi.fn(), updateProject: vi.fn() };
+    return { ...actual, updateConfig: vi.fn(), updateProject: vi.fn(), getProjectGitAuthor: vi.fn() };
 });
 
 const TRAILER_TOGGLE = 'button[aria-label="Assisted-by line in commit messages"]';
@@ -33,6 +33,9 @@ beforeEach(() => {
     }));
     vi.mocked(updateConfig).mockReset();
     vi.mocked(updateProject).mockReset();
+    // The default is the empty state: nothing names an identity.
+    vi.mocked(getProjectGitAuthor).mockReset();
+    vi.mocked(getProjectGitAuthor).mockResolvedValue({ authorName: '', authorEmail: '' });
 });
 
 afterEach(() => {
@@ -183,6 +186,47 @@ describe('Settings project tab', () => {
 
         expect(vi.mocked(updateProject).mock.calls[0]).toEqual(['proj-1', { git_author_email: '' }]);
         expect(appStore.selectedProject?.git_author_email).toBe('');
+    });
+
+    it('previews the identity the server would commit as', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        openProject();
+        vi.mocked(getProjectGitAuthor).mockResolvedValue({ authorName: 'Ada Lovelace', authorEmail: 'ada@example.com' });
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+        await openProjectTab(container);
+
+        await waitFor(() => expect(getProjectGitAuthor).toHaveBeenCalledWith('proj-1'), { timeout: 1000 });
+        expect((container.querySelector(NAME_INPUT) as HTMLInputElement).placeholder).toBe('Ada Lovelace');
+        expect((container.querySelector(EMAIL_INPUT) as HTMLInputElement).placeholder).toBe('ada@example.com');
+        // A preview is not an answer: the row still names no identity.
+        expect((container.querySelector(NAME_INPUT) as HTMLInputElement).value).toBe('');
+    });
+
+    it('names the empty state where no identity is configured', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        openProject();
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+        await openProjectTab(container);
+
+        await waitFor(() => expect(getProjectGitAuthor).toHaveBeenCalledWith('proj-1'), { timeout: 1000 });
+        expect((container.querySelector(NAME_INPUT) as HTMLInputElement).placeholder).toBe('No identity configured');
+        expect((container.querySelector(EMAIL_INPUT) as HTMLInputElement).placeholder).toBe('No identity configured');
+    });
+
+    it('re-reads the preview once a Save has moved an identity half', async () => {
+        vi.mocked(updateConfig).mockResolvedValue(makeConfig());
+        vi.mocked(updateProject).mockResolvedValue(openProject());
+        vi.mocked(getProjectGitAuthor).mockResolvedValue({ authorName: 'Ada Lovelace', authorEmail: 'ada@example.com' });
+        const { container } = render(ConfigModal, { props: { config: makeConfig(), onClose: vi.fn(), onSaved: vi.fn() } });
+        await openProjectTab(container);
+        await waitFor(() => expect(getProjectGitAuthor).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        fireEvent.input(container.querySelector(NAME_INPUT)!, { target: { value: 'Ada Lovelace' } });
+        fireEvent.click(container.querySelector('button[title="Save settings"]')!);
+        await waitFor(() => expect(updateProject).toHaveBeenCalledTimes(1), { timeout: 1000 });
+
+        // A row that names a name changes what the blank email falls back to.
+        await waitFor(() => expect(getProjectGitAuthor).toHaveBeenCalledTimes(2), { timeout: 1000 });
     });
 
     it('reads a name padded by the form as the name the row already holds', async () => {
