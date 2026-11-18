@@ -112,43 +112,78 @@ sweep that keeps the branch a live task's row names).
 ## Submodules: share the person's copy, never re-fetch
 
 Nothing a task does fetches a submodule. The worktree is given its submodules from the repository the
-person already populated, and a task never causes a clone.
+person already populated, and the one fetch of a repository-chosen URL happens at import.
 
 - **Neither clone nor `worktree add` populates a submodule.** `git worktree add` leaves the path an empty
   directory, and `CloneArgs` is not `--recursive`. `git status` stays clean over an empty gitlink, which is
   why the loss is silent rather than noisy.
 - **A linked worktree has a submodule gitdir of its own**, at `<gitDir>/worktrees/<admin>/modules/<name>`.
-  So `git submodule update --init` inside one clones the `.gitmodules` URL again, per task. `--reference`
-  does not avoid it: the clone of the URL has to complete before the reference is consulted.
+  So `git submodule update --init` inside one clones the `.gitmodules` URL again, per task — and it is also
+  where **a project that is itself a `git worktree`** keeps its stores. `walkSubmodules` therefore takes the
+  checkout's own gitdir (`checkoutGitDir`) as the store root rather than the common directory:
+  a project added as a worktree of someone's clone has its copies under its admin directory and none in the
+  common one.
+- **git keys a store by the `.gitmodules` section, not by the path** (measured, git 2.43):
+  `[submodule "shared-modules"] path = build-aux/flatpak/shared-modules` populates
+  `<gitDir>/modules/shared-modules`. Deriving `<gitDir>/modules/<path>` reports that submodule as never
+  populated — and the `submodule update --init` the refusal tells the person to run is then a **no-op**, git
+  considering it populated already, so the task fails on every retry. `resolveStore` asks the person's own
+  checkout for the gitdir its `.git` pointer names, and accepts the answer only inside that `modules` tree, which is
+  what the container pins read-only. The path derivation — the shape `git submodule add` writes, section named
+  after the path — is the fallback for a store whose checkout is gone.
+- **A store whose working copy the person deleted cannot be opened at all**: git changes into the directory
+  `core.worktree` names before it runs a single command. That state is refused with the sentence that fixes it
+  rather than with git's complaint about a directory it could not enter.
 - **What costs nothing is a linked worktree of the submodule's own shared store:**
-  `git -C <gitDir>/modules/<path> worktree add --detach <worktree>/<path> <sha>`. No clone, no duplicate
+  `git -C <gitDir>/modules/<name> worktree add --detach <worktree>/<path> <sha>`. No clone, no duplicate
   objects, no network. `PopulateSubmodules` (`backend/git/submodules.go`) does exactly this, walking nested
-  stores at `<gitDir>/modules/<outer>/modules/<inner>`, parents first.
+  stores at `<parent store>/modules/<name>`, parents first.
 - **The listing comes from the commit**, `git ls-tree -r -z` on the task's own commit, never from a working
-  tree. What an agent later writes cannot then choose which paths a container mounts. `SubmodulePaths`
-  walks the same tree without creating anything, and every container — first start, mode change, recovery —
-  derives its pins from it (`docs/sandbox-runtime.md → A task worktree's git pointer is pinned read-only`).
-- **MIKE never reads a URL out of `.gitmodules`.** `ensureCommit` answers a pointer whose commit the shared
-  store lacks with one `git fetch` *in that store*, using the store's own remote, bounded by the turn's
-  context. `.gitmodules` is text from a repository, and this runs in the server process, where
-  `credential.helper` and `core.sshCommand` are left unfenced on purpose — see *One command constructor*.
-  A store the person never populated stops the task and names the submodule; the empty directory is never
-  handed to the agent as if it were the code.
+  tree. What an agent later writes cannot then choose which paths a container mounts. `SubmodulePaths` walks
+  the same tree without creating anything, and every container — first start, mode change, recovery — derives
+  its pins from it (`docs/sandbox-runtime.md → A task worktree's git pointer is pinned read-only`).
+- **MIKE never parses `.gitmodules`.** `ensureCommit` answers a pointer whose commit the shared store lacks
+  with one `git fetch` *in that store*, using the store's own remote, bounded by the turn's context. A store
+  the person never populated stops the task and names the submodule, the checkout to work in, and the command
+  to run there; the empty directory is never handed to the agent as if it were the code.
 - **That fetch is a tail, not the common path.** `fetch.recurseSubmodules` is `on-demand` by default, so a
-  person's own `git pull` already brings a submodule commit the new superproject history names. The tail is
-  a bump committed locally, or a fetch that ran with recursion turned off.
-- **Removal mirrors the project's own.** The store keeps a registration per task ever given that submodule,
-  so `RemoveWorktree` and `GarbageCollect` prune each store through `PruneSubmoduleWorktrees`. The admin
-  directory's name is never used: git derives it from the checkout's basename and disambiguates a repeat as
-  `lib`, `lib1`, `lib2`.
+  person's own `git pull` already brings a submodule commit the new superproject history names. The tail is a
+  bump committed locally, or a fetch that ran with recursion turned off.
+- **Import is where a repository's own URLs get fetched** — `InitSubmodules`, called from `HandleCreate` and
+  `HandleClone`. It runs git's `submodule update --init --recursive <path>` for each gitlink the *commit*
+  names, and it is the only place MIKE spends the operator's credentials (`credential.helper`, their ssh
+  agent) on a destination that came out of repository text. Task start never calls it: a task starts on a path
+  an LLM turn reaches, with nobody in front of it. And `--init` records the fetched URL in the person's
+  `.git/config` and as the store's `origin`. That launders it into the `ensureCommit` fetch above, which is
+  trusted precisely because the person created that store. A submodule that will not fetch is reported and
+  skipped, so an unreachable upstream never costs a person the project; the task that needs it names it.
+- **Import leaves a checkout of the person's alone.** `git submodule update` checks the recorded commit out.
+  Doing that to a submodule the person has committed into detaches their copy off their work: measured, their
+  committed file vanished from the tree and HEAD moved back to the recorded sha. `checkoutStateOf`
+  fetches only where the working copy is absent, counts one already at the recorded commit as populated, and
+  reports a dirty one, a checkout standing on another commit, and content with no git pointer as left alone.
+- **A submodule's transport is decided by `GIT_ALLOW_PROTOCOL`, read in the child git spawns to parse the
+  URL.** A `-c protocol.file.allow=never` on the `git submodule` command line never reaches that child, and a
+  pinned `protocol.file.allow=never` does not help either: an allowlist naming `file` beats it. So
+  `submoduleProtocols` omits `file` from the clone's list, which is what refuses a `.gitmodules` entry pointing
+  at a directory on this machine — measured against a host whose own configuration allows the transport. `ext`
+  is absent from the list as well.
+- **Removal mirrors the project's own.** The store keeps a registration per task ever given that submodule, so
+  `RemoveWorktree` and `GarbageCollect` prune each store through `PruneSubmoduleWorktrees`, which sweeps from
+  that same checkout's-own-gitdir root. The admin directory's name is never used: git derives it from the
+  checkout's basename and disambiguates a repeat as `lib`, `lib1`, `lib2`.
 - **What a sandboxed task cannot do is record a new submodule commit.** The store sits under the project's
   read-only `.git` mount, so `git commit` inside a submodule fails there. The submodule's *content* keeps
   the worktree's own mode, so an attempt shows up as dirty status instead of vanishing quietly.
 - A project image build still omits submodule sources: `git archive` emits a gitlink path as an empty
   directory. Nothing about this section changes that.
 
-Tests: `backend/git/submodules_test.go` — populated with the upstream deleted, nested stores, an
-unpopulated store, the stale-commit fetch, idempotence, and the prune.
+Tests: `backend/git/submodules_test.go` — populated with the upstream deleted, nested stores, section names
+that differ from the path, a project that is itself a worktree, a store whose working copy is gone, an
+unpopulated store, the stale-commit fetch, idempotence and the prune. Its `InitSubmodules` tests cover fetching
+what is missing, leaving the person's checkout untouched, importing despite an unreachable upstream, refusing a
+local submodule URL, and fetching only what the commit names. `backend/api/project_submodules_test.go` keeps an
+unfetchable submodule from costing a person their project.
 
 ## Stash: the bracket and the identity
 

@@ -1,12 +1,24 @@
 package exec
 
 import (
+	"path/filepath"
 	"testing"
 
 	"mike/backend/sandbox"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
+
+// taskCheckoutFixture is the shape production hands the create-options builder: a project checkout, and the
+// task's worktree created off it. Reading the submodule set needs both — the worktree's commit and the stores
+// the checkout populated.
+func taskCheckoutFixture(t *testing.T) (project, worktree string) {
+	t.Helper()
+	project = testgit.Repo(t)
+	worktree = filepath.Join(t.TempDir(), "wt")
+	testgit.Git(t, project, "worktree", "add", "--detach", worktree, "HEAD", "-q")
+	return project, worktree
+}
 
 // The builder must carry every field the project configured — that is the failure it prevents, a
 // field present in one create path and missing in another.
@@ -18,14 +30,11 @@ import (
 // Configuration, where the mount and the toolchain variable are both visible per project.
 func TestSandboxCreateOpts_CarriesEveryConfiguredField(t *testing.T) {
 	t.Parallel()
-	// The builder reads the submodule set off the worktree, so the fixture is a real repository.
-	worktree := t.TempDir()
-	testgit.Git(t, worktree, "init", "-q")
-	testgit.Git(t, worktree, "commit", "-q", "--allow-empty", "-m", "one")
+	project, worktree := taskCheckoutFixture(t)
 
 	setup := &taskExecSetup{
 		task:         &types.Task{ID: "brave-amber-quartz"},
-		project:      &types.Project{ID: "proj-1", Name: "example.com"},
+		project:      &types.Project{ID: "proj-1", Name: "example.com", Path: project},
 		worktreePath: worktree,
 		sandboxOpts: sandbox.SandboxOpts{
 			NetworkIsolation: true,

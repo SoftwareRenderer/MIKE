@@ -122,10 +122,23 @@ func validateScpLikeCloneURL(s string, colon int) error {
 	return nil
 }
 
-// CloneEnv returns the environment for a clone, including the GIT_ALLOW_PROTOCOL fence.
-// It returns a complete environment slice because os/exec.Cmd.Env replaces rather than merges.
+// CloneEnv returns the environment for a clone, including the GIT_ALLOW_PROTOCOL fence. It returns a complete
+// environment slice because os/exec.Cmd.Env replaces rather than merges.
 func CloneEnv() []string {
 	return Env("GIT_ALLOW_PROTOCOL=" + strings.Join(CloneAllowedProtocols, ":"))
+}
+
+// submoduleProtocols is the transport allowlist for a remote the repository chose — a submodule's URL from
+// `.gitmodules` — and it is CloneAllowedProtocols without `file`, which would be a read of anywhere the server
+// user can reach. GIT_ALLOW_PROTOCOL decides a submodule's transport: read in the child git spawns to parse the
+// URL, it beats both a command-line refusal and the person's own `protocol.<name>.allow`.
+var submoduleProtocols = []string{"http", "https", "git", "ssh"}
+
+// submoduleEnv is CloneEnv with that narrower list. widen is extra environment a fixture appends, which
+// os/exec's last-wins lets it override the allowlist with; production passes none, and the function stays
+// unexported so no call site can widen the fence.
+func submoduleEnv(widen []string) []string {
+	return Env(append([]string{"GIT_ALLOW_PROTOCOL=" + strings.Join(submoduleProtocols, ":")}, widen...)...)
 }
 
 // CloneContext clones under ctx on the allowed transports, reporting the percentage whenever it increases.

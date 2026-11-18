@@ -362,6 +362,8 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 
 - **`git.Command`/`git.CommandContext` are the only way this repo starts git** — the execution fence cannot
   be forged from a call site.
+- **MIKE fetches a submodule only at project import** — a task start never reaches the network for one; it
+  stops, naming the submodule, the checkout and the command. `docs/git-operations.md → Submodules`.
 - **The execution fence pins every setting that names a program by key**; a program the repository picks
   *by name* has no key to pin, which is what the read-only git pointer stops.
 - **A stash entry is identified by hash, never by position** — the stack is shared by every worktree and

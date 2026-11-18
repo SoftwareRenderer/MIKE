@@ -1217,13 +1217,31 @@ func HasGitDir(path string) bool {
 // submodule names from its `.git` file. What is shared rather than per-checkout lives here: the local exclude
 // file, and the `modules` tree of submodule stores.
 func CommonGitDir(path string) (string, error) {
-	out, err := Run(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
-	gitDir := strings.TrimSpace(out)
-	if err != nil || gitDir == "" {
+	return absGitDir(path, "--git-common-dir")
+}
+
+// checkoutGitDir is the gitdir of a checkout itself: the common directory for an ordinary checkout, and the
+// admin directory for one `git worktree add` made, which keeps its own `modules` tree beside it. Ask this
+// rather than CommonGitDir wherever the per-checkout answer is what matters; an empty path is refused rather
+// than asked, because git would answer for whichever repository this process happens to sit in.
+func checkoutGitDir(path string) (string, error) {
+	if path == "" {
+		return "", fmt.Errorf("no checkout to find the git directory of")
+	}
+	return absGitDir(path, "--git-dir")
+}
+
+// absGitDir asks git one of its two directory questions and requires an absolute answer: a relative one is
+// git quoting the path back the way the caller fed it, which a later join would silently resolve against the
+// wrong directory.
+func absGitDir(path, which string) (string, error) {
+	out, err := Run(path, "rev-parse", "--path-format=absolute", which)
+	dir := strings.TrimSpace(out)
+	if err != nil || dir == "" {
 		return "", fmt.Errorf("find the git directory of %s: %s", path, gitMessage(out, err))
 	}
-	if !filepath.IsAbs(gitDir) {
-		return "", fmt.Errorf("find the git directory of %s: git answered %q", path, gitDir)
+	if !filepath.IsAbs(dir) {
+		return "", fmt.Errorf("find the git directory of %s: git answered %q", path, dir)
 	}
-	return gitDir, nil
+	return dir, nil
 }

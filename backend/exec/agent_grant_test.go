@@ -5,7 +5,6 @@ import (
 
 	"mike/backend/agent"
 	ext "mike/backend/extensions"
-	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -74,12 +73,9 @@ func TestSandboxCreateOpts_GrantsOnlyTheTasksAgent(t *testing.T) {
 	t.Parallel()
 	te := grantExecutor(t, true)
 
-	// sandboxCreateOpts reads the submodule set off the worktree, so the fixture is a real repository.
-	worktree := t.TempDir()
-	testgit.Git(t, worktree, "init", "-q")
-	testgit.Git(t, worktree, "commit", "-q", "--allow-empty", "-m", "one")
+	project, worktree := taskCheckoutFixture(t)
 
-	grantedRun := &taskExecSetup{serverURL: agentURL, worktreePath: worktree}
+	grantedRun := &taskExecSetup{serverURL: agentURL, worktreePath: worktree, project: &types.Project{Path: project}}
 	opts, err := te.sandboxCreateOpts(grantedRun, "ubuntu:latest", false)
 	if err != nil {
 		t.Fatalf("sandboxCreateOpts: %v", err)
@@ -89,7 +85,7 @@ func TestSandboxCreateOpts_GrantsOnlyTheTasksAgent(t *testing.T) {
 		t.Errorf("task on agent://pi got %+v, want its one granted mount", opts.AgentSandbox)
 	}
 
-	llmRun := &taskExecSetup{serverURL: llmURL, worktreePath: worktree}
+	llmRun := &taskExecSetup{serverURL: llmURL, worktreePath: worktree, project: &types.Project{Path: project}}
 	if opts, err := te.sandboxCreateOpts(llmRun, "ubuntu:latest", false); err != nil {
 		t.Fatalf("sandboxCreateOpts: %v", err)
 	} else if opts.AgentSandbox != nil {
@@ -98,7 +94,8 @@ func TestSandboxCreateOpts_GrantsOnlyTheTasksAgent(t *testing.T) {
 	}
 
 	// Switching provider during a run changes the loop's modelConfig, and the approved folders follow it.
-	switched := &taskExecSetup{serverURL: agentURL, provider: &modelConfig{serverURL: llmURL}, worktreePath: worktree}
+	switched := &taskExecSetup{serverURL: agentURL, provider: &modelConfig{serverURL: llmURL},
+		worktreePath: worktree, project: &types.Project{Path: project}}
 	if opts, err := te.sandboxCreateOpts(switched, "ubuntu:latest", false); err != nil {
 		t.Fatalf("sandboxCreateOpts: %v", err)
 	} else if opts.AgentSandbox != nil {

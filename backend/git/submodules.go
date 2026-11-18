@@ -1,10 +1,10 @@
 package git
 
-// Submodules: a task's worktree is given its submodule working copies from a linked worktree of the
-// person's own store, `<gitDir>/modules/<path>`, because `git submodule update --init` in a linked worktree
-// re-clones the `.gitmodules` URL once per task. MIKE never reads a URL out of `.gitmodules` — that text is
-// repository data, and this runs where `credential.helper` and `core.sshCommand` are unfenced — and fetches
-// only inside a store the person created, over that store's own remote.
+// Submodules: a task's worktree is given its submodule working copies as linked worktrees of the person's own
+// shared stores, because `git submodule update --init` in a linked worktree re-clones the `.gitmodules` URL
+// once per task. A store is found by asking git, never derived from the path, and MIKE never parses
+// `.gitmodules` itself. The one fetch of a repository-chosen URL is InitSubmodules, at project import only; a
+// task that finds no copy stops rather than reaching the network.
 //
 // docs/git-operations.md → Submodules: share the person's copy, never re-fetch.
 
@@ -42,18 +42,23 @@ var objectIDRe = regexp.MustCompile(`^[0-9a-f]{40}$|^[0-9a-f]{64}$`)
 type submodule struct {
 	// path is the submodule directory, workspace-relative (the path the superproject records).
 	path string
+	// name is that path as the parent's own tree records it, which the fallback derivation uses.
+	name string
 	// sha is the commit the superproject records for it.
 	sha string
-	// store is the shared gitdir the person's own checkout populated: <gitDir>/modules/<path>.
+	// store is the shared gitdir the person's own checkout populated, found by resolveStore.
 	store string
 }
 
 // PopulateSubmodules gives the worktree every submodule its own commit names, nested ones included, and
 // returns those paths parent-first; one already at that commit is left alone. A store the person never
 // populated is an error naming it, never an empty directory handed to the agent.
-func PopulateSubmodules(ctx context.Context, worktreePath string) ([]string, error) {
+//
+// projectPath is the checkout the person populated, whose submodule working trees name the stores this hands
+// out; worktreePath is the task's directory the checkouts are built in.
+func PopulateSubmodules(ctx context.Context, worktreePath, projectPath string) ([]string, error) {
 	var out []string
-	err := walkSubmodules(worktreePath, func(s submodule) error {
+	err := walkSubmodules(worktreePath, projectPath, func(s submodule) error {
 		if err := ensureCommit(ctx, s.store, s.sha); err != nil {
 			return fmt.Errorf("submodule %s: %w", s.path, err)
 		}
@@ -72,9 +77,9 @@ func PopulateSubmodules(ctx context.Context, worktreePath string) ([]string, err
 // SubmodulePaths lists the submodules a worktree's own commit names, in the order PopulateSubmodules walks,
 // and creates nothing. Every path that builds a container derives its git-pointer pins from here, so a
 // rebuild cannot forget a pin the first create remembered.
-func SubmodulePaths(worktreePath string) ([]string, error) {
+func SubmodulePaths(worktreePath, projectPath string) ([]string, error) {
 	var out []string
-	err := walkSubmodules(worktreePath, func(s submodule) error {
+	err := walkSubmodules(worktreePath, projectPath, func(s submodule) error {
 		out = append(out, s.path)
 		return nil
 	})
@@ -87,20 +92,23 @@ func SubmodulePaths(worktreePath string) ([]string, error) {
 // walkSubmodules walks the gitlinks of a worktree's own commit out through each submodule's shared store,
 // calling visit parents first. A missing store, or one without the commit its superproject records, is an
 // error rather than a skipped branch: skipping it would under-pin the container.
-func walkSubmodules(worktreePath string, visit func(submodule) error) error {
-	// The common gitdir holds both the objects and the `modules` tree, and answers for a store that has no
-	// working tree of its own.
-	gitDir, err := CommonGitDir(worktreePath)
+func walkSubmodules(worktreePath, projectPath string, visit func(submodule) error) error {
+	// The checkout's own gitdir holds the `modules` tree it populated: the common directory for an ordinary
+	// checkout, the admin directory for a project that is itself a `git worktree`. A checkout that is gone
+	// leaves the task's worktree to read the shared objects, and the derivation alone to find stores by.
+	gitDir, err := checkoutGitDir(projectPath)
 	if err != nil {
-		return err
+		if gitDir, err = CommonGitDir(worktreePath); err != nil {
+			return err
+		}
 	}
 	head, err := commitAt(worktreePath, "HEAD")
 	if err != nil {
 		return fmt.Errorf("resolve the task worktree's commit: %w", err)
 	}
 
-	// A node is one repository's commit and where its checkout lives relative to the worktree; its store is
-	// also where its trees are read from.
+	// A node is one repository's commit, the store its trees are read from, and where its checkout lives
+	// relative to the task's worktree.
 	type node struct {
 		store  string
 		sha    string
@@ -118,14 +126,29 @@ func walkSubmodules(worktreePath string, visit func(submodule) error) error {
 		if err != nil {
 			return err
 		}
+		modulesDir := filepath.Join(n.store, submoduleModulesDir)
 		for _, link := range links {
 			if count++; count > maxSubmoduleWalk {
 				return fmt.Errorf("more than %d submodules in this repository", maxSubmoduleWalk)
 			}
-			if _, err := os.Stat(link.store); err != nil {
-				return fmt.Errorf("submodule %s has no local copy at %s: populate it in the project checkout (git submodule update --init %s) before starting a task",
-					link.path, link.store, link.path)
+			// A project moved out from under a live task: no checkout to name, so only the derivation.
+			var checkout string
+			if projectPath != "" {
+				checkout = filepath.Join(projectPath, filepath.FromSlash(link.path))
 			}
+			store := resolveStore(modulesDir, checkout, link.name)
+			if store == "" {
+				return fmt.Errorf("submodule %s has no local copy under %s: populate it in the project checkout at %s (git submodule update --init --recursive %s) before starting a task",
+					link.path, modulesDir, projectPath, link.path)
+			}
+			if work := worktreeOf(store); work != "" {
+				// The store is read through the person's own copy, so a missing one is not a state to read past.
+				if _, err := os.Stat(work); err != nil {
+					return fmt.Errorf("submodule %s's local copy at %s has no working tree — %s is gone: restore it in the project checkout at %s (git submodule update --init --recursive %s) before starting a task",
+						link.path, store, work, projectPath, link.path)
+				}
+			}
+			link.store = store
 			if err := visit(link); err != nil {
 				return err
 			}
@@ -133,10 +156,60 @@ func walkSubmodules(worktreePath string, visit func(submodule) error) error {
 				logging.For(logging.Git).Warnf("stopped walking submodules at %s: depth limit %d reached", link.path, maxSubmoduleWalk)
 				continue
 			}
-			walk = append(walk, node{store: link.store, sha: link.sha, prefix: link.path, depth: n.depth + 1})
+			walk = append(walk, node{store: store, sha: link.sha, prefix: link.path, depth: n.depth + 1})
 		}
 	}
 	return nil
+}
+
+// resolveStore names the shared gitdir under modulesDir that holds the person's copy of the submodule whose
+// working tree is checkout, or "" where they never populated one. git keys that directory by the
+// `.gitmodules` section rather than by the path, so the checkout's own answer is asked first and the
+// `<modulesDir>/<name>` derivation is the fallback for a store whose checkout is gone.
+func resolveStore(modulesDir, checkout, name string) string {
+	if asked := storeOfCheckout(checkout); asked != "" {
+		// Only a store inside this checkout's own `modules` tree counts: that tree is what the container pins
+		// read-only. An answer naming metadata elsewhere on the disk is another repository's.
+		if dir, err := fsutil.Contained(asked, []string{modulesDir}); err == nil {
+			return dir
+		}
+	}
+	if derived := filepath.Join(modulesDir, filepath.FromSlash(name)); isGitDir(derived) {
+		return derived
+	}
+	return ""
+}
+
+// storeOfCheckout is the gitdir the checkout at dir uses, or "" where there is no checkout to ask. The git
+// pointer is looked for before git is, because rev-parse walks up: an unpopulated submodule, or an empty path,
+// would otherwise answer with somebody else's repository.
+func storeOfCheckout(dir string) string {
+	if dir == "" || !HasGitDir(dir) {
+		return ""
+	}
+	asked, err := absGitDir(dir, "--git-dir")
+	if err != nil {
+		return ""
+	}
+	return asked
+}
+
+// worktreeOf is the working tree a store serves, or "" where its configuration names none — the form a bare
+// repository is left in. The store's own `config` is read by name because git changes into the working tree
+// before it runs a single command, so a store whose copy is gone cannot be opened as a repository at all.
+func worktreeOf(store string) string {
+	out, err := Run("", "config", "--file", filepath.Join(store, "config"), "--get", "core.worktree")
+	if err != nil {
+		return ""
+	}
+	work := strings.TrimSpace(out)
+	if work == "" {
+		return ""
+	}
+	if !filepath.IsAbs(work) {
+		work = filepath.Join(store, work)
+	}
+	return filepath.Clean(work)
 }
 
 // gitlinks lists the gitlinks of one commit as submodule rows, NUL-delimited so a path with a quote or a
@@ -162,9 +235,9 @@ func gitlinks(store, sha, prefix string) ([]submodule, error) {
 			return nil, err
 		}
 		links = append(links, submodule{
-			path:  path.Join(prefix, fields[1]),
-			sha:   meta[2],
-			store: filepath.Join(store, submoduleModulesDir, filepath.FromSlash(fields[1])),
+			path: path.Join(prefix, fields[1]),
+			name: fields[1],
+			sha:  meta[2],
 		})
 	}
 	return links, nil
@@ -208,7 +281,7 @@ func checkoutSubmodule(store, sha, dst string) error {
 
 // checkedOutCommit is the commit the checkout at dir stands on, or "" where there is no checkout.
 func checkedOutCommit(dir string) string {
-	if _, err := os.Lstat(filepath.Join(dir, ".git")); err != nil {
+	if !HasGitDir(dir) {
 		return ""
 	}
 	out, _ := Run(dir, "rev-parse", "--quiet", "HEAD")
@@ -237,8 +310,7 @@ func ensureCommit(ctx context.Context, store, sha string) error {
 	return nil
 }
 
-// remoteURL names the store's origin for a failure a person has to act on, read back from the store's own
-// configuration rather than a repository's working tree.
+// remoteURL names the store's origin, for a failure a person has to act on.
 func remoteURL(store string) string {
 	out, err := Run(store, "config", "--get", "remote.origin.url")
 	if err != nil || strings.TrimSpace(out) == "" {
@@ -247,11 +319,139 @@ func remoteURL(store string) string {
 	return strings.TrimSpace(out)
 }
 
-// PruneSubmoduleWorktrees prunes every submodule store's own worktree registry under a project, the twin of
-// the project's own prune. The admin directory's name is never used, so only git's own sweep over directories
-// that are gone is safe.
+// checkoutState is what the person's own submodule checkout holds, which decides whether fetching into it
+// can cost them anything.
+type checkoutState int
+
+const (
+	// checkoutAbsent is the state a fresh clone and `git worktree add` leave: no working copy at all.
+	checkoutAbsent checkoutState = iota
+	// checkoutAtCommit holds the recorded commit and nothing of the person's own on top of it.
+	checkoutAtCommit
+	checkoutDirty
+	checkoutElsewhere
+	// checkoutNotASubmodule is content with no git pointer, so not git's copy to move.
+	checkoutNotASubmodule
+)
+
+func (s checkoutState) String() string {
+	switch s {
+	case checkoutDirty:
+		return "it holds uncommitted work of the person's own"
+	case checkoutElsewhere:
+		return "it stands on a commit of the person's own, not the one the superproject records"
+	case checkoutNotASubmodule:
+		return "its directory holds files with no git pointer in it"
+	}
+	return "its working copy is missing"
+}
+
+// InitSubmodules fetches, into the person's own checkout, the working copy of every submodule that checkout's
+// commit names, nested ones included, and returns the paths it populated. It belongs to project import and
+// nowhere else: the fetch spends the operator's own credentials (`credential.helper`, their ssh agent) on a
+// destination the repository's text chose, and leaves that destination as the store's `origin`, which every
+// later fetch then treats as the person's own remote.
+//
+// A checkout the person has content in is left alone: `git submodule update` checks the recorded commit out,
+// which detaches their own submodule off their work. onStatus, which may be nil, hears every outcome worth
+// reporting; a submodule that will not fetch is skipped, because a project whose upstream is unreachable is
+// still a project.
+//
+// The fetch is git's own verb over submoduleProtocols, so a repository cannot point a submodule at a directory
+// on this machine.
+func InitSubmodules(ctx context.Context, projectPath string, onStatus func(string)) ([]string, error) {
+	return initSubmodules(ctx, projectPath, nil, onStatus)
+}
+
+// initSubmodules takes the environment a fixture appends to reach an upstream that is a directory on this
+// machine.
+func initSubmodules(ctx context.Context, projectPath string, widen []string, onStatus func(string)) ([]string, error) {
+	report := func(format string, args ...any) {
+		line := fmt.Sprintf(format, args...)
+		if onStatus != nil {
+			onStatus(line)
+		}
+		logging.For(logging.Git).Warnf("importing submodules of %s: %s", projectPath, line)
+	}
+
+	gitDir, err := checkoutGitDir(projectPath)
+	if err != nil {
+		return nil, err
+	}
+	head, err := commitAt(projectPath, "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("resolve the project's commit: %w", err)
+	}
+	// The listing comes from the commit, so a `.gitmodules` advertising a submodule no commit names is never
+	// fetched, and every path handed to git is one validateSubmodulePath already accepted.
+	links, err := gitlinks(gitDir, head, "")
+	if err != nil {
+		return nil, err
+	}
+	if len(links) > maxSubmoduleWalk {
+		return nil, fmt.Errorf("more than %d submodules in this repository", maxSubmoduleWalk)
+	}
+
+	var populated []string
+	for _, link := range links {
+		checkout := filepath.Join(projectPath, filepath.FromSlash(link.path))
+		switch state := checkoutStateOf(checkout, link.sha); state {
+		case checkoutAtCommit:
+			populated = append(populated, link.path)
+			continue
+		case checkoutAbsent:
+		default:
+			report("submodule %s was left alone: %s", link.path, state)
+			continue
+		}
+		cmd := CommandContext(ctx, projectPath, submoduleInitArgs(link.path)...)
+		cmd.Env = submoduleEnv(widen)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			// A cancelled request is the caller's own navigation, not a repository that could not be
+			// fetched; the same distinction the clone path makes.
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return populated, ctxErr
+			}
+			report("submodule %s was not fetched: %s", link.path, gitMessage(string(out), err))
+			continue
+		}
+		populated = append(populated, link.path)
+	}
+	return populated, nil
+}
+
+// submoduleInitArgs is the argv that fetches one submodule's working copy: git's own verb, asked to recurse,
+// for one validated path the superproject's commit records rather than for every section `.gitmodules`
+// advertises. The transports that URL may use are refused in the environment — see submoduleEnv.
+func submoduleInitArgs(subPath string) []string {
+	return []string{"submodule", "update", "--init", "--recursive", "--", subPath}
+}
+
+// checkoutStateOf is what the person's own working copy of a submodule holds. The directory is read before git
+// is asked anything, because a never-populated submodule leaves an empty one.
+func checkoutStateOf(checkout, sha string) checkoutState {
+	entries, err := os.ReadDir(checkout)
+	if err != nil || len(entries) == 0 {
+		return checkoutAbsent
+	}
+	if !HasGitDir(checkout) {
+		return checkoutNotASubmodule
+	}
+	if checkedOutCommit(checkout) != sha {
+		return checkoutElsewhere
+	}
+	if out, err := Run(checkout, "status", "--porcelain"); err != nil || strings.TrimSpace(out) != "" {
+		return checkoutDirty
+	}
+	return checkoutAtCommit
+}
+
+// PruneSubmoduleWorktrees prunes every submodule store's own worktree registry under a project, the twin of the
+// project's own prune. Each store is swept by git, never by removing registrations from an admin directory
+// whose name git derives from a checkout that may be gone.
 func PruneSubmoduleWorktrees(projectPath string) {
-	gitDir, err := CommonGitDir(projectPath)
+	gitDir, err := checkoutGitDir(projectPath)
 	if err != nil {
 		return
 	}

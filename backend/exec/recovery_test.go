@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"mike/backend/sandbox"
-	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 
 	"mike/pkg/bridge"
@@ -155,16 +154,14 @@ func (f *fakeSandboxMgr) cleanup() {
 	}
 }
 
-// recoveryTestSetup gives the worktree a real one-commit repository, because reading its submodule set off a
+// recoveryTestSetup gives the task a real worktree of a real checkout, because reading its submodule set off a
 // path that is not a repository is a refusal.
 func recoveryTestSetup(t *testing.T, taskID string) (*taskExecSetup, *executionState) {
 	t.Helper()
-	worktree := t.TempDir()
-	testgit.Git(t, worktree, "init", "-q")
-	testgit.Git(t, worktree, "commit", "-q", "--allow-empty", "-m", "one")
+	project, worktree := taskCheckoutFixture(t)
 	setup := &taskExecSetup{
 		task:         &types.Task{ID: taskID, OperatingMode: "full_access"},
-		project:      &types.Project{Name: "test-proj"},
+		project:      &types.Project{Name: "test-proj", Path: project},
 		worktreePath: worktree,
 		ctx:          context.Background(),
 	}

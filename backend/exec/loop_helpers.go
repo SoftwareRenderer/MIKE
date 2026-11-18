@@ -651,7 +651,7 @@ func (te *TaskExecutor) sandboxCreateOpts(setup *taskExecSetup, image string, re
 	opts.BaseImage = image
 	opts.AgentSandbox = te.agentRegistry.AgentSandboxForURL(setup.providerURL())
 	opts.WorktreeReadOnly = readOnly
-	submodules, err := git.SubmodulePaths(setup.worktreePath)
+	submodules, err := git.SubmodulePaths(setup.worktreePath, setup.project.Path)
 	if err != nil {
 		return opts, err
 	}
@@ -696,7 +696,7 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 		// The worktree is given its submodules before the container is built around it, because the mounts
 		// that pin each submodule's git pointer are decided once, at create.
-		submodules, err := git.PopulateSubmodules(setup.ctx, worktreePath)
+		submodules, err := git.PopulateSubmodules(setup.ctx, worktreePath, setup.project.Path)
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to prepare submodules: %w", err)
 		}

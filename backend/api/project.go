@@ -101,6 +101,16 @@ func (h *ProjectHandler) HandleCounts(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, counts)
 }
 
+// importSubmodules fetches the submodules of a repository MIKE has just taken in (git.InitSubmodules), and
+// never fails the import: a submodule whose upstream is unreachable is the log's and the task's to report, not
+// a reason a person cannot use MIKE with this project. onStatus, which may be nil, hears each outcome worth
+// reporting.
+func importSubmodules(ctx context.Context, path string, onStatus func(string)) {
+	if _, err := git.InitSubmodules(ctx, path, onStatus); err != nil {
+		logging.For(logging.Git).Warnf("submodules of %s could not be read: %v", path, err)
+	}
+}
+
 // HandleCreate creates a new project from a directory path.
 func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	var req types.CreateProjectRequest
@@ -139,11 +149,13 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		req.Path = targetPath
 	}
 
+	// Submodules come down once the row exists; see importSubmodules.
 	p, code, msg := h.createProjectFromRequest(req)
 	if p == nil {
 		httputil.JSONError(w, code, msg)
 		return
 	}
+	importSubmodules(r.Context(), p.Path, nil)
 	httputil.JSONResponse(w, code, p)
 }
 
@@ -358,6 +370,12 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": "git clone failed: " + subproc.Summarize([]byte(out), subproc.AnswerMax)})
 		return
 	}
+
+	// Each submodule outcome the person would want is a status line on the stream the clone used.
+	sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": "Fetching submodules..."})
+	importSubmodules(r.Context(), targetPath, func(line string) {
+		sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": line})
+	})
 
 	req.Path = targetPath
 	if p, _, msg := h.createProjectFromRequest(req); p != nil {
