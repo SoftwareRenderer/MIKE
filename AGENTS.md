@@ -424,6 +424,9 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
   it is installable.
 - **A development row loads from a directory derived from stored rows**, never from a path in a request, and
   deleting the row never deletes the repository — the project's deletion does. `docs/extension-authoring.md`.
+- **A development load that declares egress or a host folder is refused until a person acknowledges it** —
+  the same conditions the install dialog reads, asked of the manifest the load would apply. An
+  unacknowledged load enables nothing and copies nothing into the served tree. `docs/extension-authoring.md → Loading`.
 - **Language knowledge lives in extensions** — the core holds no language names, keyword lists or bracket
   tables, in either language. `docs/languages.md`.
 - **The UI language is whichever `i18n` extension is enabled**; any load failure means whole-catalog English

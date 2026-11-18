@@ -1,4 +1,4 @@
-import type { Extension, Project, RegistryEntry, ExtensionUpdate, Task } from '../types';
+import type { Extension, ExtensionConsentRequest, Project, RegistryEntry, ExtensionUpdate, ReloadExtensionResult, Task } from '../types';
 import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from './helpers';
 import { t } from '$lib/i18n';
 
@@ -222,14 +222,30 @@ export async function scaffoldExtension(
 
 /**
  * Load one version of a development extension: a task id is that task's own bytes, no task id is the
- * repository. The failure text is the answer, and the caller shows it verbatim.
+ * repository. A failure's text is the answer, and the caller shows it verbatim — except the 409, which is
+ * a question about access the person has not approved for the version, answered by pressing again with
+ * the `ack` the server named.
  */
-export async function reloadExtensionVersion(id: string, taskId?: string): Promise<Extension> {
+export async function reloadExtensionVersion(
+    id: string,
+    taskId?: string,
+    ack?: string,
+): Promise<ReloadExtensionResult> {
     const res = await apiFetch(`${API_BASE}/extensions/${encodeURIComponent(id)}/reload`, {
         method: 'POST',
         headers: await csrfHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify(taskId ? { task_id: taskId } : {}),
+        body: JSON.stringify({
+            ...(taskId ? { task_id: taskId } : {}),
+            ...(ack ? { ack } : {}),
+        }),
     });
+    if (res.status === 409) {
+        const answer = (await res.json().catch(() => null)) as ExtensionConsentRequest | null;
+        if (answer && answer.consent_required === true && answer.fingerprint) {
+            return { status: 'consent', consent: answer };
+        }
+        throw new Error(t('api.reloadExtension'));
+    }
     if (!res.ok) throw await apiError(res, t('api.reloadExtension'));
-    return res.json();
+    return { status: 'loaded', extension: await res.json() };
 }

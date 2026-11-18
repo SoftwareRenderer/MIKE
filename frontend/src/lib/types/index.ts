@@ -879,6 +879,27 @@ export interface RegistryEntry {
     local_path?: string;
 }
 
+/**
+ * A development load refused because the version reaches for something the person has not approved for
+ * it (docs/extension-authoring.md → Loading). `entry` and `agent_mounts` are the properties the install
+ * dialog renders, read off the manifest this load would have applied rather than off the browser's copy
+ * of the row, and `fingerprint` is what the retry echoes back.
+ */
+export interface ExtensionConsentRequest {
+    consent_required: true;
+    entry: Pick<RegistryEntry, 'name' | 'display_name' | 'version' | 'description' | 'author' | 'type'> & {
+        capabilities?: Record<string, any> | null;
+    };
+    agent_mounts?: { host_path: string; container_path: string; mode: string }[];
+    fingerprint: string;
+    reasons: string[];
+}
+
+/** One press of Try Extension: the version ran, or it is held until the person answers. */
+export type ReloadExtensionResult =
+    | { status: 'loaded'; extension: Extension }
+    | { status: 'consent'; consent: ExtensionConsentRequest };
+
 /** A single changelog entry from an extension's published CHANGELOG.jsonl. */
 export interface ExtensionChangelogEntry {
     hash: string;

@@ -182,6 +182,8 @@ sharing a published name is listed as updatable and the update it invites is ref
 - The egress transport takes **no environment proxy** (`egressTransport` sets `Proxy = nil`): the peer of
   a proxied connection is the proxy, so the address rule would clear the proxy and say nothing about the
   extension's target. Test: `backend/httputil/egress_test.go`.
+- Nothing here reaches the network until a person said yes, at install or at a development load: the same
+  three conditions decide both, and `docs/extension-authoring.md → The access question` owns the load half.
 
 ## LSP capability gates
 

@@ -1690,6 +1690,8 @@ const catalog = {
     'chat.review.tryExtensionTip': 'Load this task\u2019s version into MIKE, then refresh the tab',
     'chat.review.tryExtensionLoading': 'Loading...',
     'chat.review.tryExtensionLoaded': 'Loaded - refresh the tab to see it.',
+    'chat.review.tryExtensionConsentTitle': 'Load "{name}"?',
+    'chat.review.tryExtensionLoadVersion': 'Load this version',
     'chat.review.committing': 'Committing...',
     'chat.review.inQueue': 'In queue...',
     'chat.review.resume': 'Resume',

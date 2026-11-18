@@ -1,10 +1,11 @@
 package extensions
 
-// Loading is the whole test loop: the person presses Try Extension on a task and the app must run
-// *that task's* bytes, in the browser and in every server-side reader alike.
+// Loading is the whole test loop: the person presses Try Extension on a task and the app must run that
+// task's bytes, in the browser and in every server-side reader alike.
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -106,7 +107,45 @@ func uiManifest(displayName string) string {
 
 func loadDev(t *testing.T, h *ExtensionHandler, id, taskID string) (*Extension, error) {
 	t.Helper()
-	return h.LoadDev(id, taskID)
+	return h.LoadDev(id, taskID, "")
+}
+
+// loadDevWithAck is the same press after the person acknowledged what the dialog showed them.
+func loadDevWithAck(t *testing.T, h *ExtensionHandler, id, taskID, ack string) (*Extension, error) {
+	t.Helper()
+	return h.LoadDev(id, taskID, ack)
+}
+
+// networkManifest asks for the one thing a load must not hand out quietly: server-side egress.
+func networkManifest(displayName string, domains ...string) string {
+	quoted := make([]string, 0, len(domains))
+	for _, d := range domains {
+		quoted = append(quoted, `"`+d+`"`)
+	}
+	return `{"display_name":"` + displayName + `","description":"d","author":"op","version":"0.1.0",` +
+		`"capabilities":{"ui":{"injection_points":["taskCard"],"permissions":["ui.toast"]},` +
+		`"network":{"allowed_domains":[` + strings.Join(quoted, ",") + `],"headers":{"Authorization":"Bearer {{token}}"}}}}`
+}
+
+// serveNetworkManifest reaches the network from the browser instead, through a permission the install
+// dialog flags as sandbox-escaping while the manifest itself declares no domain list.
+func serveNetworkManifest(displayName string) string {
+	return `{"display_name":"` + displayName + `","description":"d","author":"op","version":"0.1.0",` +
+		`"capabilities":{"ui":{"injection_points":["taskCard"],"permissions":["preview.serveNetwork"]}}}`
+}
+
+// dependencyManifest wants a directory of this machine for its resolved dependencies.
+func dependencyManifest(displayName string) string {
+	return `{"display_name":"` + displayName + `","description":"d","author":"op","version":"0.1.0",` +
+		`"capabilities":{"lsp":{"command":"gopls","file_types":[{"extension":"go","language":"go"}],` +
+		`"sandbox":{"dependency_cache":{"container_path":"/go/pkg/mod","env":"GOMODCACHE"}}}}}`
+}
+
+// agentMountManifest wants a directory of this machine for the agent's own files.
+func agentMountManifest(displayName string) string {
+	return `{"display_name":"` + displayName + `","description":"d","author":"op","version":"0.1.0",` +
+		`"capabilities":{"agent":{"wasm_module":"adapter.wasm",` +
+		`"sandbox":{"mount":[{"host_path":"~/.pi/agent","container_path":"/home/sandbox/.pi/agent","mode":"ro"}]}}}}`
 }
 
 // TestLoadingATaskServesThatTaskEverywhere: one press points the row at the task's bytes, and the
@@ -505,5 +544,212 @@ func TestDevListingShowsARepositoryWhoseRowIsGone(t *testing.T) {
 	}
 	if rec := attach("../.."); rec.Code != http.StatusBadRequest {
 		t.Errorf("attaching a name that is not a slug = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// --- The consent gate (consent.go, docs/extension-authoring.md → Loading) ---
+
+// pressTryExtension is the review bar's own call, so the shape the dialog renders is asserted on the
+// route rather than on LoadDev.
+func pressTryExtension(t *testing.T, h *ExtensionHandler, id, taskID, ack string) *httptest.ResponseRecorder {
+	t.Helper()
+	var body string
+	if ack == "" {
+		body = `{"task_id":"` + taskID + `"}`
+	} else {
+		body = `{"task_id":"` + taskID + `","ack":"` + ack + `"}`
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/extensions/"+id+"/reload", strings.NewReader(body))
+	rec := httptest.NewRecorder()
+	h.HandleReloadDev(rec, req, id)
+	return rec
+}
+
+// TestLoadingAVersionThatReachesTheNetworkWaitsForAPerson: Try Extension runs what the person approves,
+// not what the task's manifest asks for.
+func TestLoadingAVersionThatReachesTheNetworkWaitsForAPerson(t *testing.T) {
+	h, store, root := devHandler(t)
+	files := map[string]string{
+		"manifest.json": networkManifest("My Ext", "api.example.com"),
+		"index.html":    "<title>ext</title>",
+		"MyExt.js":      "export default ()=>()=>{}",
+	}
+	f := newDevFixture(t, root, files)
+	h.SetDevSources(f.sources)
+	createDevRow(t, store, "dev1", "My Ext", "", "")
+
+	rec := pressTryExtension(t, h, "dev1", "task1", "")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("an unacknowledged load = %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	var answer consentAnswer
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if !answer.ConsentRequired || answer.Fingerprint == "" {
+		t.Fatalf("the refusal does not say what it wants acknowledged: %+v", answer)
+	}
+	if answer.Entry.Name != "My Ext" || answer.Entry.Capabilities == nil || answer.Entry.Capabilities.Network == nil {
+		t.Fatalf("the dialog has nothing to render: %+v", answer.Entry)
+	}
+	if got := strings.Join(answer.Reasons, " | "); !strings.Contains(got, "api.example.com") {
+		t.Errorf("the refusal never names the host it is asking about: %q", got)
+	}
+
+	// Refused means nothing happened: the row is still the inert row it was, and the refused bytes were
+	// never copied into the tree the browser can reach.
+	row, err := store.GetByID("dev1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if row.Enabled || row.LoadedDir != "" || row.NetworkAck != "" {
+		t.Errorf("a refused load enabled the row anyway: %+v", row)
+	}
+	if staging, stagingErr := DevStagingDir(root, "my-ext", "task1"); stagingErr != nil {
+		t.Fatalf("staging directory name: %v", stagingErr)
+	} else if _, statErr := os.Stat(staging); !os.IsNotExist(statErr) {
+		t.Errorf("the refused version was copied into the served tree anyway: %s", staging)
+	}
+
+	if _, err := loadDevWithAck(t, h, "dev1", "task1", answer.Fingerprint); err != nil {
+		t.Fatalf("the acknowledged retry: %v", err)
+	}
+	loaded, err := store.GetByID("dev1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !loaded.Enabled || loaded.LoadedDir == "" {
+		t.Fatalf("the acknowledged load did not take effect: %+v", loaded)
+	}
+	if loaded.NetworkAck != answer.Fingerprint {
+		t.Errorf("the acknowledgement was not stored with the bytes it describes: %q", loaded.NetworkAck)
+	}
+}
+
+// TestReloadingWhatThePersonAlreadyApprovedAsksNothing: the authoring loop presses this button many
+// times, so only a change to what was shown re-asks.
+func TestReloadingWhatThePersonAlreadyApprovedAsksNothing(t *testing.T) {
+	h, store, root := devHandler(t)
+	f := newDevFixture(t, root, map[string]string{
+		"manifest.json": networkManifest("My Ext", "api.example.com"),
+		"index.html":    "<title>ext</title>",
+	})
+	h.SetDevSources(f.sources)
+	createDevRow(t, store, "dev1", "My Ext", "", "")
+
+	first := pressTryExtension(t, h, "dev1", "task1", "")
+	var answer consentAnswer
+	if err := json.Unmarshal(first.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadDevWithAck(t, h, "dev1", "task1", answer.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same bytes again, with no ack in hand: the row's own acknowledgement answers for it.
+	if _, err := loadDev(t, h, "dev1", "task1"); err != nil {
+		t.Fatalf("re-loading unchanged bytes asked again: %v", err)
+	}
+
+	// A wording change is not a widening, so it must not cost the person another click.
+	f.writeWorktree(t, "manifest.json", networkManifest("My Ext, Rebranded", "api.example.com"))
+	if _, err := loadDev(t, h, "dev1", "task1"); err != nil {
+		t.Fatalf("an edited display name asked again: %v", err)
+	}
+
+	// One more host in the list is exactly the thing the person said yes or no to.
+	f.writeWorktree(t, "manifest.json", networkManifest("My Ext, Rebranded", "api.example.com", "evil.example"))
+	refused, err := loadDev(t, h, "dev1", "task1")
+	if refused != nil {
+		t.Fatal("a widened domain list loaded without asking")
+	}
+	var required *ErrConsentRequired
+	if !errors.As(err, &required) {
+		t.Fatalf("a widened domain list = %v, want ErrConsentRequired", err)
+	}
+	if required.Fingerprint == answer.Fingerprint {
+		t.Error("widening the domain list produced the fingerprint that was already acknowledged")
+	}
+	stored, err := store.GetByID("dev1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.NetworkAck != answer.Fingerprint {
+		t.Errorf("the refusal overwrote the acknowledgement of the version still running: %q", stored.NetworkAck)
+	}
+}
+
+// TestADangerousPermissionAndAHostFolderAreAskedForToo: the gate reads the same three conditions the
+// install dialog does, not just the network capability.
+func TestADangerousPermissionAndAHostFolderAreAskedForToo(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		manifest   string
+		wantPhrase string
+	}{
+		{"browser egress", serveNetworkManifest("My Ext"), "preview.serveNetwork"},
+		{"dependency directory", dependencyManifest("My Ext"), "directory of this machine"},
+		{"agent directory", agentMountManifest("My Ext"), "directory of this machine"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, store, root := devHandler(t)
+			f := newDevFixture(t, root, map[string]string{
+				"manifest.json": tc.manifest,
+				"index.html":    "<title>ext</title>",
+			})
+			h.SetDevSources(f.sources)
+			createDevRow(t, store, "dev1", "My Ext", "", "")
+
+			rec := pressTryExtension(t, h, "dev1", "task1", "")
+			if rec.Code != http.StatusConflict {
+				t.Fatalf("= %d, want 409: %s", rec.Code, rec.Body.String())
+			}
+			if !strings.Contains(rec.Body.String(), tc.wantPhrase) {
+				t.Errorf("the refusal never mentions %q: %s", tc.wantPhrase, rec.Body.String())
+			}
+			if _, err := loadDev(t, h, "dev1", "task1"); err == nil {
+				t.Error("the version loaded without an acknowledgement")
+			}
+		})
+	}
+}
+
+// TestAVersionThatAsksForNothingIsNeverHeldUp: the ordinary authoring loop is untouched, and an old
+// acknowledgement cannot carry a later version that starts asking.
+func TestAVersionThatAsksForNothingIsNeverHeldUp(t *testing.T) {
+	h, store, root := devHandler(t)
+	f := newDevFixture(t, root, map[string]string{
+		"manifest.json": networkManifest("My Ext", "api.example.com"),
+		"index.html":    "<title>ext</title>",
+	})
+	h.SetDevSources(f.sources)
+	createDevRow(t, store, "dev1", "My Ext", "", "")
+
+	rec := pressTryExtension(t, h, "dev1", "task1", "")
+	var answer consentAnswer
+	if err := json.Unmarshal(rec.Body.Bytes(), &answer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadDevWithAck(t, h, "dev1", "task1", answer.Fingerprint); err != nil {
+		t.Fatal(err)
+	}
+
+	// The version drops the network block: it loads, and carries no acknowledgement of its own.
+	f.writeWorktree(t, "manifest.json", uiManifest("My Ext"))
+	if _, err := loadDev(t, h, "dev1", "task1"); err != nil {
+		t.Fatalf("a version asking for nothing was held up: %v", err)
+	}
+	quiet, err := store.GetByID("dev1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quiet.NetworkAck != "" {
+		t.Errorf("a version that asks for nothing kept an acknowledgement: %q", quiet.NetworkAck)
+	}
+
+	// Bringing the identical declaration back is a fresh question, not a ride on the old one.
+	f.writeWorktree(t, "manifest.json", networkManifest("My Ext", "api.example.com"))
+	if _, err := loadDev(t, h, "dev1", "task1"); err == nil {
+		t.Error("the old acknowledgement carried a declaration the person had stopped being shown")
 	}
 }

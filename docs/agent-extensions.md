@@ -92,6 +92,7 @@ An agent extension that only appears in the list after a browser refresh is a bu
 - `TaskExecutor.agentGrantHash` hashes both the provider URL and the grant. Any change to either recreates the mount to ensure the container is up to date.
 - The adapter still receives the manifest-defined sandbox path (`runner.go`) for internal variable resolution; this is extension-side metadata, not a host grant.
 - **Two declaration shapes, one reader**: The registry index projects `capabilities.agent.sandbox.mount` for pre-install views, while `GET /api/extensions/local` provides the raw manifest. Both are resolved by `resolvedSandboxManifest`. `agentMountDeclaration()` is the sole reader.
-- The UI manages the grant at install via the install review dialog. The extension card then displays the grant status (`needsAgentMountGrant` yellow dot) and provides an `Unmount` option. The host path is managed in the edit form (`HOST_OWNED_AGENT_CONFIG_KEY`) and saved via its own route.
+- The UI manages the grant at install via the install review dialog, and again when a development version
+  that declares one is loaded (`docs/extension-authoring.md → The access question`). The extension card then displays the grant status (`needsAgentMountGrant` yellow dot) and provides an `Unmount` option. The host path is managed in the edit form (`HOST_OWNED_AGENT_CONFIG_KEY`) and saved via its own route.
 
 Tests: `backend/extensions/agent_mount_test.go`, `backend/agent/registry_test.go`, `backend/exec/agent_grant_test.go`, `backend/term/agent_grant_test.go`, and `frontend/src/lib/utils/__tests__/extension-permissions.unit.ts`.

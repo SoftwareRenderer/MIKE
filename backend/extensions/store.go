@@ -144,7 +144,8 @@ CREATE TABLE IF NOT EXISTS extensions (
     subdir            TEXT DEFAULT '',
     project_id        TEXT DEFAULT '',
     task_id           TEXT DEFAULT '',
-    loaded_dir        TEXT DEFAULT ''
+    loaded_dir        TEXT DEFAULT '',
+    network_ack       TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS extension_storage (
@@ -172,6 +173,7 @@ CREATE TABLE IF NOT EXISTS extension_storage (
 		`ALTER TABLE extensions ADD COLUMN project_id TEXT DEFAULT ''`,
 		`ALTER TABLE extensions ADD COLUMN task_id TEXT DEFAULT ''`,
 		`ALTER TABLE extensions ADD COLUMN loaded_dir TEXT DEFAULT ''`,
+		`ALTER TABLE extensions ADD COLUMN network_ack TEXT DEFAULT ''`,
 	} {
 		_, _ = es.db.Exec(stmt)
 	}
@@ -229,7 +231,7 @@ func (es *ExtensionStore) ListProjectSandboxMountPaths() ([]string, error) {
 
 // extensionColumns is the SELECT list every extensions query shares; the order must match
 // scanExtension's argument order.
-const extensionColumns = `id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir, project_id, task_id, loaded_dir`
+const extensionColumns = `id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir, project_id, task_id, loaded_dir, network_ack`
 
 // GetByType returns extensions filtered by type (empty = all).
 func (es *ExtensionStore) GetByType(extType string) ([]Extension, error) {
@@ -356,8 +358,8 @@ func (es *ExtensionStore) Create(ext *Extension) error {
 	}
 
 	_, err = es.db.Exec(
-		`INSERT INTO extensions (id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir, project_id, task_id, loaded_dir) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		ext.ID, ext.Name, ext.Author, ext.Version, ext.Type, columns.manifest, columns.config, columns.container, columns.sandbox, ext.InstallSource, ext.ImageRef, store.B2I(ext.Enabled), ext.InstalledAt, ext.BuiltAt, ext.Repo, ext.Commit, ext.Subdir, ext.ProjectID, ext.TaskID, ext.LoadedDir,
+		`INSERT INTO extensions (id, name, author, version, type, manifest, config, container_config, sandbox_config, install_source, image_ref, enabled, installed_at, built_at, repo, commit_sha, subdir, project_id, task_id, loaded_dir, network_ack) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		ext.ID, ext.Name, ext.Author, ext.Version, ext.Type, columns.manifest, columns.config, columns.container, columns.sandbox, ext.InstallSource, ext.ImageRef, store.B2I(ext.Enabled), ext.InstalledAt, ext.BuiltAt, ext.Repo, ext.Commit, ext.Subdir, ext.ProjectID, ext.TaskID, ext.LoadedDir, ext.NetworkAck,
 	)
 	if err != nil {
 		return fmt.Errorf("insert extension: %w", err)
@@ -396,16 +398,18 @@ func (es *ExtensionStore) Delete(id string) error {
 }
 
 // SetLoaded records which bytes a development row is running: the manifest that was read, the type it
-// implies, and where the served copy lives. It writes nothing a person configures (config, sandbox
-// additions, image), because loading a version is not a change to what they set up.
+// implies, where the served copy lives, and the consent fingerprint the person acknowledged beside them,
+// so an acknowledgement never describes different bytes than the load runs. It writes nothing a person
+// configures (config, sandbox additions, image), because loading a version is not a change to what they
+// set up.
 func (es *ExtensionStore) SetLoaded(ext *Extension) error {
 	columns, err := es.rowJSON(ext.ID, ext)
 	if err != nil {
 		return err
 	}
 	return es.execOne("load development extension", ext.ID,
-		`UPDATE extensions SET version = ?, type = ?, manifest = ?, enabled = ?, task_id = ?, loaded_dir = ? WHERE id = ?`,
-		ext.Version, ext.Type, columns.manifest, store.B2I(ext.Enabled), ext.TaskID, ext.LoadedDir, ext.ID)
+		`UPDATE extensions SET version = ?, type = ?, manifest = ?, enabled = ?, task_id = ?, loaded_dir = ?, network_ack = ? WHERE id = ?`,
+		ext.Version, ext.Type, columns.manifest, store.B2I(ext.Enabled), ext.TaskID, ext.LoadedDir, ext.NetworkAck, ext.ID)
 }
 
 // SetEnabled toggles the enabled state of an extension.
@@ -537,9 +541,9 @@ func (es *ExtensionStore) scanExtension(s scanner) (*Extension, error) {
 	var enabled int
 	var installedAt, builtAt string
 	var repo, commitSHA, subdir string
-	var projectID, taskID, loadedDir string
+	var projectID, taskID, loadedDir, networkAck string
 
-	err := s.Scan(&ext.ID, &ext.Name, &ext.Author, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir, &projectID, &taskID, &loadedDir)
+	err := s.Scan(&ext.ID, &ext.Name, &ext.Author, &ext.Version, &extType, &manifestJSON, &configJSON, &containerConfigJSON, &sandboxConfigJSON, &installSource, &imageRef, &enabled, &installedAt, &builtAt, &repo, &commitSHA, &subdir, &projectID, &taskID, &loadedDir, &networkAck)
 	if err != nil {
 		return nil, err
 	}
@@ -556,6 +560,7 @@ func (es *ExtensionStore) scanExtension(s scanner) (*Extension, error) {
 	ext.ProjectID = projectID
 	ext.TaskID = taskID
 	ext.LoadedDir = loadedDir
+	ext.NetworkAck = networkAck
 
 	if manifestJSON.Valid {
 		if err := json.Unmarshal([]byte(manifestJSON.String), &ext.Manifest); err != nil {

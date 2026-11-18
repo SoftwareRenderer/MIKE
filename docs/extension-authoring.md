@@ -66,6 +66,37 @@ manifest says a file is is refused, because the served copy would silently hold 
 loaded" cannot mean different things. A manifest that fails validation leaves the version already running
 in place and answers with the failure text — the sentence the person relays to the agent.
 
+### The access question
+
+Validation checks a manifest's shape; it does not ask anyone whether the shape is acceptable. The agent
+wrote this manifest, so the load asks the question an install asks: `consentRequired`
+(`backend/extensions/consent.go`) refuses a version declaring the `network` capability, a sandbox-escaping
+permission (`network.proxy`, `preview.serveScripts`, `preview.serveNetwork`), or a folder on this machine
+— the three conditions `requiresInstallReview()` reads before the install dialog opens. The rule lives
+once per end and nowhere else: `consent_test.go` and
+`frontend/src/lib/utils/__tests__/extension-consent-gate.unit.ts` run the same fixtures through each half,
+so a condition added on one side only fails a test.
+
+`POST /api/extensions/{id}/reload` answers **409** with what the dialog renders — the entry and the folder
+proposals read off the manifest about to run, not off the browser's cached row — plus a fingerprint of the
+consent-bearing fields. The browser opens `ExtensionInstallConfirmModal` with them and presses again
+carrying that fingerprint, which the server accepts only when it equals the one it computed; the client's
+word alone decides nothing. `TryExtension` (`frontend/src/lib/composables/use-try-extension.svelte.ts`)
+owns the three states that press needs, which is why the flow has a test without mounting the chat.
+
+The check runs **before** the worktree is copied, so a refused version is never served, and it writes no
+row: the version already running keeps running, and closing the dialog posts nothing. What the row keeps
+(`network_ack`) is a fingerprint, not a flag. Re-loading unchanged bytes asks nothing; one more host in
+`allowed_domains` asks again. A version that asks for nothing carries no acknowledgement, which is what
+stops an old yes carrying a later ask. Granting the folders in the dialog applies them through
+`PUT /api/extensions/{id}/agent-mount`, the same route the card's mount control uses, so the folders a
+person named are still judged by `ValidateAgentMountGrant`.
+
+Test: `go test ./backend/extensions/ -run Consent` over the conditions, the fingerprint and the refusal;
+`backend/extensions/dev_load_test.go` over the load itself, and
+`frontend/src/lib/composables/__tests__/try-extension.unit.svelte.ts` over the dialog, the echo and the
+decline.
+
 ## Creating
 
 `POST /api/extensions/scaffold` writes the repository from the embedded bundle

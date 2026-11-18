@@ -12,15 +12,23 @@
     import { capabilityDescriptions } from '$lib/utils/extension-manifest';
 
     /**
-     * Shown before installing an extension that asks for network access, for permissions that escape the
-     * sandbox, or for a host folder. Closing it installs nothing.
-     *
-     * The folder rows are the only place the user is asked about a folder, and the manifest's path is a
-     * suggestion — an extension's `sandbox.mount` is a request, not a grant.
+     * The only place a person is asked about network access, permissions that escape the sandbox, or a
+     * host folder before anything runs, and closing it answers nothing — a manifest's `sandbox.mount` is a
+     * request, not a grant. `title` and `confirmLabel` carry these questions to a development load
+     * (docs/extension-authoring.md → Loading) and default to the install wording.
      */
-    let { entry, agentMounts, onconfirm, onclose }: {
+    let {
+        entry,
+        agentMounts,
+        title,
+        confirmLabel,
+        onconfirm,
+        onclose,
+    }: {
         entry: RegistryEntry;
         agentMounts: AgentMountProposal[];
+        title?: string;
+        confirmLabel?: string;
         onconfirm: (mount: boolean) => void;
         onclose: () => void;
     } = $props();
@@ -37,12 +45,12 @@
         <button type="button" class="btn" onclick={() => onconfirm(false)}>{t('settings.extensions.agentMountDecline')}</button>
         <button type="button" class="btn btn-primary" onclick={() => onconfirm(true)}>{t('settings.extensions.agentMountGrant')}</button>
     {:else}
-        <button type="button" class="btn btn-primary" onclick={() => onconfirm(false)}>{t('settings.extensions.install')}</button>
+        <button type="button" class="btn btn-primary" onclick={() => onconfirm(false)}>{confirmLabel ?? t('settings.extensions.install')}</button>
     {/if}
 {/snippet}
 
 <BaseModal
-    title={t('settings.extensions.installTitle', { name: entry.display_name || entry.name })}
+    title={title ?? t('settings.extensions.installTitle', { name: entry.display_name || entry.name })}
     width="480px"
     modalClass="install-confirm-modal"
     footer={installConfirmFooter}

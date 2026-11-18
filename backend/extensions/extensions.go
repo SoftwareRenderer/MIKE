@@ -69,6 +69,10 @@ type Extension struct {
 	ProjectID string `json:"project_id,omitempty"`
 	TaskID    string `json:"task_id,omitempty"`
 	LoadedDir string `json:"loaded_dir,omitempty"`
+	// NetworkAck is the fingerprint of the manifest fields the person last acknowledged for this
+	// development row (docs/extension-authoring.md). A load compares it with the fingerprint of the
+	// manifest it is about to apply, so a changed declaration has to be asked about again.
+	NetworkAck string `json:"network_ack,omitempty"`
 }
 
 // SensitiveProperty reports whether the manifest declares this config key to hold a secret.

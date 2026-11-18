@@ -54,8 +54,9 @@ func (h *ExtensionHandler) SetDevSources(src DevSources) { h.devSources = src }
 
 // LoadDev points one development row at a version and makes it the running one: an empty taskID loads
 // the repository, a taskID of the row's project loads that task's worktree. A manifest that will not
-// validate leaves the running version in place.
-func (h *ExtensionHandler) LoadDev(id, taskID string) (*Extension, error) {
+// validate, or that consentRefusal() rejects because nobody has acknowledged what it asks for, leaves the
+// running version in place; `ack` is the fingerprint the browser echoes back after the dialog.
+func (h *ExtensionHandler) LoadDev(id, taskID, ack string) (*Extension, error) {
 	ext, err := h.store.GetByID(id)
 	if err != nil {
 		return nil, err
@@ -79,6 +80,13 @@ func (h *ExtensionHandler) LoadDev(id, taskID string) (*Extension, error) {
 	manifest, err := readManifest(src)
 	if err != nil {
 		return nil, manifestError(err, "development extension")
+	}
+
+	// Asked before anything is copied or written, so a refused version is never served. Whether the
+	// extension may reach the network is the person's call, not the task's.
+	fingerprint, err := consentRefusal(ext, &manifest, ack)
+	if err != nil {
+		return nil, err
 	}
 
 	dst := src
@@ -112,6 +120,9 @@ func (h *ExtensionHandler) LoadDev(id, taskID string) (*Extension, error) {
 	ext.LoadedDir = filepath.ToSlash(loadedRel)
 	ext.TaskID = taskID
 	ext.Enabled = true
+	// The acknowledgement describes these bytes, so it travels with them. A version that asks for
+	// nothing stores none.
+	ext.NetworkAck = fingerprint
 	if err := h.store.SetLoaded(ext); err != nil {
 		return nil, err
 	}
@@ -163,10 +174,9 @@ func (h *ExtensionHandler) devSourceDir(root string, ext *Extension, taskID stri
 	return worktree, slug, nil
 }
 
-// copyLoadedFiles lays one version's files down in dst. The extension directory is the unit — a
-// manifest names its stylesheet and its catalog but never the script its own index.html loads — so the
-// copy takes the directory's own files plus what the manifest resolves. What lands here is served to a
-// browser with no session.
+// copyLoadedFiles lays one version's files down in dst, which a browser is then served without a session.
+// The copy takes the directory's own files plus what the manifest resolves, because a manifest names its
+// stylesheet and its catalog but never the script its own index.html loads.
 func copyLoadedFiles(src, dst string) error {
 	names, declared, err := loadedNames(src)
 	if err != nil {
@@ -352,12 +362,63 @@ func (h *ExtensionHandler) validateLoadedManifest(name string, manifest *Extensi
 	return sandboxCfg, nil
 }
 
+// consentAnswer is a refused load's answer: what the install dialog renders, plus the fingerprint a
+// retry echoes back. The capabilities come from the server, so the dialog describes the bytes about to
+// run rather than the last ones that did.
+type consentAnswer struct {
+	ConsentRequired bool                 `json:"consent_required"`
+	Entry           consentEntry         `json:"entry"`
+	AgentMounts     []types.SandboxMount `json:"agent_mounts,omitzero"`
+	Fingerprint     string               `json:"fingerprint"`
+	Reasons         []string             `json:"reasons"`
+}
+
+// consentEntry is the dialog's entry row. It carries a whole registry entry because that is the shape
+// the dialog's prop asks for, and only the server knows the version about to run.
+type consentEntry struct {
+	Name         string        `json:"name"`
+	DisplayName  string        `json:"display_name"`
+	Version      string        `json:"version"`
+	Description  string        `json:"description"`
+	Author       string        `json:"author"`
+	Type         string        `json:"type"`
+	Capabilities *Capabilities `json:"capabilities,omitzero"`
+}
+
+// consentAnswerOf renders a refusal.
+func consentAnswerOf(refused *ErrConsentRequired) consentAnswer {
+	answer := consentAnswer{
+		ConsentRequired: true,
+		Entry: consentEntry{
+			Name:         refused.Name,
+			DisplayName:  refused.Manifest.DisplayName,
+			Version:      refused.Manifest.Version,
+			Description:  refused.Manifest.Description,
+			Author:       refused.Manifest.Author,
+			Type:         inferExtensionType(refused.Manifest.Capabilities),
+			Capabilities: refused.Manifest.Capabilities,
+		},
+		Fingerprint: refused.Fingerprint,
+		Reasons:     refused.Reasons(),
+	}
+	if caps := refused.Manifest.Capabilities; caps != nil && caps.Agent != nil && caps.Agent.Sandbox != nil {
+		for _, m := range caps.Agent.Sandbox.Mounts {
+			if m.HostPath != "" && m.ContainerPath != "" {
+				answer.AgentMounts = append(answer.AgentMounts, m)
+			}
+		}
+	}
+	return answer
+}
+
 // HandleReloadDev makes one development row's bytes the running version: a task id in the body is Try
-// Extension and loads that task's worktree, no task id loads the repository. The failure text is the
-// answer rather than a log line — it is the sentence the person carries back to the agent.
+// Extension and loads that task's worktree, no task id loads the repository. A manifest asking for
+// unacknowledged access answers 409 with what the install dialog renders; any other failure text is the
+// answer, because it is the sentence the person carries back to the agent.
 func (h *ExtensionHandler) HandleReloadDev(w http.ResponseWriter, r *http.Request, id string) {
 	var req struct {
 		TaskID *string `json:"task_id"`
+		Ack    string  `json:"ack"`
 	}
 	if !httputil.DecodeJSON(w, r, &req) {
 		return
@@ -366,10 +427,15 @@ func (h *ExtensionHandler) HandleReloadDev(w http.ResponseWriter, r *http.Reques
 	if req.TaskID != nil {
 		taskID = strings.TrimSpace(*req.TaskID)
 	}
-	ext, err := h.LoadDev(id, taskID)
+	ext, err := h.LoadDev(id, taskID, strings.TrimSpace(req.Ack))
 	if err != nil {
 		if errors.Is(err, ErrExtensionNotFound) {
 			httputil.JSONError(w, http.StatusNotFound, "extension not found")
+			return
+		}
+		var refused *ErrConsentRequired
+		if errors.As(err, &refused) {
+			httputil.JSONResponse(w, http.StatusConflict, consentAnswerOf(refused))
 			return
 		}
 		logging.For(logging.Extensions).Warnf("ext=%s could not load its development version: %v", id, err)
