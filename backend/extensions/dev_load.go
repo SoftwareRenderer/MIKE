@@ -524,6 +524,12 @@ func (h *ExtensionHandler) CreateDevRow(name, projectID string) (*Extension, err
 	if err := h.store.Create(ext); err != nil {
 		return nil, err
 	}
+	// The row is a change like any other: without this broadcast the browser's app-wide copy of the
+	// list keeps the snapshot it took at boot, and a task of this project shows no Try Extension
+	// until the page is reloaded.
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
 	return ext, nil
 }
 

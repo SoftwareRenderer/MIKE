@@ -31,6 +31,7 @@
     import { countByCategory, filterByCategory, visibleCategories } from '$lib/utils/extension-categories';
     import { identityKey } from '$lib/utils/extension-identity';
     import { orderBrowseEntries } from '$lib/composables/use-browse-order';
+    import { extensionManager } from '$lib/services/extension-manager.svelte';
 
     /**
      * Settings → Extensions. This file owns the two lists and everything that changes them: the install
@@ -582,9 +583,8 @@
             onclose={() => showCreateModal = false}
             oncreated={(project) => {
                 showCreateModal = false;
-                // The row the create path made belongs to the list this tab owns, so it is re-read
-                // before the shell takes the person to the board the task is already running on.
                 void loadExtensions();
+                void extensionManager.loadExtensions();
                 onOpenProject?.(project);
             }}
         />
