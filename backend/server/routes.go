@@ -228,6 +228,7 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/diff", s.gitHandler.HandleDiff)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/diff/file", s.gitHandler.HandleProjectDiffFile)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/git/status", s.gitHandler.HandleStatus)
+	s.mux.HandleFunc("GET /api/projects/{projectID}/git-author", s.gitHandler.HandleGitAuthor)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/stage", s.gitHandler.HandleProjectStagePaths)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/commit", s.gitHandler.HandleProjectCommit)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/git/discard", s.gitHandler.HandleProjectDiscardPaths)

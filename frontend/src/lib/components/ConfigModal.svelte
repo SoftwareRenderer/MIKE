@@ -84,6 +84,8 @@
     // server's identity answering, so it is written only when it moved.
     let gitAuthorName = $state('');
     let gitAuthorEmail = $state('');
+    // Bumped when a Save writes an identity half, so the fields preview the row as saved.
+    let identityRevision = $state(0);
     // The MCP registry and this project's opt-in list. Both are edited here rather than in the tab: the
     // first rides the config payload, the second the project PUT.
     let mcpServers = $state<MCPServerDraft[]>([]);
@@ -561,6 +563,7 @@
         if (mcpChanged) patched.mcp_server_ids = chosen;
         appStore.projects = appStore.projects.map(p => (p.id === row.id ? patched : p));
         if (appStore.selectedProject?.id === row.id) appStore.selectedProject = patched;
+        if (nameChanged || emailChanged) identityRevision++;
     }
 
     /** Order-insensitive equality: two saves of one selection must read as unchanged. */
@@ -1009,6 +1012,8 @@
                 bind:mcpServerIDs={projectMCPOpts}
                 mcpOptions={selectableMCPServers(config)}
                 projectName={appStore.selectedProject.name}
+                projectId={appStore.selectedProject.id}
+                identityRevision={identityRevision}
                 onDirty={markDirty}
             />
         {/if}

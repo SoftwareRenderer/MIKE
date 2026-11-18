@@ -173,6 +173,15 @@ export async function getGitStatus(projectId: string): Promise<{ clean: boolean;
 }
 
 
+/** The identity a commit in this project is authored as. The server layers it — backend's
+ * git.ProjectAuthorIdentity — so what this answers is what a commit carries. An empty half means
+ * nothing anywhere names one. */
+export async function getProjectGitAuthor(projectId: string): Promise<{ authorName: string; authorEmail: string }> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/git-author`);
+    if (!res.ok) throw await apiError(res, t('api.fetchGitAuthor'));
+    return res.json();
+}
+
 /** Fetch the content (or metadata) of a single file in the project repo.
  * When meta=true, only line_count/file_size/isBinary are returned (cheap).
  * Otherwise returns the unified diff plus the full file lines.

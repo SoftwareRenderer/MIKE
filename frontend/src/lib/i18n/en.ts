@@ -434,6 +434,8 @@ const catalog = {
     'settings.project.gitAuthorDesc': 'Who every commit in this project is authored as. A half left blank falls back to the server identity, then to the git config of the repository.',
     'settings.project.gitAuthorName': 'Name',
     'settings.project.gitAuthorEmail': 'Email address',
+    // The placeholder when nothing names an identity anywhere.
+    'settings.project.gitAuthorUnset': 'No identity configured',
     'settings.project.mcp': 'MCP servers',
     'settings.project.mcpNone': 'No servers enabled under Settings → MCP.',
     'settings.mcp.title': 'MCP servers',
@@ -1217,6 +1219,7 @@ const catalog = {
     'api.fetchBranches': 'Failed to fetch branches',
     'api.checkoutBranch': 'Failed to checkout branch',
     'api.fetchGitStatus': 'Failed to fetch git status',
+    'api.fetchGitAuthor': 'Failed to fetch the commit author',
     'api.fetchProjectDiff': 'Failed to fetch project diff',
     'api.fetchFile': 'Failed to fetch file',
     'api.stageFile': 'Failed to stage file',

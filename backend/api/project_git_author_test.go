@@ -3,9 +3,12 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"mike/backend/git"
+	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
 
@@ -18,6 +21,75 @@ func storedGitAuthor(t *testing.T, h *ProjectHandler, projID string) (string, st
 		t.Fatalf("get project: %v", err)
 	}
 	return p.GitAuthorName, p.GitAuthorEmail
+}
+
+// gitAuthorAnswer reads GET /api/projects/{id}/git-author. Both fields are required: an answer that
+// omitted one would read back as an empty half.
+func gitAuthorAnswer(t *testing.T, h *GitHandler, id string) (string, string) {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{projectID}/git-author", h.HandleGitAuthor)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/projects/"+id+"/git-author", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("git-author: status = %d, want 200 (%s)", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		AuthorName  *string `json:"authorName"`
+		AuthorEmail *string `json:"authorEmail"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode git-author body: %v: %s", err, rec.Body.String())
+	}
+	if body.AuthorName == nil || body.AuthorEmail == nil {
+		t.Fatalf("git-author body carries no pair: %s", rec.Body.String())
+	}
+	return *body.AuthorName, *body.AuthorEmail
+}
+
+// TestHandleGitAuthorAnswersTheEffectiveIdentity: the route answers for the row the path names, and
+// answers the empty pair when nothing names an identity. The layering of the three sources is held by
+// TestGitAuthorOfReadsTheProjectsOwnRepository and TestProjectAuthorIdentityAnswersTheProjectFirst.
+func TestHandleGitAuthorAnswersTheEffectiveIdentity(t *testing.T) {
+	origName, origEmail := git.AuthorIdentity()
+	defer git.SetAuthorIdentity(origName, origEmail)
+	// An empty HOME keeps this person's own global git config out of the answer.
+	t.Setenv("HOME", t.TempDir())
+
+	h, _, s := testProjectHandlerWithStore(t)
+	gitH := &GitHandler{store: s}
+	// Each repository names a person of its own, so an answer read from the wrong row is visible.
+	storeGitProject(t, s, "p1", testgit.Repo(t))
+	storeGitProject(t, s, "p2", testgit.EmptyRepo(t))
+
+	git.SetAuthorIdentity("Boot Person", "boot@example.com")
+	if rr := putProject(t, h, "p1", `{"git_author_name":"Ada Lovelace"}`); rr.Code != http.StatusOK {
+		t.Fatalf("PUT the name: status = %d (%s)", rr.Code, rr.Body.String())
+	}
+	if name, email := gitAuthorAnswer(t, gitH, "p1"); name != "Ada Lovelace" || email != "boot@example.com" {
+		t.Errorf("got %q <%q>, want the row's name over the stamped email, not the repository's own",
+			name, email)
+	}
+
+	// p2 is unstamped and its repository names nobody.
+	git.SetAuthorIdentity("", "")
+	if name, email := gitAuthorAnswer(t, gitH, "p2"); name != "" || email != "" {
+		t.Errorf("nothing configured: got %q <%q>, want the empty pair", name, email)
+	}
+}
+
+// TestHandleGitAuthorUnknownProject: a row that is not there is a 404, not the empty pair that means
+// "nothing is configured".
+func TestHandleGitAuthorUnknownProject(t *testing.T) {
+	_, _, s := testProjectHandlerWithStore(t)
+	h := &GitHandler{store: s}
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/projects/{projectID}/git-author", h.HandleGitAuthor)
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest("GET", "/api/projects/nope/git-author", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (%s)", rec.Code, rec.Body.String())
+	}
 }
 
 // TestUpdateProjectGitAuthor: each half is written on its own, the response carries what the row now
