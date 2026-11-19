@@ -445,6 +445,27 @@ func (cs *ConfigStore) EstimateCallCost(serverURL, modelName string, usage *type
 		float64(usage.CompletionTokens)*outputRate) / 1_000_000
 }
 
+// GetWorkerTarget returns the URL and model of the configured worker pair, for a task that names no pair
+// of its own. ok is false when no provider answers the reference or the pair names no model; an agent
+// provider's model is its own name.
+func (cs *ConfigStore) GetWorkerTarget() (serverURL, model string, ok bool) {
+	cfg, err := cs.GetConfig()
+	if err != nil {
+		return "", "", false
+	}
+	p := cs.ResolveProvider(cfg.WorkerProvider)
+	if p == nil || p.URL == "" {
+		return "", "", false
+	}
+	if p.IsAgent() {
+		return p.URL, p.Name, p.Name != ""
+	}
+	if cfg.WorkerModel == "" {
+		return "", "", false
+	}
+	return p.URL, cfg.WorkerModel, true
+}
+
 // GetUtility returns the configured Utility provider name and model.
 func (cs *ConfigStore) GetUtility() (providerName, model string) {
 	cfg, err := cs.GetConfig()

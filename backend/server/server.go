@@ -672,10 +672,11 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS, author
 	// request.
 	s.extHandler.SetAuthoringBundle(authoring)
 	s.scaffoldHandler = api.NewExtensionScaffoldHandler(api.ExtensionScaffoldDeps{
-		Store:      store,
-		Projects:   s.projectHandler,
-		Tasks:      s.taskHandler,
-		Extensions: s.extHandler,
+		Store:       store,
+		Projects:    s.projectHandler,
+		Tasks:       s.taskHandler,
+		Extensions:  s.extHandler,
+		ConfigStore: s.configStore,
 	})
 	s.extHandler.SetDevSources(devSources{store: store, worktrees: worktreeMgr})
 	s.taskHandler.SetDevStagingPrune(s.extHandler.PruneDevStaging)

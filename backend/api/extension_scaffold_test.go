@@ -58,9 +58,10 @@ func scaffoldHandler(t *testing.T) (*ExtensionScaffoldHandler, *store.Store, *ex
 	extH := extensions.NewExtensionHandler(extStore, nil, nil, &extensions.ExtensionConfig{ExtensionsDir: extRoot})
 	extH.SetAuthoringBundle(scaffoldBundle())
 	h := NewExtensionScaffoldHandler(ExtensionScaffoldDeps{
-		Store:      s,
-		Projects:   projects,
-		Extensions: extH,
+		Store:       s,
+		Projects:    projects,
+		Extensions:  extH,
+		ConfigStore: cfgStore,
 	})
 	return h, s, extStore, extRoot
 }
@@ -169,6 +170,53 @@ func TestScaffoldMakesRepositoryProjectRowAndTask(t *testing.T) {
 	}
 	if len(messages) != 1 || messages[0].Role != "user" {
 		t.Errorf("the task holds %d messages; the agent starts with the person's request in its thread", len(messages))
+	}
+}
+
+// Without the worker pair on this card the start at the end of the create has nothing to run.
+func TestScaffoldTaskCarriesTheConfiguredDefaults(t *testing.T) {
+	h, s, _, _ := scaffoldHandler(t)
+	mode := types.ModePlan
+	turns := 5
+	yes := true
+	if err := h.configStore.UpdateConfig(&types.Config{
+		Providers: []types.Provider{{ID: 3, Name: "worker", Kind: types.ProviderKindLLM,
+			URL: workerURL, Models: []types.ModelConfig{{Name: workerModel}}}},
+		WorkerProvider:        "3",
+		WorkerModel:           workerModel,
+		DefaultOperatingMode:  &mode,
+		DefaultMaxFailedTurns: &turns,
+		DefaultAutoCommit:     &yes,
+	}); err != nil {
+		t.Fatalf("configure the worker pair: %v", err)
+	}
+
+	rec := postScaffold(t, h, `{"name":"Counted","description":"count the words on a card"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Task types.Task `json:"task"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	task, err := s.GetTask(out.Task.ProjectID, out.Task.ID)
+	if err != nil {
+		t.Fatalf("the task row is missing: %v", err)
+	}
+	if task.LlamaServerURL != workerURL || task.ModelName != workerModel {
+		t.Errorf("the first task names (%q, %q); the start path needs the configured worker pair (%q, %q)",
+			task.LlamaServerURL, task.ModelName, workerURL, workerModel)
+	}
+	if task.OperatingMode != types.ModePlan {
+		t.Errorf("operating_mode = %q, want the configured default %q", task.OperatingMode, types.ModePlan)
+	}
+	if task.MaxConsecutiveFailedTurns != turns {
+		t.Errorf("max_consecutive_failed_turns = %d, want the configured default %d", task.MaxConsecutiveFailedTurns, turns)
+	}
+	if !task.AutoCommit {
+		t.Error("the configured auto-commit default never reached the card")
 	}
 }
 

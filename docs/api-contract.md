@@ -251,8 +251,13 @@ wire while a command runs.
 
 `PUT /api/config` is a partial update with two required pairs:
 
-- `worker_provider`/`worker_model` — chat; resolved frontend-side by `resolveWorker` in
-  `$lib/utils/providers.ts`.
+- `worker_provider`/`worker_model` — chat, and the model a task runs on when nobody chose one. The
+  browser resolves it with `resolveWorker` in `$lib/utils/providers.ts`. The server resolves it with
+  `GetWorkerTarget()` in `backend/config/llm.go`, which `applyTaskDefaults()`
+  (`backend/api/task_defaults.go`) writes onto a created task that named neither half of the pair. A
+  request naming one half is left as sent: the worker's model may belong to another provider. A task
+  created with no provider at all is still created, pairless, and refuses to start until one exists.
+  Tests: `backend/api/task_defaults_test.go`, `backend/config/worker_target_test.go`.
 - `utility_provider`/`utility_model` — titles, summaries, commit messages, checkpoint labels;
   `utilityTarget()` in `backend/exec/executor.go`, falling back to the task's own URL/model.
 

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"mike/backend/config"
 	"mike/backend/extensions"
 	"mike/backend/git"
 	"mike/backend/httputil"
@@ -24,28 +25,31 @@ import (
 // ExtensionScaffoldDeps is what the create path needs beyond the handlers it reuses. The authoring
 // bundle is injected because a package under backend/ must not reach for the source tree.
 type ExtensionScaffoldDeps struct {
-	Store      *store.Store
-	Projects   *ProjectHandler
-	Tasks      *TaskHandler
-	Extensions *extensions.ExtensionHandler
+	Store       *store.Store
+	Projects    *ProjectHandler
+	Tasks       *TaskHandler
+	Extensions  *extensions.ExtensionHandler
+	ConfigStore *config.ConfigStore
 }
 
 // ExtensionScaffoldHandler creates a custom extension beside its own repository.
 type ExtensionScaffoldHandler struct {
-	store    *store.Store
-	projects *ProjectHandler
-	tasks    *TaskHandler
-	ext      *extensions.ExtensionHandler
+	store       *store.Store
+	projects    *ProjectHandler
+	tasks       *TaskHandler
+	ext         *extensions.ExtensionHandler
+	configStore *config.ConfigStore
 }
 
 // NewExtensionScaffoldHandler wires the create path over the handlers it borrows: the project's own
 // creation validates the repository, and the task's own start decides whether the agent runs now.
 func NewExtensionScaffoldHandler(deps ExtensionScaffoldDeps) *ExtensionScaffoldHandler {
 	return &ExtensionScaffoldHandler{
-		store:    deps.Store,
-		projects: deps.Projects,
-		tasks:    deps.Tasks,
-		ext:      deps.Extensions,
+		store:       deps.Store,
+		projects:    deps.Projects,
+		tasks:       deps.Tasks,
+		ext:         deps.Extensions,
+		configStore: deps.ConfigStore,
 	}
 }
 
@@ -142,6 +146,9 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
+	// No browser is open here to choose a model, and the start below refuses a row with no provider in
+	// the log alone.
+	applyTaskDefaults(task, h.configStore, nil, nil)
 	if err := h.store.CreateTask(task); err != nil {
 		h.rollbackProject(project.ID)
 		cleanup(err)

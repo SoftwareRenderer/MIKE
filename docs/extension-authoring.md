@@ -106,6 +106,11 @@ Any failure removes what the call made, including the directory: a project whose
 half-written is a state nobody can clean up. The task's worktree is the ordinary one under
 `.worktrees/`, never inside the extensions tree.
 
+That first card has no browser in front of it choosing a model, so `applyTaskDefaults`
+(`backend/api/task_defaults.go`) gives it the configured worker pair, operating mode, failed-turn limit
+and auto-commit defaults. A row with no provider is one `executor.StartTask` refuses, and the create only
+logs that refusal — the pair is what makes the card run.
+
 ## The bundle
 
 `templates/extension/` holds `README.md`, `AGENTS.md`, a `tests/README.md`, and the authoring skill
@@ -120,5 +125,6 @@ read-only while the browser cannot reach it.
 - `dev_load_test.go` — loading, the three consumers resolving into the staging copy, the prune.
 - `scaffold_test.go` — the bundle and the scaffolder: every example manifest passes the load validator,
   and the grammar page names every field the Go manifest types declare, in both directions.
-- `backend/api/extension_scaffold_test.go` — the create path.
+- `backend/api/extension_scaffold_test.go` — the create path, and the defaults its first task arrives
+  with.
 - `backend/api/project_dev_repo_test.go` — only a development project's directory is removed.

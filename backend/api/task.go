@@ -190,33 +190,13 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		if task.Title == "" && task.Prompt != "" {
 			task.Title = autoGenerateTitle(task.Prompt)
 		}
-		if h.configStore != nil {
-			if cfg, err := h.configStore.GetConfig(); err == nil {
-				skipFields := make(map[string]struct{})
-				for _, k := range []string{"auto_commit", "auto_merge", "subtasks_auto_merge"} {
-					if rawBody.has(k) {
-						skipFields[k] = struct{}{}
-					}
-				}
-				var parentTask *types.Task
-				if task.ParentTaskID != "" {
-					parentTask, _ = h.store.GetTask(projectID, task.ParentTaskID)
-				}
-				types.ApplyTaskCreationDefaults(&task, cfg, parentTask, skipFields)
-
-				if !rawBody.has("operating_mode") {
-					if cfg.DefaultOperatingMode != nil {
-						task.OperatingMode = *cfg.DefaultOperatingMode
-					}
-				}
-				if task.OperatingMode == "" {
-					task.OperatingMode = types.ModeAct
-				}
-				if cfg.DefaultMaxFailedTurns != nil && !rawBody.has("max_consecutive_failed_turns") {
-					task.MaxConsecutiveFailedTurns = *cfg.DefaultMaxFailedTurns
-				}
+		skipFields := make(map[string]struct{})
+		for _, k := range []string{"auto_commit", "auto_merge", "subtasks_auto_merge", "operating_mode", "max_consecutive_failed_turns"} {
+			if rawBody.has(k) {
+				skipFields[k] = struct{}{}
 			}
 		}
+		var parentTask *types.Task
 		if task.ParentTaskID != "" {
 			parent, err := h.store.GetTask(projectID, task.ParentTaskID)
 			if err != nil {
@@ -227,7 +207,11 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 				httputil.JSONError(w, http.StatusBadRequest, "task cannot be its own parent")
 				return
 			}
-			task.Status = types.SubtaskStatusFor(parent.Status)
+			parentTask = parent
+		}
+		applyTaskDefaults(&task, h.configStore, parentTask, skipFields)
+		if parentTask != nil {
+			task.Status = types.SubtaskStatusFor(parentTask.Status)
 			if task.Status == types.StatusInProgress {
 				task.ExecutionState = types.ExecStateIdle
 			}
