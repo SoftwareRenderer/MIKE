@@ -41,6 +41,17 @@ if (typeof globalThis.BroadcastChannel === 'function') {
     });
 }
 
+// jsdom decodes no image and draws no canvas, so an intake that measures its own picture would fail before
+// the tray sees it. Every file is pictured at these dimensions; a test that measures a resample passes its
+// own decoder.
+if (typeof globalThis.createImageBitmap !== 'function') {
+    Object.defineProperty(globalThis, 'createImageBitmap', {
+        value: async () => ({ width: 800, height: 600, close: () => {} }),
+        writable: true,
+        configurable: true,
+    });
+}
+
 // jsdom's HTMLDialogElement declares `open` and nothing else, so showModal()/close() throw and a
 // component that opens its own <dialog> never reaches the markup the test is reading. What the app
 // asks of them: showModal makes it open, close makes it closed and says so.

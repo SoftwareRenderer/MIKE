@@ -27,10 +27,9 @@ func (s *Server) handleTaskSend(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 
 	// Read the body to see the replace field, then hand the same bytes on; every other field stays the
-	// executor's to parse. One byte past the cap leaves the size limit to the delegate.
-	raw, err := io.ReadAll(io.LimitReader(r.Body, httputil.MaxRequestBodyBytes+1))
-	if err != nil {
-		Fail(w, err, "read request", "request body unreadable")
+	// executor's to parse.
+	raw, ok := httputil.MessageBody(w, r)
+	if !ok {
 		return
 	}
 	var peek struct {

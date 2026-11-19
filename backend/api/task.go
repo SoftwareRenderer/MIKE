@@ -125,7 +125,10 @@ func (h *TaskHandler) HandleList(w http.ResponseWriter, r *http.Request) {
 		}
 		httputil.JSONResponse(w, http.StatusOK, tasks)
 	case http.MethodPost:
-		body, _ := io.ReadAll(r.Body)
+		body, ok := httputil.MessageBody(w, r)
+		if !ok {
+			return
+		}
 		var task types.Task
 		// The body is decoded twice, on purpose: into types.Task for the values, and into the
 		// still-encoded fields to answer "did the client send this key at all", which no struct

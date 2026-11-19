@@ -1058,8 +1058,9 @@ func (s *Server) middlewareChain(h http.Handler) http.Handler {
 		s.RedirectHTTPSMiddleware,
 		PanicRecoveryMiddleware,
 		s.StatusLogMiddleware,
-		// Before anything that reads a body.
-		MaxBodyMiddleware(httputil.MaxRequestBodyBytes),
+		// Before anything that reads a body. The cap is the widest body any route may legitimately carry, so
+		// a message with four attached images is not refused on its way in.
+		MaxBodyMiddleware(httputil.MaxMessageBodyBytes),
 		NonceMiddleware,
 		s.CORSMiddleware,
 		// Before CSRF and the session: a bearer credential carries no cookie to forge, and its

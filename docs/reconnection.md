@@ -115,9 +115,10 @@ holding the buffer holds the wait (`saveRetryDelayMs`) until the write lands.
 ## The Chat Draft Across a Browser Being Away
 
 The composer's text and its image tray belong to the browser: the `drafts` and `attachments` stores hold what
-the person left there, and the next open of the task reads them back. One rule covers both halves and
-`frontend/src/lib/utils/chat-draft.ts` is its only home: **the store holds exactly what the surface holds,
-empty included.**
+the person left there, and the next open of the task reads them back. What reaches the tray was decided before
+it got there: `docs/api-contract.md → The image a provider is shown` owns the caps. One rule covers both
+halves and `frontend/src/lib/utils/chat-draft.ts` is its only home: **the store holds exactly what the surface
+holds, empty included.**
 
 Two shortcuts break it, one per half. A save that skips an emptied tray leaves an image nobody kept, and the
 next read paints the thumbnail back. A save that runs before the opening read answers deletes the draft that

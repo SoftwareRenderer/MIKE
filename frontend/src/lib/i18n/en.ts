@@ -1488,7 +1488,15 @@ const catalog = {
     // {error} is whatever the request threw, often the server's own sentence.
     'boardDnd.moveFailed': 'Failed to move task: {error}',
     'attachments.couldNotRead': 'Could not read {name}',
-    'attachments.tooLarge': { one: '{count} image too large (max {limit} MB)', other: '{count} images too large (max {limit} MB)' },
+    // An image the tray cannot hold reaches the task as a file; the sentence names which reason emptied the tray.
+    'attachments.sentAsFilesOversize': {
+        one: '{count} image over {limit} MB attached as a file',
+        other: '{count} images over {limit} MB attached as a file',
+    },
+    'attachments.sentAsFilesUnresizable': {
+        one: '{count} image could not be scaled down, attached as a file',
+        other: '{count} images could not be scaled down, attached as a file',
+    },
     'attachments.onlyN': 'Only {max} images per message',
     'attachments.inlinedFile': 'Pasted {name}:',
     'attachments.truncatedText': '… {kb} KB of {name} not included',

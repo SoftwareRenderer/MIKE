@@ -12,7 +12,7 @@ test.describe.configure({ mode: 'serial' });
 // The attachments store holds what the tray holds, empty included, so an image the person removed has to
 // leave the store too — or the next read paints its thumbnail back.
 
-/** A 1x1 PNG: the tray takes the bytes' base64 and never decodes them. */
+/** A 1x1 PNG: it is inside both image caps, so the tray holds the bytes it was given. */
 const PNG = Buffer.from(
     'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
     'base64',

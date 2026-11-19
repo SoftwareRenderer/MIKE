@@ -9,13 +9,15 @@ import {
     readTextFile,
     sortTransferFiles,
     takeTransfer,
+    type DecodeImage,
     type TransferBuckets,
 } from '$lib/utils/attachments';
 
 /**
  * The paste, drop and picker handling of one message input: a raster a provider can be shown
  * becomes an attachment, a text document is inlined where the cursor is, and anything else is
- * written into the task's own environment and named by path.
+ * written into the task's own environment and named by path — including an image the tray cannot
+ * hold, which reaches the task as a file.
  */
 export interface ImageAttachmentsOptions {
     getTextarea: () => HTMLTextAreaElement | null | undefined;
@@ -30,6 +32,11 @@ export interface ImageAttachmentsOptions {
     uploadFile?: (file: File) => Promise<string>;
     /** False where there is no task environment to write into (the create-task modal). */
     hasTask?: () => boolean;
+    /**
+     * Handed to `readImageAttachments`. The browser's decoder is the default; a test passes one that needs no
+     * canvas.
+     */
+    decode?: DecodeImage;
     onChanged?: () => void;
 }
 
@@ -52,11 +59,15 @@ export function useImageAttachments(options: ImageAttachmentsOptions) {
         dialogStore.showToast(message, 'error');
     }
 
-    async function takeImages(files: File[]) {
-        const picked = await readImageAttachments(files, MAX_IMAGES - options.held());
+    async function takeImages(files: File[]): Promise<File[]> {
+        const picked = await readImageAttachments(files, MAX_IMAGES - options.held(), options.decode);
         if (picked.accepted.length > 0) options.addImages(picked.accepted);
-        const problem = describeRejectedImages(picked);
+        // Only say the bytes became a file when they can still land somewhere; with no task to write into,
+        // takeFiles reports the refusal.
+        const canUpload = !!options.uploadFile && !!options.hasTask?.();
+        const problem = describeRejectedImages(picked, canUpload);
         if (problem) report(problem);
+        return picked.asFiles.map(({ file }) => file);
     }
 
     async function takeTexts(files: File[]) {
@@ -90,9 +101,10 @@ export function useImageAttachments(options: ImageAttachmentsOptions) {
     }
 
     async function intake(buckets: TransferBuckets) {
-        if (buckets.images.length > 0) await takeImages(buckets.images);
+        const fallback = buckets.images.length > 0 ? await takeImages(buckets.images) : [];
         if (buckets.texts.length > 0) await takeTexts(buckets.texts);
-        if (buckets.files.length > 0) await takeFiles(buckets.files);
+        const files = [...buckets.files, ...fallback];
+        if (files.length > 0) await takeFiles(files);
         options.onChanged?.();
     }
 

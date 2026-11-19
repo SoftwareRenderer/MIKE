@@ -49,7 +49,7 @@ func (te *TaskExecutor) HandleSend(w http.ResponseWriter, r *http.Request) {
 		Regenerate      bool   `json:"regenerate"`
 		ClientToken     string `json:"client_token"`
 	}
-	if !httputil.DecodeJSON(w, r, &req) {
+	if !httputil.DecodeMessageJSON(w, r, &req) {
 		return
 	}
 	if req.Content == "" && req.Attachments == "" {

@@ -3,7 +3,7 @@
 // (.svelte.ts extension: the composable under test uses $state.)
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { dialogStore } from '$lib/stores';
-import { MAX_IMAGES, MAX_INLINE_TEXT } from '$lib/utils/attachments';
+import { MAX_IMAGES, MAX_IMAGE_SIZE, MAX_INLINE_TEXT, type DecodeImage } from '$lib/utils/attachments';
 import { useImageAttachments } from '../use-image-attachments.svelte';
 
 function pasteOf(files: File[], text: string | null = null) {
@@ -34,7 +34,15 @@ const png = (name = 'shot.png') => new File([new Uint8Array([0x89, 0x50, 0x4e, 0
 const textFile = (name: string, body: string) => new File([body], name, { type: 'text/plain' });
 const archive = (name = 'bundle.zip') => new File([new Uint8Array([0x50, 0x4b, 0x03, 0x04])], name, { type: 'application/zip' });
 
-function setup(options: { upload?: boolean; hasTask?: boolean; held?: number } = {}) {
+/**
+ * jsdom has no canvas, so files are pictured at these dimensions unless the test brings its own decoder.
+ * `writes` is what a resample returns; these fixtures stay under the ceiling, so it answers nothing by default.
+ */
+function pictureOf(width: number, height: number, writes: Blob | null = null): DecodeImage {
+    return async () => ({ width, height, encode: async () => writes, close: () => {} });
+}
+
+function setup(options: { upload?: boolean; hasTask?: boolean; held?: number; decode?: DecodeImage } = {}) {
     const textarea = document.createElement('textarea');
     document.body.append(textarea);
     textarea.value = 'before ';
@@ -54,6 +62,7 @@ function setup(options: { upload?: boolean; hasTask?: boolean; held?: number } =
             ? undefined
             : async (file) => { uploaded.push(file.name); return `/home/sandbox/p1/.mike-uploads/${file.name}`; },
         hasTask: () => options.hasTask !== false,
+        decode: options.decode ?? pictureOf(100, 100),
     });
 
     return { textarea, intake, images, uploaded, toasts };
@@ -186,15 +195,60 @@ describe('image caps', () => {
         expect(h.images).toHaveLength(MAX_IMAGES);
     });
 
-    it('reports an image over the size limit', async () => {
+    it('keeps an image as large as the upload cap allows, which is what an attached file may be', async () => {
         const h = setup();
         const big = new File([new Uint8Array(5 * 1024 * 1024)], 'big.png', { type: 'image/png' });
 
         h.intake.handlePaste(pasteOf([big]));
 
-        await vi.waitFor(() => expect(h.toasts).toHaveBeenCalled());
-        expect(h.toasts.mock.calls[0][0]).toContain('too large');
+        await vi.waitFor(() => expect(h.images).toHaveLength(1));
+        expect(h.uploaded).toEqual([]);
+        expect(h.toasts).not.toHaveBeenCalled();
+    });
+
+    it('uploads an image over the byte cap into the task and says it became a file', async () => {
+        const h = setup();
+        const huge = png('huge.png');
+        Object.defineProperty(huge, 'size', { value: MAX_IMAGE_SIZE + 1 });
+
+        h.intake.handlePaste(pasteOf([huge]));
+
+        await vi.waitFor(() => expect(h.uploaded).toEqual(['huge.png']));
         expect(h.images).toHaveLength(0);
+        expect(h.toasts.mock.calls.flat().join(' ')).toContain('attached as a file');
+    });
+
+    it('uploads an image no browser can picture, naming the resample as the reason', async () => {
+        const h = setup({ decode: async () => null });
+
+        h.intake.handlePaste(pasteOf([png('broken.png')]));
+
+        await vi.waitFor(() => expect(h.uploaded).toEqual(['broken.png']));
+        expect(h.toasts.mock.calls.flat().join(' ')).toContain('could not be scaled down');
+    });
+
+    it('scales an image over the pixel ceiling down rather than refusing it', async () => {
+        const h = setup({ decode: pictureOf(5000, 5000, new Blob([new Uint8Array([9, 9])], { type: 'image/png' })) });
+
+        h.intake.handlePaste(pasteOf([png('huge-shot.png')]));
+
+        await vi.waitFor(() => expect(h.images).toHaveLength(1));
+        expect(h.images[0]).toEqual({ mimeType: 'image/png', data: 'CQk=' });
+        expect(h.uploaded).toEqual([]);
+        expect(h.toasts).not.toHaveBeenCalled();
+    });
+
+    it('names the missing task rather than claiming an upload for a surface that has nowhere to write', async () => {
+        const h = setup({ hasTask: false });
+        const huge = png('huge.png');
+        Object.defineProperty(huge, 'size', { value: MAX_IMAGE_SIZE + 1 });
+
+        h.intake.handlePaste(pasteOf([huge]));
+
+        await vi.waitFor(() => expect(h.toasts).toHaveBeenCalled());
+        const said = h.toasts.mock.calls.flat().join(' ');
+        expect(said).toContain('needs a running task');
+        expect(said).not.toContain('attached as a file');
     });
 
     it('counts what the field already holds, so two gestures cannot exceed the cap', async () => {

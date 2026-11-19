@@ -527,6 +527,39 @@ row they were reading. `frontend/tests/e2e/chat-scroll-jitter.spec.ts` answers t
 wheel spec cannot: it tags every `scrollTop` write so an app write is distinguishable from the browser's
 kinetic scroll and anchoring, and asserts the settle leaves a fling alone and a still reader on their row.
 
+## The image a provider is shown
+
+An attached image is decided once, in the browser, before a byte of it is stored. The tray's thumbnail, the
+IndexedDB draft, the POST body, the `attachments` column and the `image_url` part are one picture. Nothing
+downstream resamples, and no Go code decodes an image.
+
+**Two caps decide it.** The byte cap is `MAX_IMAGE_SIZE` in `frontend/src/lib/utils/attachments.ts`, and it
+is the size of an uploaded file: the constant mirrors `exec.MaxUploadBytes`, which is what the upload handler
+enforces. The pixel cap is `MAX_IMAGE_PIXELS`, and `scaledImageDimensions` answers the largest integer pair
+on the source's ratio that fits it, or nothing when the source already fits. `MAX_IMAGES` bounds how many a
+message carries.
+
+**An image inside both caps keeps the bytes it arrived as**, unread and unencoded, because resampling a
+picture that already fits costs quality for nothing. A bigger one is drawn down by `decodeImage`:
+`createImageBitmap`, a canvas, and a re-encode under the mime type it arrived as. `NewImagePart` hands that
+mime to the provider, so the format the person attached is the format the provider is shown — a canvas that
+would write a PNG where a GIF was asked for reports nothing.
+
+**What cannot be an image becomes a file.** Over the byte cap, undecodable, or a format no canvas writes:
+`readImageAttachments` returns it under `asFiles` with its reason, and the composer's file path writes it into
+the task's `.mike-uploads/` and inserts the path, exactly as a dropped archive does. A toast names the reason.
+Where the surface has no task to write into, that is the sentence instead — an upload was not claimed.
+
+**The bound that follows is the message bound.** Four images at the byte cap are ~107 MB of base64. The two
+routes that carry a user message therefore read at `httputil.MaxMessageBodyBytes`: creating a task with a
+first prompt, and `POST …/tasks/{taskID}/send`. `MaxBodyMiddleware` carries the same number, so the largest
+legitimate message arrives. Every other JSON route decodes at `MaxRequestBodyBytes`. Widening the message
+route must not widen the rest.
+
+Tests: `frontend/src/lib/utils/__tests__/attachments.unit.ts` (the geometry table, and which bucket each pick
+lands in), `frontend/tests/e2e/chat-image-downscale.spec.ts` (a real pick resampled to the ceiling, and a pick
+that is no picture landing in the task's uploads), and `go test ./backend/httputil/` for the two bounds.
+
 ## The branch listing names its holder
 
 `GET /api/projects/{id}/git/branches` answers one row per ref: `name`, `worktree` — the path of a worktree

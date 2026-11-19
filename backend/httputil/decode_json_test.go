@@ -38,22 +38,33 @@ func TestDecodeJSONBoundsTheBody(t *testing.T) {
 	}
 }
 
-// TestMaxRequestBodyBytesCoversTheLargestRealPayload keeps the cap honest: the
-// biggest thing the UI legitimately sends is a user message with four inline images,
-// so raising or lowering the constant is a decision about that flow.
-func TestMaxRequestBodyBytesCoversTheLargestRealPayload(t *testing.T) {
+// TestMaxMessageBodyBytesCoversTheLargestRealPayload keeps the cap honest: the biggest thing the UI sends is
+// a user message with four images at the frontend's intake cap, so either constant can break that flow.
+func TestMaxMessageBodyBytesCoversTheLargestRealPayload(t *testing.T) {
 	const (
-		maxImages     = 4               // frontend/src/lib/utils/attachments.ts MAX_IMAGES
-		maxImageBytes = 4 * 1024 * 1024 // ... and MAX_IMAGE_SIZE
-		base64Slack   = 4               // base64 is 4/3 of the bytes
+		maxImages     = 4                // frontend/src/lib/utils/attachments.ts MAX_IMAGES
+		maxImageBytes = 20 * 1024 * 1024 // ... and MAX_IMAGE_SIZE, which mirrors exec.MaxUploadBytes
+		base64Slack   = 4                // base64 is 4/3 of the bytes
 	)
 	largest := int64(maxImages*maxImageBytes)*int64(base64Slack)/3 + (1 << 20) // + prompt and framing
-	if MaxRequestBodyBytes < largest {
-		t.Errorf("MaxRequestBodyBytes = %d, but a message with %d images of %d bytes needs ~%d",
-			MaxRequestBodyBytes, maxImages, maxImageBytes, largest)
+	if MaxMessageBodyBytes < largest {
+		t.Errorf("MaxMessageBodyBytes = %d, but a message with %d images of %d bytes needs ~%d",
+			MaxMessageBodyBytes, maxImages, maxImageBytes, largest)
 	}
-	if MaxRequestBodyBytes > 64<<20 {
-		t.Errorf("MaxRequestBodyBytes = %d is looser than any flow needs; the cap is the point", MaxRequestBodyBytes)
+	if MaxMessageBodyBytes > 160<<20 {
+		t.Errorf("MaxMessageBodyBytes = %d is looser than any flow needs; the cap is the point", MaxMessageBodyBytes)
+	}
+}
+
+// TestGeneralJSONBoundStaysTighterThanTheMessageBound keeps the widening to the routes that need it: only
+// the two message routes decode at MaxMessageBodyBytes.
+func TestGeneralJSONBoundStaysTighterThanTheMessageBound(t *testing.T) {
+	if MaxRequestBodyBytes > 32<<20 {
+		t.Errorf("MaxRequestBodyBytes = %d: nothing without an attachment needs this much", MaxRequestBodyBytes)
+	}
+	if MaxRequestBodyBytes >= MaxMessageBodyBytes {
+		t.Errorf("MaxRequestBodyBytes = %d is no tighter than the message bound %d, so widening one widened both",
+			MaxRequestBodyBytes, MaxMessageBodyBytes)
 	}
 }
 

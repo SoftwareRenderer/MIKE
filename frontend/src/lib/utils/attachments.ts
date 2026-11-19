@@ -6,10 +6,23 @@
 import type { DraftAttachment } from '$lib/storage';
 import { t } from '$lib/i18n';
 
-/** @knipignore A fixture is built one byte over this cap. */
-export const MAX_IMAGE_SIZE = 4 * 1024 * 1024;
+/**
+ * The intake cap for an image, and it is the upload cap: this mirrors `exec.MaxUploadBytes`
+ * (backend/exec/task_files.go), so an image may be as large as any file the same gesture can upload.
+ *
+ * @knipignore A fixture is built one byte over this cap.
+ */
+export const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
 
 export const MAX_IMAGES = 4;
+
+/**
+ * The pixel ceiling on the image a provider is shown: above it the file is resampled here, at intake, so the
+ * tray, the draft, the row and the request all hold the smaller picture.
+ *
+ * @knipignore The geometry table measures against this ceiling.
+ */
+export const MAX_IMAGE_PIXELS = 16_000_000;
 
 /**
  * A paste has no `accept`, so this is the only thing between a log file and the prompt.
@@ -18,18 +31,30 @@ export const MAX_IMAGES = 4;
  */
 export const MAX_INLINE_TEXT = 64 * 1024;
 
+/** Why an image could not stay an image. */
+type ImageFallback = 'oversize' | 'unresizable';
+
 export interface PickedImages {
     accepted: DraftAttachment[];
-    oversize: File[];
+    /** Images that cannot become an `image_url` part, each with its reason: they go to the task's files. */
+    asFiles: { file: File; reason: ImageFallback }[];
+    /** Images that fit every cap but the count. */
     overflow: File[];
 }
 
-/** What a picker's selection splits into, before anything is read. */
-interface ClassifiedImages {
-    readable: File[];
-    oversize: File[];
-    overflow: File[];
+/**
+ * A decoded picture: its size, and the resample. `encode` answers nothing when the browser cannot write that
+ * format, which is how a GIF — something no canvas can write — leaves the tray.
+ */
+interface DecodedImage {
+    width: number;
+    height: number;
+    encode(mimeType: string, width: number, height: number): Promise<Blob | null>;
+    close(): void;
 }
+
+/** How bytes become a picture. Injected, so the rules below are measured without a canvas. */
+export type DecodeImage = (file: File) => Promise<DecodedImage | null>;
 
 /**
  * The rasters a provider will be shown. `NewImagePart` passes the mime straight into
@@ -151,24 +176,97 @@ export function readTextFile(file: File): Promise<{ content: string; droppedByte
 }
 
 /**
- * Whatever is not an attachable image is not this function's business: a picker can be talked
- * past its `accept`, and those files belong to `sortTransferFiles`.
+ * The largest integer pair on the source's ratio that fits `MAX_IMAGE_PIXELS`, or null when it already fits,
+ * which keeps the image's own bytes instead of re-encoding it.
+ *
+ * @knipignore The geometry table measures this.
  */
-function classifyImages(files: FileList | File[], remaining: number): ClassifiedImages {
-    const images = Array.from(files).filter(isAttachableImage);
-    const oversize = images.filter(f => f.size > MAX_IMAGE_SIZE);
-    const readable = images.filter(f => f.size <= MAX_IMAGE_SIZE);
-    const room = Math.max(0, remaining);
-    return { readable: readable.slice(0, room), oversize, overflow: readable.slice(room) };
+export function scaledImageDimensions(width: number, height: number): { width: number; height: number } | null {
+    if (width <= 0 || height <= 0 || width * height <= MAX_IMAGE_PIXELS) return null;
+    const scale = Math.sqrt(MAX_IMAGE_PIXELS / (width * height));
+    const w = Math.max(1, Math.floor(width * scale));
+    const h = Math.max(1, Math.floor(height * scale));
+    // A side that floors to zero is one pixel, and the other is then bounded by the ceiling itself, so the
+    // product still fits a strip of any ratio.
+    return { width: h === 1 ? Math.min(w, MAX_IMAGE_PIXELS) : w, height: w === 1 ? Math.min(h, MAX_IMAGE_PIXELS) : h };
 }
 
-function readImageDataUrl(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = () => reject(reader.error ?? new Error(t('attachments.couldNotRead', { name: file.name })));
-        reader.readAsDataURL(file);
-    });
+/** The bytes of `file` as bare base64, the form the tray, the draft and the row hold; null when they cannot be read. */
+async function readImageBase64(file: File): Promise<string | null> {
+    try {
+        const url = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(file);
+        });
+        return url.slice(url.indexOf(',') + 1);
+    } catch (err) {
+        console.error('Failed to read attachment:', err);
+        return null;
+    }
+}
+
+async function blobToBase64(blob: Blob): Promise<string> {
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    // btoa over one string built by repeated concatenation would hold a copy per chunk of the image.
+    const CHUNK = 0x8000;
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+    }
+    return btoa(binary);
+}
+
+/**
+ * The one place a resample is owed: an image inside both caps keeps the bytes it arrived as, and a bigger one
+ * is drawn down to the dimensions its ratio allows. An image that cannot be pictured, written or read
+ * answers null, and the caller attaches it as a file.
+ */
+async function toAttachment(file: File, decode: DecodeImage): Promise<DraftAttachment | null> {
+    let image: DecodedImage | null;
+    try {
+        image = await decode(file);
+    } catch (err) {
+        console.error('Failed to decode attachment:', err);
+        return null;
+    }
+    if (!image) return null;
+    try {
+        const target = scaledImageDimensions(image.width, image.height);
+        if (!target) {
+            const data = await readImageBase64(file);
+            return data ? { mimeType: file.type, data } : null;
+        }
+        const blob = await image.encode(file.type, target.width, target.height);
+        if (!blob) return null;
+        return { mimeType: file.type, data: await blobToBase64(blob) };
+    } finally {
+        image.close();
+    }
+}
+
+/**
+ * The browser's own decoder. A format it will not write answers null rather than the PNG a canvas falls back
+ * to, so the provider is shown the format that was attached.
+ */
+async function decodeImage(file: File): Promise<DecodedImage | null> {
+    const bitmap = await createImageBitmap(file);
+    return {
+        width: bitmap.width,
+        height: bitmap.height,
+        async encode(mimeType, width, height) {
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return null;
+            ctx.drawImage(bitmap, 0, 0, width, height);
+            const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, mimeType));
+            return blob && blob.type === mimeType ? blob : null;
+        },
+        close: () => bitmap.close?.(),
+    };
 }
 
 const DATA_URL_SCHEME = 'data:';
@@ -184,30 +282,46 @@ export function imageSrc(att: { mimeType: string; data: string }): string {
 
 /** `data` is the **bare** base64, not a data URL: what the `attachments` column and IndexedDB
  *  drafts hold, and what `NewImagePart` wants with no envelope on it. */
-export async function readImageAttachments(files: FileList | File[], remaining: number): Promise<PickedImages> {
-    const { readable, oversize, overflow } = classifyImages(files, remaining);
-
+export async function readImageAttachments(
+    files: FileList | File[],
+    remaining: number,
+    decode: DecodeImage = decodeImage,
+): Promise<PickedImages> {
+    let room = Math.max(0, remaining);
     const accepted: DraftAttachment[] = [];
-    for (const file of readable) {
-        try {
-            const url = await readImageDataUrl(file);
-            accepted.push({ mimeType: file.type, data: url.slice(url.indexOf(',') + 1) });
-        } catch (err) {
-            // Reported as a rejection rather than left as a hole in the message.
-            console.error('Failed to read attachment:', err);
-            oversize.push(file);
+    const asFiles: PickedImages['asFiles'] = [];
+    const overflow: File[] = [];
+
+    // Whatever is not an attachable image is not this function's business: a picker can be talked past its
+    // `accept`, and those files belong to `sortTransferFiles`.
+    for (const file of Array.from(files).filter(isAttachableImage)) {
+        if (file.size > MAX_IMAGE_SIZE) asFiles.push({ file, reason: 'oversize' });
+        else if (room === 0) overflow.push(file);
+        else {
+            const attachment = await toAttachment(file, decode);
+            if (attachment) {
+                accepted.push(attachment);
+                room -= 1;
+            } else asFiles.push({ file, reason: 'unresizable' });
         }
     }
 
-    return { accepted, oversize, overflow };
+    return { accepted, asFiles, overflow };
 }
 
-export function describeRejectedImages(rejected: { oversize: File[]; overflow: File[] }): string | null {
-    if (rejected.oversize.length > 0) {
-        const n = rejected.oversize.length;
+/**
+ * The sentence for a pick that left no image in the tray. `uploaded` is false where there is no task to write
+ * into: the file path reports its own refusal there, so claiming an upload would be wrong.
+ */
+export function describeRejectedImages(rejected: PickedImages, uploaded = true): string | null {
+    const sentences: string[] = [];
+    if (uploaded) {
         const limit = Math.round(MAX_IMAGE_SIZE / (1024 * 1024));
-        return t('attachments.tooLarge', { count: n, limit });
+        const oversize = rejected.asFiles.filter(e => e.reason === 'oversize').length;
+        const unresizable = rejected.asFiles.filter(e => e.reason === 'unresizable').length;
+        if (oversize > 0) sentences.push(t('attachments.sentAsFilesOversize', { count: oversize, limit }));
+        if (unresizable > 0) sentences.push(t('attachments.sentAsFilesUnresizable', { count: unresizable }));
     }
-    if (rejected.overflow.length > 0) return t('attachments.onlyN', { max: MAX_IMAGES });
-    return null;
+    if (rejected.overflow.length > 0) sentences.push(t('attachments.onlyN', { max: MAX_IMAGES }));
+    return sentences.length > 0 ? sentences.join('; ') : null;
 }

@@ -53,24 +53,23 @@ func TestMaxBodyMiddlewareBoundsEveryReader(t *testing.T) {
 	}
 }
 
-// TestServerRefusesOversizedBody is the same rule through the middleware chain the
-// server actually runs, on a route that decodes its body itself, at the real limit —
-// and the GET that must not be bounded, because the WebSocket upgrades are GETs.
-//
-// The body is one the handler would happily act on — a valid request with an extra
-// field padded past the cap, and an unknown JSON field is ignored — so the only thing
-// that can stop it is the bound on the reader. A test whose body is garbage proves
-// nothing: it would be refused with the cap wired up or not.
+// TestServerRefusesOversizedBody is the same rule through the middleware chain the server actually runs, at
+// the message bound, and on the GET that must not be bounded because the WebSocket upgrades are GETs. Both
+// bodies are ones the handler would act on, so only the bound can stop it: a garbage body would be refused
+// with the cap wired up or not.
 func TestServerRefusesOversizedBody(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
 
-	// A real mkdir, aimed at a directory the handler would create if it ever saw the
-	// document. Its absence afterwards is the second half of the assertion.
+	// A real mkdir, aimed at a directory the handler would create if it ever saw the document; its absence
+	// afterwards is the second half of the assertion. The declared length is what this half of the rule reads,
+	// so it is set past the cap over that body.
 	made := filepath.Join(t.TempDir(), "made")
-	body := `{"path":"` + made + `","pad":"` + strings.Repeat("y", int(httputil.MaxRequestBodyBytes)) + `"}`
+	body := `{"path":"` + made + `"}`
+	oversized := postRequest("/api/fs/mkdir", strings.NewReader(body), cookie, csrf)
+	oversized.ContentLength = httputil.MaxMessageBodyBytes + 1
 
-	rr := postThroughChain(t, s, "/api/fs/mkdir", strings.NewReader(body), cookie, csrf)
+	rr := serveThroughChain(t, s, oversized)
 	if rr.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("declared length over the cap: got %d, want %d: %s", rr.Code, http.StatusRequestEntityTooLarge, rr.Body.String())
 	}
@@ -81,17 +80,12 @@ func TestServerRefusesOversizedBody(t *testing.T) {
 	// The other sender: no declared length at all (chunked), so nothing to refuse up
 	// front and the bound has to come from the reader. The body is still one the
 	// handler would otherwise act on.
-	chunked := secureRequest(httptest.NewRequest(http.MethodPost, "/api/fs/mkdir", io.MultiReader(
+	chunked := postRequest("/api/fs/mkdir", io.MultiReader(
 		strings.NewReader(`{"path":"`+made+`","pad":"`),
-		&fillerReader{remaining: httputil.MaxRequestBodyBytes},
+		&fillerReader{remaining: httputil.MaxMessageBodyBytes},
 		strings.NewReader(`"}`),
-	)))
-	chunked.Host = "localhost"
-	chunked.Header.Set("Content-Type", "application/json")
-	chunked.Header.Set("Cookie", cookie)
-	chunked.Header.Set("X-CSRF-Token", csrf)
-	w := httptest.NewRecorder()
-	s.middlewareChain(s.mux).ServeHTTP(w, chunked)
+	), cookie, csrf)
+	w := serveThroughChain(t, s, chunked)
 	if w.Code == http.StatusOK {
 		t.Error("a chunked body with no bound was accepted")
 	}
@@ -111,10 +105,9 @@ func TestServerRefusesOversizedBody(t *testing.T) {
 	}
 }
 
-// postThroughChain posts to the middleware chain Serve installs — not to the bare mux,
-// which is a different composition and would let an unwired middleware pass.
-func postThroughChain(t *testing.T, s *Server, target string, body io.Reader, cookie, csrf string) *httptest.ResponseRecorder {
-	t.Helper()
+// postRequest builds the POST every route in front of the mux would receive. Its Content-Length is
+// whatever the body's reader reports; a test staging the declared-length case overrides it.
+func postRequest(target string, body io.Reader, cookie, csrf string) *http.Request {
 	req := secureRequest(httptest.NewRequest(http.MethodPost, target, body))
 	// The chain is Host-pinned before anything else, and httptest's default Host is
 	// not one this server accepts.
@@ -122,6 +115,13 @@ func postThroughChain(t *testing.T, s *Server, target string, body io.Reader, co
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Cookie", cookie)
 	req.Header.Set("X-CSRF-Token", csrf)
+	return req
+}
+
+// serveThroughChain runs a request through the middleware chain Serve installs — not against the bare
+// mux, which is a different composition and would let an unwired middleware pass.
+func serveThroughChain(t *testing.T, s *Server, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
 	rr := httptest.NewRecorder()
 	s.middlewareChain(s.mux).ServeHTTP(rr, req)
 	return rr

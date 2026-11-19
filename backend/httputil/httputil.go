@@ -44,11 +44,18 @@ func MethodNotAllowed(w http.ResponseWriter) {
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 }
 
-// MaxRequestBodyBytes bounds one request body. The largest thing the API legitimately
-// sends is a user message with four inline images (~21 MB base64), so this leaves room
-// and nothing more: without a bound any client with a session can make the server read
-// JSON into memory until it dies.
+// MaxRequestBodyBytes bounds one request body that carries no attachments: what every JSON route reads
+// through DecodeJSON. The largest thing the UI legitimately sends without an image is a file write's
+// 1 MB `content` field, so this leaves room and nothing more: without a bound any client with a session
+// can make the server read JSON into memory until it dies.
 const MaxRequestBodyBytes int64 = 32 << 20
+
+// MaxMessageBodyBytes bounds the two bodies that carry a user message's attachments, the only place an
+// image travels: four images at the frontend's intake cap (MAX_IMAGE_SIZE in
+// frontend/src/lib/utils/attachments.ts, mirroring exec.MaxUploadBytes) are about 107 MB once base64 adds a
+// third. MaxBodyMiddleware carries this number so the largest legitimate message arrives, and a route with
+// no attachments stays at MaxRequestBodyBytes.
+const MaxMessageBodyBytes int64 = 128 << 20
 
 // DecodeJSON decodes the JSON request body into v, bounded by MaxRequestBodyBytes. On failure
 // it writes 400, or 413 when the body was simply too big, and returns false so handlers read as
@@ -62,6 +69,12 @@ const MaxRequestBodyBytes int64 = 32 << 20
 // It checks nothing else: method and required fields stay with the handler.
 func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeJSON(w, r, v, MaxRequestBodyBytes, false)
+}
+
+// DecodeMessageJSON is DecodeJSON at MaxMessageBodyBytes, for the routes that carry a user message. A route
+// may not pick its own bound.
+func DecodeMessageJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	return decodeJSON(w, r, v, MaxMessageBodyBytes, false)
 }
 
 // DecodeJSONOrEmpty is DecodeJSON for a route whose fields are all optional: a request with no body
@@ -78,13 +91,8 @@ func DecodeJSONOrEmpty(w http.ResponseWriter, r *http.Request, v any) bool {
 // that never arrived and one that stopped half way through a value both arrive as io.ErrUnexpectedEOF.
 // `emptyOK` means "no body", not "unreadable body", so the bytes decide.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64, emptyOK bool) bool {
-	raw, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, "invalid request body")
-		return false
-	}
-	if int64(len(raw)) > limit {
-		JSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+	raw, ok := readBody(w, r, limit)
+	if !ok {
 		return false
 	}
 	if len(bytes.TrimSpace(raw)) == 0 {
@@ -99,6 +107,27 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64, empt
 		return false
 	}
 	return true
+}
+
+// MessageBody reads a whole body at MaxMessageBodyBytes for a handler that decodes the bytes more than once
+// and so cannot hand the read to DecodeMessageJSON. It answers 413 over the cap and 400 for a body that
+// failed to arrive.
+func MessageBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
+	return readBody(w, r, MaxMessageBodyBytes)
+}
+
+// readBody is the bounded read behind both, and behind decodeJSON with the general cap.
+func readBody(w http.ResponseWriter, r *http.Request, limit int64) ([]byte, bool) {
+	raw, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
+	if err != nil {
+		JSONError(w, http.StatusBadRequest, "invalid request body")
+		return nil, false
+	}
+	if int64(len(raw)) > limit {
+		JSONError(w, http.StatusRequestEntityTooLarge, "request body too large")
+		return nil, false
+	}
+	return raw, true
 }
 
 // statusClientClosedRequest is nginx's convention for "the peer hung up before we answered". Go has no

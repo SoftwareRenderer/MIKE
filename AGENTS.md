@@ -196,6 +196,9 @@ make test-podman-state                                   # the image entrypoint'
   `frontend/tests/e2e/sandbox-config-form.spec.ts` is what fails when it stops holding.
 - Chat never disguises a system message as a user message, shows the streaming cursor only during an active
   response, and formats stats as `X tokens · Ys · Z tok/s`.
+- **The image a provider is shown is downscaled in the browser before anything is stored** — one intake cap
+  in bytes (the upload cap) and one in pixels, the format kept, and what cannot be downscaled attached as a
+  file instead. `docs/api-contract.md → The image a provider is shown`.
 - **Chat autoscroll is judged from the scroll event, never from a gesture listener**, and new content
   re-pins only while the reader is being followed. `frontend/src/lib/composables/use-chat-follow.svelte.ts`,
   `docs/api-contract.md → The conversation is a window, not the thread`.
