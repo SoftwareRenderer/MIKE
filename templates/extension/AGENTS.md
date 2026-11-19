@@ -18,14 +18,15 @@ files MIKE reads, and the only build step is the person pressing **Try Extension
 
 ## How to work
 
-1. Read `.agents/skills/extension-authoring/SKILL.md`. It decides the type from the description the
+1. Read the Plan skill and agree on a plan before implementing anything.
+2. Read `.agents/skills/extension-authoring/SKILL.md`. It decides the type from the description the
    person gave, and the type decides everything else — whether there is a Dockerfile, whether a
    container runs, whether the extension may reach a network at all.
-2. Write `manifest.json` at this root, beside the files it names. Names inside the extension are
+3. Write `manifest.json` at this root, beside the files it names. Names inside the extension are
    relative to this directory and never climb out of it.
-3. Keep the person's own words out of committed files. The tree is public; their request belongs in
+4. Keep the person's own words out of committed files. The tree is public; their request belongs in
    the task, not in a comment.
-4. Say which type you chose and why, in the task's final message, in the person's terms.
+5. Say which type you chose and why, in the task's final message, in the person's terms.
 
 ## Tests
 
