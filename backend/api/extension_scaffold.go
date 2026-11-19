@@ -63,8 +63,6 @@ type scaffoldRequest struct {
 // devTaskPreamble is the only text the create path adds to the prompt; the person's description follows
 // it verbatim.
 const devTaskPreamble = "You are writing a MIKE extension in this repository.\n\n" +
-	"Read AGENTS.md first, then the extension-authoring skill under .agents/skills/. The skill decides " +
-	"which kind of extension this is — the person did not choose a type, and choosing it is your job. " +
 	"Write manifest.json at the repository root beside the files it names, and copy from the skill's " +
 	"examples rather than inventing a shape.\n\n" +
 	"When you finish, say which type you chose, why, and what the person should look at after they " +
