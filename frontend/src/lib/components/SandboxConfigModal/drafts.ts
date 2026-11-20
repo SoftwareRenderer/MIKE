@@ -16,6 +16,13 @@ export interface SandboxDraft {
     /** Where a task runs. Exactly this value decides it — nothing re-checks it later. */
     sandboxEnabled: boolean;
     networkIsolation: boolean;
+    /**
+     * Whether a turn may reach the network for a submodule this project's repositories name. It is a
+     * person's consent, not a default: a project that never grants it waits on the submodule and answers
+     * with the notice (`backend/exec/submodules.go`). Isolation outranks it — a project that reaches no
+     * network from a turn reaches none for a submodule either.
+     */
+    autoFetchSubmodules: boolean;
     /** The number the field holds: null is a blank field, which means no limit. */
     memoryLimitMB: number | null;
     image: string;
@@ -44,6 +51,7 @@ export function draftFromProject(project: Project): SandboxDraft {
     return {
         sandboxEnabled: project.sandbox_enabled ?? false,
         networkIsolation: project.sandbox_network_isolation ?? false,
+        autoFetchSubmodules: project.auto_fetch_submodules ?? false,
         memoryLimitMB: memoryLimitToInput(project.sandbox_memory_limit ?? DEFAULT_MEMORY_LIMIT_MB),
         image: project.sandbox_image ?? '',
         dockerfilePath,
@@ -130,6 +138,9 @@ export function projectChanges(project: Project, draft: SandboxDraft): SandboxCh
     }
     if (draft.networkIsolation !== draft.networkIsolationBaseline) {
         changes.sandbox_network_isolation = draft.networkIsolation;
+    }
+    if (draft.autoFetchSubmodules !== (project.auto_fetch_submodules ?? false)) {
+        changes.auto_fetch_submodules = draft.autoFetchSubmodules;
     }
     const memoryLimitMB = parseMemoryLimitMB(draft.memoryLimitMB);
     if (memoryLimitMB !== parseMemoryLimitMB(project.sandbox_memory_limit ?? DEFAULT_MEMORY_LIMIT_MB)) {

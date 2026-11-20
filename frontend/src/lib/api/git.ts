@@ -262,6 +262,50 @@ export async function pushProject(projectId: string): Promise<{ status: string }
     return res.json();
 }
 
+/**
+ * One gitlink a commit names, as the person's own checkout holds it. The field names are
+ * `backend/git.SubmoduleState`'s JSON tags, and both the card's notice and the task's refusal are built from
+ * that one row.
+ */
+export interface SubmoduleState {
+    path: string;
+    /** The redacted address MIKE would contact, empty where none is recorded for the path. */
+    url: string;
+    populated: boolean;
+    /** MIKE's own sentence for what is wrong, and for why a fetch would not bring it down either. */
+    note: string;
+}
+
+/** The submodules the task's own commit names, and whether the person's checkout holds each one. Read-only:
+ * nothing here reaches the network. */
+export async function getTaskSubmodules(projectId: string, taskId: string): Promise<SubmoduleState[]> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/submodules`);
+    if (!res.ok) throw await apiError(res, t('api.fetchSubmodules'));
+    const body = await res.json();
+    return (body.submodules ?? []) as SubmoduleState[];
+}
+
+/** What one click of "Initialize submodules" did: what came down, what git said about it, and what is still
+ * missing afterwards. */
+export interface SubmoduleInitResult {
+    populated: string[];
+    reported: string[];
+    missing: SubmoduleState[];
+}
+
+/** Fetch, into the person's own checkout, every submodule the project's commit records. Never queued: it is a
+ * fetch, and a replay would ask the network again for a state the answer already reported. */
+export async function initProjectSubmodules(projectId: string): Promise<SubmoduleInitResult> {
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/submodules/init`, { method: 'POST' });
+    if (!res.ok) throw await apiError(res, t('api.initSubmodules'));
+    const body = await res.json();
+    return {
+        populated: (body.populated ?? []) as string[],
+        reported: (body.reported ?? []) as string[],
+        missing: (body.missing ?? []) as SubmoduleState[],
+    };
+}
+
 // -- Task Git endpoints --
 
 /**

@@ -40,6 +40,9 @@ type ProjectHandler struct {
 	hostRoot *fsutil.HostRoot
 	// resolved DANGER_ZONE grant.
 	dangerZone sandbox.DangerZone
+	// submoduleFetch is the operator's half of what fetching a submodule may contact. The project's half
+	// decides whether a turn asks at all; a person's click always may.
+	submoduleFetch git.SubmoduleFetch
 	// removes the repository directory of a project the server created under the development
 	// namespace, and reports what it could not remove. Declared here so a project's deletion stays one
 	// path; nil means this server has no extensions to develop.
@@ -68,6 +71,8 @@ type ProjectDeps struct {
 	DangerZone  sandbox.DangerZone
 	// DevRepoCleanup owns the repository directory of a development project; see ProjectHandler.
 	DevRepoCleanup func(projectPath string) string
+	// SubmoduleFetch carries the operator's decision into both submodule endpoints.
+	SubmoduleFetch git.SubmoduleFetch
 }
 
 func NewProjectHandler(deps ProjectDeps) *ProjectHandler {
@@ -82,6 +87,8 @@ func NewProjectHandler(deps ProjectDeps) *ProjectHandler {
 		dangerZone:     deps.DangerZone,
 		tasks:          deps.Tasks,
 		devRepoCleanup: deps.DevRepoCleanup,
+
+		submoduleFetch: deps.SubmoduleFetch,
 	}
 }
 
@@ -105,10 +112,46 @@ func (h *ProjectHandler) HandleCounts(w http.ResponseWriter, r *http.Request) {
 // never fails the import: a submodule whose upstream is unreachable is the log's and the task's to report, not
 // a reason a person cannot use MIKE with this project. onStatus, which may be nil, hears each outcome worth
 // reporting.
-func importSubmodules(ctx context.Context, path string, onStatus func(string)) {
-	if _, err := git.InitSubmodules(ctx, path, onStatus); err != nil {
+func (h *ProjectHandler) importSubmodules(ctx context.Context, path string, onStatus func(string)) {
+	if _, err := git.InitSubmodules(ctx, path, h.submoduleFetch, onStatus); err != nil {
 		logging.For(logging.Git).Warnf("submodules of %s could not be read: %v", path, err)
 	}
+}
+
+// HandleTaskSubmodules answers GET /api/projects/{projectID}/tasks/{taskID}/submodules with the submodules the
+// task's own commit names, each with the address MIKE would fetch it from and whether the person's checkout
+// already holds it (project_submodules.go holds the reading).
+func (h *ProjectHandler) HandleTaskSubmodules(w http.ResponseWriter, r *http.Request) {
+	task, ok := resolveTaskWithWorktree(w, r, h.store, h.worktreeMgr)
+	if !ok {
+		return
+	}
+	project, ok := resolveProject(w, r, h.store)
+	if !ok {
+		return
+	}
+	states, err := h.taskSubmoduleRows(r.Context(), task.ID, project.Path)
+	if err != nil {
+		httputil.Fail(w, errs.Operation("read the project's submodules", err), "read submodules", "project not found")
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, submodulesAnswer(states))
+}
+
+// HandleInitSubmodules answers POST /api/projects/{projectID}/submodules/init: the person asking MIKE to fetch
+// what the project's checkout records and does not hold. What stayed out is part of the answer rather than a
+// fault — the person has to read which submodule and why, and stay able to act on it.
+func (h *ProjectHandler) HandleInitSubmodules(w http.ResponseWriter, r *http.Request) {
+	project, ok := resolveProject(w, r, h.store)
+	if !ok {
+		return
+	}
+	init, err := h.initProjectSubmodules(r.Context(), project.Path)
+	if err != nil {
+		httputil.Fail(w, errs.Operation("initialize the project's submodules", err), "initialize submodules", "project not found")
+		return
+	}
+	httputil.JSONResponse(w, http.StatusOK, init.Answer())
 }
 
 // HandleCreate creates a new project from a directory path.
@@ -155,7 +198,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 		httputil.JSONError(w, code, msg)
 		return
 	}
-	importSubmodules(r.Context(), p.Path, nil)
+	h.importSubmodules(r.Context(), p.Path, nil)
 	httputil.JSONResponse(w, code, p)
 }
 
@@ -297,12 +340,18 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 	if req.SandboxNetworkIsolation != nil {
 		networkIsolation = *req.SandboxNetworkIsolation
 	}
+	// Unset means no consent, which is what a create request that says nothing means too.
+	autoFetch := false
+	if req.AutoFetchSubmodules != nil {
+		autoFetch = *req.AutoFetchSubmodules
+	}
 	p := &types.Project{
 		ID:                      projectID,
 		Name:                    name,
 		Path:                    req.Path,
 		SandboxEnabled:          req.SandboxEnabled,
 		SandboxNetworkIsolation: networkIsolation,
+		AutoFetchSubmodules:     autoFetch,
 		SandboxImage:            req.SandboxImage,
 		SandboxDockerfilePath:   req.SandboxDockerfilePath,
 		SandboxBuildContext:     contextRoot,
@@ -373,7 +422,7 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 
 	// Each submodule outcome the person would want is a status line on the stream the clone used.
 	sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": "Fetching submodules..."})
-	importSubmodules(r.Context(), targetPath, func(line string) {
+	h.importSubmodules(r.Context(), targetPath, func(line string) {
 		sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": line})
 	})
 
@@ -728,6 +777,7 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 	// Modifying sandbox settings during execution would kill bridge processes
 	// mid-tool-call, causing "broken pipe" errors.
 	hasSandboxChange := req.SandboxEnabled != nil || req.SandboxNetworkIsolation != nil ||
+		req.AutoFetchSubmodules != nil ||
 		req.SandboxImage != nil || req.SandboxDockerfilePath != nil || req.SandboxBuildContext != nil ||
 		req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
 		req.SandboxMounts != nil || req.SandboxEnvs != nil ||
@@ -808,6 +858,11 @@ func (h *ProjectHandler) applySandboxFields(id string, req types.UpdateProjectRe
 	if req.SandboxNetworkIsolation != nil {
 		if updateErr := h.store.UpdateProjectSandboxNetworkIsolation(id, *req.SandboxNetworkIsolation); updateErr != nil {
 			return errs.Operation("update sandbox network isolation setting", updateErr)
+		}
+	}
+	if req.AutoFetchSubmodules != nil {
+		if updateErr := h.store.UpdateProjectAutoFetchSubmodules(id, *req.AutoFetchSubmodules); updateErr != nil {
+			return errs.Operation("update submodule fetch consent", updateErr)
 		}
 	}
 	if req.SandboxImage != nil {

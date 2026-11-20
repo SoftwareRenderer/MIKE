@@ -1033,6 +1033,25 @@ Tests: `backend/server/handler_fs_ops_test.go`; client side `frontend/src/lib/ap
 Tests: `backend/api/project_build_context_test.go`, `TestRejectBuildQuery`,
 `backend/sandbox/build_e2e_test.go`.
 
+## Submodules are read from the task and fetched by a click
+
+- **`GET /api/projects/{projectID}/tasks/{taskID}/submodules`** answers the gitlinks that task's own commit
+  names, as `git.SubmoduleState` rows: `path`, `url`, `populated`, `note`. It reads and fetches nothing. The
+  card's notice is built from these rows, so what the person is told is missing is what the next start will
+  re-read. A task with no worktree is listed from the checkout its worktree would be built from, which is the
+  reading a start would have made.
+- **`POST /api/projects/{projectID}/submodules/init`** is one click asking for the project's own checkout to
+  hold what its commit records. It answers `populated`, `reported` and `missing` — what came down, what git
+  said, and what is still out. A submodule that stayed out is a result and not a fault: the answer is 200 so
+  the person can read which one and act on it.
+- **The URL is redacted on the way out** and shown as text, never as a link. It is a repository-chosen
+  address (`docs/git-operations.md → Submodules`).
+- **`submodules_uninitialized` is the code that turns an error row into that notice** rather than a retry
+  (`backend/exec/submodules.go`, `frontend/src/lib/components/Chat/SubmoduleNotice.svelte`).
+
+Tests: `backend/api/project_submodules_test.go`,
+`frontend/src/lib/components/Chat/__tests__/submodule-notice.unit.svelte.ts`.
+
 ## Errors
 
 A server fault answers MIKE's own sentence; the cause goes to the log. `errs.Operation(operation, cause)`

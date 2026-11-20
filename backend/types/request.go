@@ -12,6 +12,7 @@ type CreateProjectRequest struct {
 	Name                    string         `json:"name,omitempty"`
 	SandboxEnabled          bool           `json:"sandbox_enabled"`
 	SandboxNetworkIsolation *bool          `json:"sandbox_network_isolation"`
+	AutoFetchSubmodules     *bool          `json:"auto_fetch_submodules,omitempty"`
 	SandboxImage            string         `json:"sandbox_image,omitempty"`
 	SandboxDockerfilePath   string         `json:"sandbox_dockerfile_path,omitempty"`
 	SandboxBuildContext     string         `json:"sandbox_build_context,omitempty"`
@@ -27,6 +28,7 @@ type UpdateProjectRequest struct {
 	Name                    string         `json:"name,omitempty"`
 	SandboxEnabled          *bool          `json:"sandbox_enabled,omitzero"`
 	SandboxNetworkIsolation *bool          `json:"sandbox_network_isolation,omitzero"`
+	AutoFetchSubmodules     *bool          `json:"auto_fetch_submodules,omitzero"`
 	SandboxImage            *string        `json:"sandbox_image,omitzero"`
 	SandboxDockerfilePath   *string        `json:"sandbox_dockerfile_path,omitzero"`
 	SandboxBuildContext     *string        `json:"sandbox_build_context,omitzero"`

@@ -134,11 +134,11 @@ func CloneEnv() []string {
 // URL, it beats both a command-line refusal and the person's own `protocol.<name>.allow`.
 var submoduleProtocols = []string{"http", "https", "git", "ssh"}
 
-// submoduleEnv is CloneEnv with that narrower list. widen is extra environment a fixture appends, which
-// os/exec's last-wins lets it override the allowlist with; production passes none, and the function stays
-// unexported so no call site can widen the fence.
+// submoduleEnv is CloneEnv with that narrower list, plus the pinned refusal of a redirect. widen is extra
+// environment a fixture appends, which os/exec's last-wins lets it override the allowlist with; production
+// passes none, and the function stays unexported so no call site can widen the fence.
 func submoduleEnv(widen []string) []string {
-	return Env(append([]string{"GIT_ALLOW_PROTOCOL=" + strings.Join(submoduleProtocols, ":")}, widen...)...)
+	return envWithPinned(submodulePinned, append([]string{"GIT_ALLOW_PROTOCOL=" + strings.Join(submoduleProtocols, ":")}, widen...)...)
 }
 
 // CloneContext clones under ctx on the allowed transports, reporting the percentage whenever it increases.

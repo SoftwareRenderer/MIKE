@@ -318,8 +318,12 @@ type Project struct {
 	OriginBranch            string `json:"origin_branch,omitempty"`
 	SandboxEnabled          bool   `json:"sandbox_enabled"`
 	SandboxNetworkIsolation bool   `json:"sandbox_network_isolation"`
-	SandboxImage            string `json:"sandbox_image,omitempty"`
-	SandboxDockerfilePath   string `json:"sandbox_dockerfile_path,omitempty"`
+	// AutoFetchSubmodules is this project's consent to MIKE contacting a submodule URL nobody asked for.
+	// It says nothing while SandboxNetworkIsolation is on: nothing a project runs reaches the network
+	// then, and a submodule fetch is the one thing that would.
+	AutoFetchSubmodules   bool   `json:"auto_fetch_submodules"`
+	SandboxImage          string `json:"sandbox_image,omitempty"`
+	SandboxDockerfilePath string `json:"sandbox_dockerfile_path,omitempty"`
 	// SandboxBuildContext is the repository-relative subtree an image build may read. Empty means the
 	// directory holding the Dockerfile, which is the smallest context that lets a Dockerfile copy its own
 	// files; anything wider is a value a person set.

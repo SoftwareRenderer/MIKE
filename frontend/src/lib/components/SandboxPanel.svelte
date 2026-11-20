@@ -125,6 +125,12 @@ import { formatNetworkedExtensions, serverToolExtensions, serverToolMCPServers }
                         <span class="sandbox-value">{project.sandbox_network_isolation ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
                     </div>
 
+                    <!-- The consent reads as off while isolation outranks it, which is what a task does. -->
+                    <div class="sandbox-row">
+                        <span class="sandbox-label">{t('sandbox.autoFetchSubmodules')}</span>
+                        <span class="sandbox-value">{project.auto_fetch_submodules && !project.sandbox_network_isolation ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
+                    </div>
+
                     {#if serverToolNotice.length > 0}
                         <div class="server-tool-notice">{t('sandbox.networkIsolationServerToolsShort', { extensions: formatNetworkedExtensions(serverToolNotice) })}</div>
                     {/if}

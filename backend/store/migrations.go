@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS projects (
     origin_branch            TEXT DEFAULT NULL,
     sandbox_enabled          INTEGER NOT NULL DEFAULT 0,
     sandbox_network_isolation INTEGER NOT NULL DEFAULT 0,
+    auto_fetch_submodules    INTEGER NOT NULL DEFAULT 0,
     sandbox_image            TEXT DEFAULT NULL,
     sandbox_dockerfile_path  TEXT DEFAULT NULL,
     sandbox_build_context    TEXT DEFAULT NULL,

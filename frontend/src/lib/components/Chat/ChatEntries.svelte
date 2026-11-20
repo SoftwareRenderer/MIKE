@@ -9,6 +9,7 @@
     import { canPrioritize } from '$lib/utils/queue-priority';
     import ChatMessage from './ChatMessage.svelte';
     import CheckpointDivider from './CheckpointDivider.svelte';
+    import SubmoduleNotice from './SubmoduleNotice.svelte';
     import QueueIndicator from './QueueIndicator.svelte';
     import Spinner from '$lib/components/Spinner.svelte';
     import EmptyState from '$lib/components/EmptyState.svelte';
@@ -480,23 +481,27 @@
                 {/if}
                 {#if entry.role === 'error'}
                     <div class="error-entry">
-                        <div class="error-card">
-                            <div class="error-header">
-                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
-                                    <line x1="12" y1="9" x2="12" y2="13"/>
-                                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                                </svg>
-                                <span class="error-code">{entry.error?.code || 'error'}</span>
-                                <button class="btn-dismiss" onclick={() => onDismissError(entry.id)} title={t('chat.entries.dismissError')} aria-label={t('chat.entries.dismissError')}>
-                                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                        <line x1="18" y1="6" x2="6" y2="18"/>
-                                        <line x1="6" y1="6" x2="18" y2="18"/>
+                        {#if entry.error?.code === 'submodules_uninitialized'}
+                            <SubmoduleNotice projectId={projectId} taskId={taskId} message={entry.content} onDismiss={() => onDismissError(entry.id)} />
+                        {:else}
+                            <div class="error-card">
+                                <div class="error-header">
+                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                                        <line x1="12" y1="9" x2="12" y2="13"/>
+                                        <line x1="12" y1="17" x2="12.01" y2="17"/>
                                     </svg>
-                                </button>
+                                    <span class="error-code">{entry.error?.code || 'error'}</span>
+                                    <button class="btn-dismiss" onclick={() => onDismissError(entry.id)} title={t('chat.entries.dismissError')} aria-label={t('chat.entries.dismissError')}>
+                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                            <line x1="18" y1="6" x2="6" y2="18"/>
+                                            <line x1="6" y1="6" x2="18" y2="18"/>
+                                        </svg>
+                                    </button>
+                                </div>
+                                <div class="error-message">{entry.content}</div>
                             </div>
-                            <div class="error-message">{entry.content}</div>
-                        </div>
+                        {/if}
                     </div>
                 {:else if entry.role === 'summarization'}
                     <div class="summarization-entry">

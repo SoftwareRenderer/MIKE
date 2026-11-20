@@ -181,6 +181,10 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuild)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/sandbox/build", s.projectHandler.HandleSandboxBuildWatch)
 	s.mux.HandleFunc("POST /api/projects/{projectID}/sandbox/build/cancel", s.projectHandler.HandleSandboxBuildCancel)
+	// Submodules: the task-scoped read is what the card's notice shows, and the init is the click behind its
+	// button. Neither is in the bearer token's scope — a fetch of a repository-chosen URL is a person's act.
+	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks/{taskID}/submodules", s.projectHandler.HandleTaskSubmodules)
+	s.mux.HandleFunc("POST /api/projects/{projectID}/submodules/init", s.projectHandler.HandleInitSubmodules)
 	s.mux.HandleFunc("GET /api/projects/{projectID}/terminal", s.terminalMgr.HandleProjectTerminal)
 
 	s.mux.HandleFunc("GET /api/projects/{projectID}/tasks", s.taskHandler.HandleList)

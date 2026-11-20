@@ -159,6 +159,36 @@ func TestCloneEnv(t *testing.T) {
 	}
 }
 
+// TestSubmoduleEnvRefusesRedirects: a submodule's URL is repository-chosen text, so the address the URL
+// screen refused is reachable through a redirect from an address it passed. git follows the initial
+// request's redirect unless told not to, and a `-c` on the `git submodule` command line never reaches the
+// clone git spawns for the child — only the environment does.
+func TestSubmoduleEnvRefusesRedirects(t *testing.T) {
+	env := submoduleEnv(nil)
+
+	for _, want := range []string{
+		"GIT_CONFIG_KEY_5=http.followRedirects",
+		"GIT_CONFIG_VALUE_5=false",
+		"GIT_ALLOW_PROTOCOL=http:https:git:ssh",
+	} {
+		if !slices.Contains(env, want) {
+			t.Errorf("submoduleEnv() missing %q; full environment:\n%v", want, env)
+		}
+	}
+
+	// A count that does not match the numbered keys makes git ignore every one of them, the pinned
+	// redirect refusal included.
+	keys := 0
+	for _, entry := range env {
+		if strings.HasPrefix(entry, "GIT_CONFIG_KEY_") {
+			keys++
+		}
+	}
+	if want := fmt.Sprintf("GIT_CONFIG_COUNT=%d", keys); !slices.Contains(env, want) {
+		t.Errorf("submoduleEnv() declares %d KEY_n entries but not %q; git would fetch with redirects on: %v", keys, want, env)
+	}
+}
+
 // TestClone_HostileEnvironment proves the restriction does not depend on the
 // host's git config: even when the environment opens GIT_ALLOW_PROTOCOL to the
 // `ext` helper and an earlier `-c protocol.ext.allow=always` is present, the

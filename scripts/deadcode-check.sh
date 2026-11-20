@@ -42,6 +42,7 @@ backend/auth/pairing.go:Live
 backend/sandbox/build.go:ActiveBuildCount
 backend/sandbox/sandbox.go:SetMountRoot
 pkg/procterm/procterm.go:ProcessGone
+backend/git/env.go:ExecutionFence
 "
 
 # pkg/logging, one reason each. deadcode walks a call graph, so it cannot see three legitimate shapes:
@@ -73,6 +74,10 @@ pkg/procterm/procterm.go:ProcessGone
 #
 # pkg/procterm: ProcessGone answers whether a pid is gone, which nothing production asks. The three waits
 # on it are backend/exec's and the bridge's bash-stream tests and this package's own.
+#
+# backend/git: ExecutionFence is the fence read as a list. Every git child gets it through Env(), which
+# appends it last, so the only reader of the list itself is the shape test that counts the numbered keys
+# against GIT_CONFIG_COUNT — the pair a fixture's widen cannot be allowed to disagree with.
 
 is_allowed() {
 	local file="$1" name="$2" entry

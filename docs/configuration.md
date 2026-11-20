@@ -48,6 +48,7 @@ environment.
 | `MIKE_TRUST_PROXY` | Exactly `1` enables `X-Forwarded-For` and `X-Forwarded-Proto` headers. Use only behind a trusted reverse proxy. |
 | `MIKE_RESTRICT_MCP` | Exactly `1` freezes the MCP server registry; no servers can be added, edited, or removed via Settings. **`docs/mcp.md`**. |
 | `MIKE_RESTRICT_STAT_RESET` | Exactly `1` prevents resetting cumulative token counters via API or Settings. |
+| `MIKE_ALLOW_PRIVATE_SUBMODULE_HOSTS` | Exactly `1` widens the address screen a submodule URL is checked against to the private ranges, for a host whose git server lives on one. The loopback, link-local and unspecified refusals stay. **`docs/git-operations.md → Submodules`**. |
 | `MIKE_LISTEN` | Socket address for the API. Defaults to `127.0.0.1`. Use `0.0.0.0` or `::` for all interfaces. |
 | `MIKE_ALLOWED_HOSTS` | Extra comma-separated hostnames accepted in the `Host` header. `localhost`, `127.0.0.1`, `::1` and the listen host are accepted without being listed, so unset means loopback-only; the container entrypoint defaults it to `localhost`. Rejections result in HTTP 421. **`docs/tls.md`**. |
 | `MIKE_EXT_MOUNT_ROOTS` | `os.PathList` of extra host roots that extension sandboxes may bind-mount. |

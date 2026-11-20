@@ -9,6 +9,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"slices"
 	"strings"
@@ -65,32 +66,50 @@ var gitEnvPrefixes = []string{"LC_", "GIT_"}
 // isGitSafeEnv reports if an environment variable name is allowed for git.
 var isGitSafeEnv = subproc.Allows(gitEnvNames, gitEnvPrefixes)
 
+// pinnedConfig is one git configuration every child is given, outranking `.git/config`.
+type pinnedConfig struct{ key, value string }
+
+// fenceConfigs are the configurations that keep a repository from naming a program for git to run.
+// `core.editor=true` ensures `git merge --continue` can finish; read-only git pointers stop
+// `filter.<name>.clean`.
+var fenceConfigs = []pinnedConfig{
+	{"core.hooksPath", "/dev/null"},
+	{"core.fsmonitor", "false"},
+	{"core.editor", "true"},
+	{"core.pager", "cat"},
+	{"core.askPass", ""},
+}
+
+// submodulePinned goes with a fetch of a remote the repository chose. A redirect outranks the address
+// check that screen: the URL git was handed can 301 to the loopback or the metadata address it was
+// refused for, and git follows the initial request's redirect by default.
+var submodulePinned = []pinnedConfig{{"http.followRedirects", "false"}}
+
 // ExecutionFence prevents a repository from specifying programs for git to run.
-// Pinned configurations outrank `.git/config`. `core.editor=true` ensures `git merge --continue` can finish.
-// Read-only git pointers stop `filter.<name>.clean`.
-func ExecutionFence() []string {
-	return []string{
-		"GIT_CONFIG_COUNT=5",
-		"GIT_CONFIG_KEY_0=core.hooksPath",
-		"GIT_CONFIG_VALUE_0=/dev/null",
-		"GIT_CONFIG_KEY_1=core.fsmonitor",
-		"GIT_CONFIG_VALUE_1=false",
-		"GIT_CONFIG_KEY_2=core.editor",
-		"GIT_CONFIG_VALUE_2=true",
-		"GIT_CONFIG_KEY_3=core.pager",
-		"GIT_CONFIG_VALUE_3=cat",
-		"GIT_CONFIG_KEY_4=core.askPass",
-		"GIT_CONFIG_VALUE_4=",
+func ExecutionFence() []string { return fenceArgs(fenceConfigs) }
+
+// fenceArgs numbers the keys. GIT_CONFIG_COUNT must equal the number of KEY_n entries or git ignores
+// every one of them, silently, which is why the count is derived from the list rather than written.
+func fenceArgs(configs []pinnedConfig) []string {
+	out := []string{fmt.Sprintf("GIT_CONFIG_COUNT=%d", len(configs))}
+	for i, c := range configs {
+		out = append(out, fmt.Sprintf("GIT_CONFIG_KEY_%d=%s", i, c.key), fmt.Sprintf("GIT_CONFIG_VALUE_%d=%s", i, c.value))
 	}
+	return out
 }
 
 // Env appends policy last so callers cannot weaken the fence (os/exec keeps the last occurrence).
-func Env(extra ...string) []string {
+func Env(extra ...string) []string { return envWithPinned(nil, extra...) }
+
+// envWithPinned is Env for a family of commands that needs one more thing the repository cannot choose.
+// The pinned configs join the fence's own list rather than trailing it, because a second GIT_CONFIG_COUNT
+// beside the fence's would decide how many of the numbered keys git reads.
+func envWithPinned(pinned []pinnedConfig, extra ...string) []string {
 	env := subproc.Inherit(isGitSafeEnv, subproc.DropEmpty)
 	env = append(env, extra...)
 	// Policy last. GIT_TERMINAL_PROMPT=0 goes with the fence: an unattended server that hits a
 	// credential prompt hangs the request forever.
-	return append(env, append(ExecutionFence(), "GIT_TERMINAL_PROMPT=0")...)
+	return append(env, append(fenceArgs(append(append([]pinnedConfig{}, fenceConfigs...), pinned...)), "GIT_TERMINAL_PROMPT=0")...)
 }
 
 // Command constructs a git process. It is the only place in the repo where this happens.

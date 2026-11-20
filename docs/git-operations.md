@@ -11,7 +11,10 @@ The rules are in `AGENTS.md → Git`. This is the mechanism behind each fence.
   control-case test must be able to spawn an **unfenced** git.
 - `git.ExecutionFence()` pins `core.hooksPath=/dev/null`, `core.fsmonitor=false`, `core.editor=true`,
   `core.pager=cat` and `core.askPass=` via `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`, appended *after* the
-  extras so `os/exec`'s last-wins makes it unforgeable. `--no-verify` is not equivalent — it has no
+  extras so `os/exec`'s last-wins makes it unforgeable. The count is derived from the list, because a
+  `GIT_CONFIG_COUNT` beside a second one decides how many numbered keys git reads — and reads none when the
+  two disagree. `envWithPinned` is the one path that adds a key, taken by a submodule fetch for
+  `http.followRedirects=false`. `--no-verify` is not equivalent — it has no
   effect on `post-checkout`, which `git worktree add` runs. `core.editor` is pinned to `true` and not to
   something that refuses, because `git merge --continue` takes its message from an editor and a refusing
   value would stop a person finishing a merge (`TestMergeContinueSurvivesTheEditorFence`). Accepted
@@ -111,8 +114,8 @@ sweep that keeps the branch a live task's row names).
 
 ## Submodules: share the person's copy, never re-fetch
 
-Nothing a task does fetches a submodule. The worktree is given its submodules from the repository the
-person already populated, and the one fetch of a repository-chosen URL happens at import.
+The worktree is given its submodules from the repository the person already populated. A fetch of a
+repository-chosen URL happens at import, at the person's click, and — under two switches — at task start.
 
 - **Neither clone nor `worktree add` populates a submodule.** `git worktree add` leaves the path an empty
   directory, and `CloneArgs` is not `--recursive`. `git status` stays clean over an empty gitlink, which is
@@ -143,20 +146,57 @@ person already populated, and the one fetch of a repository-chosen URL happens a
   the same tree without creating anything, and every container — first start, mode change, recovery — derives
   its pins from it (`docs/sandbox-runtime.md → A task worktree's git pointer is pinned read-only`).
 - **MIKE never parses `.gitmodules`.** `ensureCommit` answers a pointer whose commit the shared store lacks
-  with one `git fetch` *in that store*, using the store's own remote, bounded by the turn's context. A store
+  with one `git fetch` *in that store*, using the store's own remote, bounded by the turn's context. That
+  address lives in a config file MIKE did not write, so it is screened like any other and fetched over
+  `submoduleEnv`, and the fetch needs both switches — the same pair as the task's own fetch. A store
   the person never populated stops the task and names the submodule, the checkout to work in, and the command
   to run there; the empty directory is never handed to the agent as if it were the code.
 - **That fetch is a tail, not the common path.** `fetch.recurseSubmodules` is `on-demand` by default, so a
   person's own `git pull` already brings a submodule commit the new superproject history names. The tail is a
   bump committed locally, or a fetch that ran with recursion turned off.
-- **Import is where a repository's own URLs get fetched** — `InitSubmodules`, called from `HandleCreate` and
-  `HandleClone`. It runs git's `submodule update --init --recursive <path>` for each gitlink the *commit*
-  names, and it is the only place MIKE spends the operator's credentials (`credential.helper`, their ssh
-  agent) on a destination that came out of repository text. Task start never calls it: a task starts on a path
-  an LLM turn reaches, with nobody in front of it. And `--init` records the fetched URL in the person's
-  `.git/config` and as the store's `origin`. That launders it into the `ensureCommit` fetch above, which is
-  trusted precisely because the person created that store. A submodule that will not fetch is reported and
-  skipped, so an unreachable upstream never costs a person the project; the task that needs it names it.
+- **Import is where a person is present for a repository's own URLs** — `InitSubmodules`, called from `HandleCreate`
+  and `HandleClone`. It runs git's `submodule update --init <path>` for each gitlink the *commit* names, one
+  level at a time under `fetchRounds`, and it spends the operator's credentials (`credential.helper`, their ssh
+  agent) on a destination that came out of repository text. Never `--recursive`, even here: a nested
+  `.gitmodules` arrives inside a clone, so MIKE has read no line of it and no screen has run on the addresses
+  it names. Re-listing between rounds makes every contacted address one MIKE enumerated and judged. `--init`
+  records the fetched URL in the person's `.git/config` and as the store's `origin`, which is why neither is
+  trusted by provenance: both are read again and screened again the next time anything dials them. A submodule
+  that will not fetch is reported and skipped, so an unreachable upstream never costs a person the project; the
+  task that needs it names it.
+- **The same verb answers one click.** `POST /api/projects/{projectID}/submodules/init` is `InitSubmodules`
+  over the project's own checkout — the person asking for the state they were told to go and get. It is a
+  click, which is what makes the fetch the person's own (`docs/api-contract.md → Submodules`).
+- **A task start fetches only under both switches.** `prepareSubmodules` (`backend/exec/submodules.go`) asks
+  the project's row: `auto_fetch_submodules` grants the fetch and `sandbox_network_isolation` refuses it, and
+  refusal outranks consent. The stale-pointer fetch of `PopulateSubmodules` asks the same pair
+  (`allowStoreFetch`), because it dials the store's remote from the server process. Anything still unpopulated
+  then stops the task on `git.SubmodulesUninitialized`, whose rows carry each path, its redacted address and
+  MIKE's reason; the fail code is `submodules_uninitialized`, which the card answers with the button rather
+  than a retry.
+- **Only the checkout's own gitlinks are fetchable.** A gitlink a *task's* commit names and the project's
+  commit does not was put there by the model, and the model does not decide what MIKE downloads.
+  `FetchSubmodules` is the task's verb and skips such a row; `CheckoutSubmoduleStates` is what a click may
+  ask for.
+- **No fetch asks git to recurse.** A nested `.gitmodules` is text that arrives inside a clone, so
+  `fetchRounds` asks one level, re-lists, and asks again: a nested refusal is then a report, not a clone MIKE
+  never judged. Import is the same verb without the path filter, and a nested refusal still leaves the level
+  above it populated.
+- **A submodule URL is screened before git sees it, and again as an address.** It is the one remote MIKE
+  contacts on a repository's say-so, from the server process, outside every sandbox. `screenSubmoduleURL`
+  refuses an empty or oversized URL, one naming no host, the loopback, link-local and unspecified addresses
+  and any address a public name resolves to. `MIKE_ALLOW_PRIVATE_SUBMODULE_HOSTS=1` widens only the private
+  ranges. A host that does not resolve is refused rather than handed over unchecked.
+- **Every address git may dial for one submodule is screened, not the one `.gitmodules` happens to show**
+  (`SubmoduleFetch.screenAddresses`). `git submodule update` dials the checkout's own
+  `submodule.<name>.url` from `.git/config`, and falls back to `.gitmodules` only where that is unset. The two
+  therefore drift apart as soon as a repository moves a submodule and nobody runs `git submodule sync` —
+  measured: `.gitmodules` named one host while the clone went to the address `.git/config` still held. The
+  checkout's answer and the store's `origin` are judged beside it, and any refusal stops the fetch. A listing
+  whose two readings name different places says so, because the person decides from that row.
+- **A redirect cannot answer for the screen.** `http.followRedirects` is pinned off for every submodule fetch
+  (`submodulePinned`). An address git was handed can redirect to the loopback or the metadata address it was
+  refused for, and git follows the first request's redirect by default.
 - **Import leaves a checkout of the person's alone.** `git submodule update` checks the recorded commit out.
   Doing that to a submodule the person has committed into detaches their copy off their work: measured, their
   committed file vanished from the tree and HEAD moved back to the recorded sha. `checkoutStateOf`
@@ -180,10 +220,12 @@ person already populated, and the one fetch of a repository-chosen URL happens a
 
 Tests: `backend/git/submodules_test.go` — populated with the upstream deleted, nested stores, section names
 that differ from the path, a project that is itself a worktree, a store whose working copy is gone, an
-unpopulated store, the stale-commit fetch, idempotence and the prune. Its `InitSubmodules` tests cover fetching
-what is missing, leaving the person's checkout untouched, importing despite an unreachable upstream, refusing a
-local submodule URL, and fetching only what the commit names. `backend/api/project_submodules_test.go` keeps an
-unfetchable submodule from costing a person their project.
+unpopulated store, and the prune. It fetches the stale commit, refuses a store remote naming a refused
+address, and repeats a population that already happened. Its `InitSubmodules` tests fetch what is missing, leave the person's checkout untouched, import
+despite an unreachable upstream, refuse a local submodule URL, refuse what the checkout records behind
+`.gitmodules`, and fetch only what the commit names. Its screen tests cover each refused address class and what
+the widening reaches. `backend/exec/submodules_test.go` covers the two switches for both fetch paths, and
+`backend/api/project_submodules_test.go` that the listing and the click name the same rows the refusal named.
 
 ## Stash: the bracket and the identity
 

@@ -42,7 +42,7 @@ func (te *TaskExecutor) openTaskSandbox(setup *taskExecSetup, state *executionSt
 	// Resolve image and agent config dir early — needed for both initial creation and mid-execution recreation.
 	imageToUse, agentClient, err := te.setupSandbox(setup)
 	if err != nil {
-		te.failTask(setup.task, setup.projectID, err.Error(), "sandbox_setup_failed")
+		te.failTask(setup.task, setup.projectID, err.Error(), submoduleFailCode(err))
 		return "", false
 	}
 	sb := sandboxState{operatingMode: setup.task.OperatingMode, agentConfigHash: te.agentGrantHash(setup.providerURL())}

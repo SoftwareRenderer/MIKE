@@ -583,6 +583,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS, author
 		ExtensionTools:     s.extToolRegistry,
 		MCP:                s.mcpRegistry,
 		RewindConversation: s.rewindConversationForRow,
+
+		AllowPrivateSubmoduleHosts: settings.AllowPrivateSubmoduleHosts,
 	})
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	// The budget is measured on the same tick that samples the containers it counts, and reports
@@ -647,6 +649,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS, author
 		Tasks:       s.taskHandler,
 		HostRoot:    s.hostRoot,
 		DangerZone:  sandbox.DangerZone(settings.DangerZone),
+		// The same operator decision the executor carries: the button fetches over one address screen.
+		SubmoduleFetch: git.SubmoduleFetch{AllowPrivateHosts: settings.AllowPrivateSubmoduleHosts},
 	})
 	s.gitHandler = api.NewGitHandler(store, s.executor.WorktreeMgr())
 	s.gitHandler.SetWorktreeMutex(s.lockWorktree)

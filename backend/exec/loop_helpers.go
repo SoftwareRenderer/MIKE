@@ -696,7 +696,14 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 	if !te.sandboxMgr.ContainerIsRunning(task.ID) {
 		// The worktree is given its submodules before the container is built around it, because the mounts
 		// that pin each submodule's git pointer are decided once, at create.
-		submodules, err := git.PopulateSubmodules(setup.ctx, worktreePath, setup.project.Path)
+		if err := te.prepareSubmodules(setup); err != nil {
+			return "", nil, err
+		}
+		submodules, err := git.PopulateSubmodules(setup.ctx, worktreePath, setup.project.Path, git.PopulateOpts{
+			// The same two switches as the fetch above: this one dials the store's own remote too.
+			AllowStoreFetch: allowStoreFetch(setup.project),
+			Fetch:           te.submoduleFetch,
+		})
 		if err != nil {
 			return "", nil, fmt.Errorf("failed to prepare submodules: %w", err)
 		}

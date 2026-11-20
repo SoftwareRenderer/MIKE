@@ -365,8 +365,15 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 
 - **`git.Command`/`git.CommandContext` are the only way this repo starts git** — the execution fence cannot
   be forged from a call site.
-- **MIKE fetches a submodule only at project import** — a task start never reaches the network for one; it
-  stops, naming the submodule, the checkout and the command. `docs/git-operations.md → Submodules`.
+- **A task fetches a submodule only under both of the project's switches** — `auto_fetch_submodules` grants it
+  and `sandbox_network_isolation` refuses it, refusal outranking consent. The fetch into the person's shared
+  store asks the same pair. Otherwise the task stops naming each submodule and its address, and the card
+  answers with the button. `docs/git-operations.md → Submodules`.
+- **A submodule URL is checked as written, as every address it resolves to, and as every reading git may dial**
+  — git dials the checkout's own `submodule.<name>.url`, not the file MIKE read. So that answer, `.gitmodules`
+  and the store's `origin` are each judged. Loopback, link-local, unspecified and private ranges are refused,
+  redirects are pinned off, and only the operator's variable widens the private ranges.
+  `docs/git-operations.md → Submodules`.
 - **The execution fence pins every setting that names a program by key**; a program the repository picks
   *by name* has no key to pin, which is what the read-only git pointer stops.
 - **A stash entry is identified by hash, never by position** — the stack is shared by every worktree and

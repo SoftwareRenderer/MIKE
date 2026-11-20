@@ -44,6 +44,10 @@ const (
 	EnvGCDryRun          = "MIKE_GC_DRY_RUN"
 	EnvPProf             = "MIKE_PPROF"
 	EnvMemoryBudgetPct   = "MIKE_MEMORY_BUDGET_PCT"
+	// EnvAllowPrivateSubmoduleHosts widens the submodule address screen to private networks, for a host
+	// whose git server lives on one. Its name is owned here and mirrored by
+	// git.AllowPrivateSubmoduleHostsEnv, which is the sentence a refusal prints.
+	EnvAllowPrivateSubmoduleHosts = "MIKE_ALLOW_PRIVATE_SUBMODULE_HOSTS"
 	// EnvBuildOutputLimitMB caps the disk one image build may write into its output directory.
 	EnvBuildOutputLimitMB = "MIKE_BUILD_OUTPUT_LIMIT_MB"
 )
@@ -147,6 +151,11 @@ type Config struct {
 	// RestrictStatReset refuses an explicit reset of a project's token counters. Deleting a task or
 	// project still removes the rows it owns.
 	RestrictStatReset bool
+
+	// AllowPrivateSubmoduleHosts widens the address screen a repository-chosen submodule URL is checked
+	// against to the private ranges. The loopback, link-local and unspecified refusals are not part of it:
+	// no repository lives behind those, whatever network this server is on.
+	AllowPrivateSubmoduleHosts bool
 
 	// ExtMountRoots are the extra host roots an extension sandbox may bind-mount, beyond the
 	// implicit ones. Still an allowlist.
@@ -252,6 +261,7 @@ func Resolve(f Flags) (Config, error) {
 	c.DisableUpdates = resolveDisable(EnvDisableUpdates, &c.Warnings)
 	c.RestrictMCP = isOne(EnvRestrictMCP)
 	c.RestrictStatReset = isOne(EnvRestrictStatReset)
+	c.AllowPrivateSubmoduleHosts = isOne(EnvAllowPrivateSubmoduleHosts)
 	c.ExtMountRoots = splitPathList(os.Getenv(EnvExtMountRoots))
 	c.AgentPath = resolveString("", EnvAgentPath, "")
 	c.SweepStaleContainersAtBoot = os.Getenv(EnvSkipSandboxSweep) == ""
@@ -280,7 +290,7 @@ func Resolve(f Flags) (Config, error) {
 
 	// A switch set to anything but "1" stays closed, and says so: an operator who typed
 	// MIKE_ALLOW_ROOT_FS=true and got the jail would otherwise discover it by being refused.
-	for _, name := range []string{EnvAllowRootFS, EnvDangerZone, EnvTrustProxy, EnvGCDryRun, EnvPProf, EnvRestrictMCP, EnvRestrictStatReset} {
+	for _, name := range []string{EnvAllowRootFS, EnvDangerZone, EnvTrustProxy, EnvGCDryRun, EnvPProf, EnvRestrictMCP, EnvRestrictStatReset, EnvAllowPrivateSubmoduleHosts} {
 		if v := os.Getenv(name); v != "" && v != "1" {
 			c.Warnings = append(c.Warnings, fmt.Sprintf("%s=%q is not the exact value 1, so it does nothing; set %s=1 to enable it or unset it to keep the current behaviour", name, v, name))
 		}

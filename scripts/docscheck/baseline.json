@@ -189,5 +189,9 @@
  "docs/ui-extensions.md": {
   "history": 0,
   "longsent": 0
+ },
+ "docs/adr/0003-a-task-fetches-a-submodule-only-under-the-projects-two-switches.md": {
+  "history": 0,
+  "longsent": 0
  }
 }

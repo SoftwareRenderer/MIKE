@@ -283,7 +283,10 @@ bare list to `cmd.Env` *replaces* rather than extends; extras are appended last 
 occurrence).
 
 - `git.Env` — `HOME`/`SSH_AUTH_SOCK`/`GIT_*`/`LC_*`/proxy/trust-store, because git needs the operator's
-  own configuration and credentials to reach their remotes.
+  own configuration and credentials to reach their remotes. The execution fence is appended after the
+  inherited environment, so an inherited `GIT_CONFIG_COUNT` cannot decide how many of the fence's numbered
+  keys git reads. A submodule fetch adds its own pinned `http.followRedirects=false` to that same list rather
+  than trailing a second one beside it (`envWithPinned`).
 - `sandboxruntime.PodmanEnv` — the XDG/DBUS trio rootless podman genuinely reads, plus `CONTAINERS_*`.
 - `agent.SafeAgentEnv` (`backend/agent/env.go`) — the only source of `cmd.Env` for an adapter's
   subprocess (`runner.go`) and its `--list-models` probe (`loader.go`):

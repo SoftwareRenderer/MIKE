@@ -22,6 +22,7 @@
     import MemoryRow from './SandboxConfigModal/MemoryRow.svelte';
     import MountsSection from './SandboxConfigModal/MountsSection.svelte';
     import NetworkRow from './SandboxConfigModal/NetworkRow.svelte';
+    import SubmodulesRow from './SandboxConfigModal/SubmodulesRow.svelte';
     import PortsSection from './SandboxConfigModal/PortsSection.svelte';
 
     let { project, inProgressCount: initialInProgressCount, onClose, onSaved }: {
@@ -145,6 +146,10 @@
                 <MemoryRow {draft} locked={isLocked} />
                 <ImageSection {draft} locked={isLocked} {project} onBrowse={() => showDockerfilePicker = true} />
             {/if}
+
+            <!-- A submodule is fetched into the person's checkout by the server, sandboxed or not, so the
+                 consent is asked outside the container's own rows. -->
+            <SubmodulesRow {draft} locked={isLocked} />
         </div>
 
         {#if draft.saveWarning}

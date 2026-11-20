@@ -42,6 +42,13 @@ Returning a mutex would allow callers to store or copy it, potentially leading t
   `TestHeldFollowsTheHolderAndGrowsNothing`.
 - **Deadlock Prevention**: Never hold a mutex across a `WaitGroup.Wait` for a goroutine that also requires that mutex. (e.g., `WorktreeWatcher.Close` must release its mutex before waiting for the pool).
 - **Git-Family Timeouts**: Avoid adding seconds-scale bounds to git-family locks (e.g., `mergeMu`, `stashMu`). These are often held across tool calls that can last up to 300s. Instead, use slow-wait reports (e.g., `gitSlowWait` at 2s) to identify wedged sections.
+- **The submodule fetch is its own domain**: `submoduleFetchLocks` (`backend/git/submodules.go`) keys a
+  checkout's path, not its project row, because three callers write one checkout's `.git/config` and its
+  `modules` tree — import, the person's click, and a task's fetch. It is not the project's git lock: a fetch
+  runs minutes and the git-family locks are held across tool calls, so merging them would queue a merge behind
+  a download. Its wait is bounded (`submoduleFetchWait`) rather than indefinite, because the fetch it waits for
+  is itself bounded — a holder still there past that is wedged, and "another fetch is running" is then the true
+  answer. Tests: `backend/git/submodules_test.go`.
 - **Execution Ownership**: A prepared execution (`prepareTaskExecution`) is owned by the caller until its loop is launched or it is released via `releasePrepared`. Failing to release a prepared execution leaves the task in a "running" state and delays subsequent stop operations.
 
 ## Watched Waits (User Notifications)

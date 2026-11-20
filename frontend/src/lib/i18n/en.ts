@@ -1229,6 +1229,8 @@ const catalog = {
     'api.pull': 'Failed to pull',
     'api.fetchFromRemote': 'Failed to check the remote',
     'api.push': 'Failed to push',
+    'api.fetchSubmodules': 'Failed to read the project\'s submodules',
+    'api.initSubmodules': 'Failed to initialize the submodules',
     'api.fetchDiff': 'Failed to fetch diff',
     'api.fetchCommits': 'Failed to fetch commits',
     'api.fetchFileContent': 'Failed to fetch file content',
@@ -1313,6 +1315,10 @@ const catalog = {
     'sandbox.disabledAria': 'Sandbox disabled',
     'sandbox.isolationDesc': 'Use gVisor to isolate all AI actions within a sandbox',
     'sandbox.networkIsolation': 'Network Isolation',
+    'sandbox.autoFetchSubmodules': 'Fetch Submodules',
+    'sandbox.autoFetchSubmodulesAria': 'Fetch submodules during a task',
+    'sandbox.autoFetchSubmodulesDesc': 'Let a task download a submodule the project’s repositories name',
+    'sandbox.autoFetchSubmodulesIsolated': 'This project is isolated, so no task reaches the network for a submodule',
     'sandbox.networkIsolationAria': 'Network isolation',
     'sandbox.networkIsolationDesc': 'Block the container’s network access',
     'sandbox.networkIsolationServerTools': 'Isolation closes this project’s container. {extensions} run in the MIKE server process, so their requests still leave while isolation is on.',
@@ -1608,6 +1614,18 @@ const catalog = {
     'chat.queue.lockOther': 'Waiting — the project is busy ({seconds}s)...',
     'chat.queue.modelPrompt': 'The provider is processing the prompt ({seconds}s)...',
     'chat.queue.modelQuiet': 'The provider is generating quietly ({seconds}s since its last token)...',
+
+    // ── Chat/SubmoduleNotice.svelte (the card a run that stopped on unfetched submodules leaves behind) ──
+    'chat.submodules.title': 'This project has submodules that were never fetched',
+    'chat.submodules.titleDone': 'Submodules initialized',
+    'chat.submodules.reading': 'Reading the project\'s submodules…',
+    'chat.submodules.readFailed': 'Could not read the project\'s submodules',
+    'chat.submodules.none': 'Nothing is recorded in the project\'s own checkout',
+    'chat.submodules.present': 'fetched',
+    'chat.submodules.initialize': 'Initialize submodules',
+    'chat.submodules.initializing': 'Initializing…',
+    'chat.submodules.initialized': 'Submodules initialized',
+    'chat.submodules.initFailed': 'Could not initialize the submodules',
 
     // ── Chat/ContextUsage.svelte (donut tooltip; the suffix keeps its leading separator) ──
     'chat.context.usage': '{used} / {limit} tokens · {percent}%',

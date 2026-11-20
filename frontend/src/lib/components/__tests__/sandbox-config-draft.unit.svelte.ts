@@ -115,6 +115,37 @@ describe('the sandbox draft', () => {
         });
     });
 
+    describe('the submodule fetch consent', () => {
+        it('writes the consent only when the person moves the switch', () => {
+            const row = storedRow({ sandbox_enabled: false, sandbox_network_isolation: false });
+            const draft = draftOf(row);
+
+            // Switching sandboxing on answers isolation, and must not answer this one: the fetch spends the
+            // operator's own credentials on an address a repository's text chose.
+            draft.sandboxEnabled = true;
+            draft.onSandboxEnabledChanged();
+            expect(draft.autoFetchSubmodules).toBe(false);
+            expect(projectChanges(row, draft.snapshot()).changes).not.toHaveProperty('auto_fetch_submodules');
+
+            draft.autoFetchSubmodules = true;
+            expect(projectChanges(row, draft.snapshot()).changes).toEqual({
+                sandbox_enabled: true,
+                auto_fetch_submodules: true,
+            });
+        });
+
+        it('writes the withdrawal of a consent the row already holds', () => {
+            const row = storedRow({ auto_fetch_submodules: true });
+            const draft = draftOf(row);
+
+            expect(draft.autoFetchSubmodules).toBe(true);
+            expect(projectChanges(row, draft.snapshot()).changes).toEqual({});
+
+            draft.autoFetchSubmodules = false;
+            expect(projectChanges(row, draft.snapshot()).changes).toEqual({ auto_fetch_submodules: false });
+        });
+    });
+
     describe('environment variables', () => {
 
         it('replaces the declaration being edited and nothing else', () => {
