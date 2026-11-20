@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
-    import type { DiffFile } from '$lib/types/diff';
+    import type { DiffFile, DiffImageSource } from '$lib/types/diff';
     import { gitStatusLabel, gitStatusAbsentFromHead, gitStatusColor } from '$lib/utils/git-status';
     import { confirmList } from '$lib/utils/file-selection';
     import { sortPathsRootLast } from '$lib/utils/sort-paths';
@@ -75,6 +75,10 @@
     let fromCommit = $state('');
     let toCommit = $state('');
     let compareDiff = $state<DiffFile[]>([]);
+    // Each of the panel's two comparisons names the refs the viewer reads its sides from; a side with no ref
+    // is the file on disk, which is what `new: ''` means to GET /api/fs/raw.
+    let workingImageSource = $derived<DiffImageSource>({ project: projectId, working: { old: 'HEAD' } });
+    let compareImageSource = $derived<DiffImageSource>({ project: projectId, committed: { old: fromCommit, new: toCommit } });
     let compareLoading = $state(false);
     let compareError = $state('');
     let showFromDropdown = $state(false);
@@ -1349,6 +1353,7 @@
                             unstagedFiles={[]}
                             loading={compareLoading}
                             collapseScope="compare"
+                            imageSource={compareImageSource}
                         />
                     {:else}
                         <div class="diff-viewer-loading">{t('git.loadingDiffViewer')}</div>
@@ -1373,6 +1378,7 @@
                             busyLabel={writeBusyLabel}
                             onExpandUntracked={loadUntrackedFile}
                             onLineClick={handleLineClick}
+                            imageSource={workingImageSource}
                         />
                     {:else}
                         <div class="diff-viewer-loading">{t('git.loadingDiffViewer')}</div>

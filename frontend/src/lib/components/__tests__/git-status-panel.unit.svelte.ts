@@ -445,3 +445,80 @@ describe('GitStatusPanel: a sync button waiting on the other one', () => {
         expect(describedBy(container, pushBtn(container))).toBeNull();
     });
 });
+
+// The explorer's Changes panel is a second host of the same viewer. Which row wears a control at all is
+// `binary-file-affordances.unit.svelte.ts`; these hold the panel's promise about the refs each side reads from.
+describe('the binary row the explorer lists', () => {
+    const IMAGE = { path: 'docs/logo.png', rows: [], added: 1, removed: 1, isBinary: true, fileSize: 67 };
+
+    const imageButtons = (container: HTMLElement) =>
+        [...container.querySelectorAll<HTMLButtonElement>('.diff-view-image-btn')];
+
+    const pictureSources = (container: HTMLElement) =>
+        [...container.querySelectorAll<HTMLImageElement>('img.image-diff-img')]
+            .map((i) => new URL(i.getAttribute('src')!, 'http://x'));
+
+    beforeEach(() => {
+        getGitStatus.mockResolvedValue({
+            clean: false, status: ' M docs/logo.png\n?? shots/new.png', head: 'h1',
+            authorName: 'Test', authorEmail: 'test@test.com', ahead: 0, behind: 0,
+        });
+        getProjectDiffFiles.mockImplementation(async (_p: string, opts?: { cached?: boolean }) =>
+            (opts?.cached ? [] : [{ ...IMAGE }]));
+        getProjectDiffFile.mockImplementation(async (_p: string, _path: string, opts?: { meta?: boolean }) =>
+            (opts?.meta ? { line_count: 1, isBinary: true, file_size: 67 } : { lines: [], line_count: 0 }));
+    });
+
+    it('offers the picture of an image the working tree changed, both sides of what it compares', async () => {
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(imageButtons(container).length).toBeGreaterThan(0));
+
+        const modified = imageButtons(container).find((b) => b.closest('.diff-file-section-untracked') === null)!;
+        expect(modified).toBeDefined();
+        modified.click();
+
+        await waitFor(() => expect(pictureSources(container).length).toBe(2));
+        const [oldSide, newSide] = pictureSources(container);
+        expect(oldSide.pathname).toBe('/api/fs/raw');
+        expect(oldSide.searchParams.get('project')).toBe('p1');
+        expect(oldSide.searchParams.get('path')).toBe('docs/logo.png');
+        expect(oldSide.searchParams.get('ref')).toBe('HEAD');
+        expect(newSide.searchParams.has('ref')).toBe(false);
+        // The panel compares the project's own checkout, so no task may steer the read.
+        expect(oldSide.searchParams.has('task')).toBe(false);
+    });
+
+    it('offers one side for an image nobody has committed yet', async () => {
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+        await waitFor(() => expect(imageButtons(container).length).toBe(2));
+
+        const untracked = imageButtons(container).find((b) => b.closest('.diff-file-section-untracked') !== null)!;
+        untracked.click();
+
+        await waitFor(() => expect(pictureSources(container).length).toBe(1));
+        const [only] = pictureSources(container);
+        expect(only.searchParams.has('ref')).toBe(false);
+        expect(only.searchParams.get('path')).toBe('shots/new.png');
+    });
+
+    // A clean tree puts the panel in its commit comparison, where From is the parent of the newest commit
+    // and To is that commit — the two refs each side of the picture is read from.
+    it('reads a commit comparison from the two commits the panel was shown', async () => {
+        const head = { hash: '2'.repeat(40), short: '2222222', subject: 'Head', author: 'Test', date: '', parents: ['1'.repeat(40)] };
+        const parent = { hash: '1'.repeat(40), short: '1111111', subject: 'Parent', author: 'Test', date: '', parents: [] };
+        getGitStatus.mockResolvedValue({ clean: true, status: '', head: 'h1', authorName: 'Test', authorEmail: 'test@test.com', ahead: 0, behind: 0 });
+        getGitLogFull.mockResolvedValue({ commits: [head, parent], current_branch: 'main' });
+        getCommitDiffFiles.mockResolvedValue([{ ...IMAGE }]);
+
+        const { container } = render(GitStatusPanel, { props: baseProps() });
+
+        await waitFor(() => expect(getCommitDiffFiles).toHaveBeenCalledWith('p1', parent.hash, head.hash));
+        await waitFor(() => expect(imageButtons(container).length).toBe(1));
+        imageButtons(container)[0].click();
+
+        await waitFor(() => expect(pictureSources(container).length).toBe(2));
+        const [oldSide, newSide] = pictureSources(container);
+        expect(oldSide.searchParams.get('ref')).toBe(parent.hash);
+        expect(newSide.searchParams.get('ref')).toBe(head.hash);
+    });
+});

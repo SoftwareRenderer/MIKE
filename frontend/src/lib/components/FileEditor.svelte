@@ -2,7 +2,8 @@
     import { onMount, onDestroy } from 'svelte';
     import { t } from '$lib/i18n';
     import { baseName, sandboxMountFromPath } from '$lib/utils/path';
-    import { readFsFile, writeFsFile, FsReadRefused, isTransientError } from '$lib/api';
+    import { readFsFile, writeFsFile, rawFileURL, FsReadRefused, isTransientError } from '$lib/api';
+    import { isDisplayableImage } from '$lib/utils/diff-image';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorState, Transaction, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
     import { EditorView, keymap } from '@codemirror/view';
@@ -135,6 +136,19 @@
     let error = $state('');
     let fileTooLarge = $state(false);
     let fileNotFound = $state(false);
+    /** The read refused the bytes as text (415); the suffix decides what is shown instead. */
+    let fileBinary = $state(false);
+    let imageFailed = $state(false);
+    /** The states in which this editor holds no text: no CodeMirror, no draft, no save. Bytes the browser
+     *  never held cannot be written back, so the save path closes on the same test. */
+    const noBuffer = $derived(fileTooLarge || fileNotFound || fileBinary);
+    /** A refused image still has its bytes: the raw route reads them from disk, which needs the name the
+     *  explorer opened the file by — the repository-relative one. */
+    const imageSrc = $derived(
+        fileBinary && !imageFailed && isDisplayableImage(filePath || '')
+            ? rawFileURL({ project: projectId, task: taskId, path: toProjectRelative(filePath || '', projectPath || '') })
+            : ''
+    );
     let baselineContent = $state('');       // disk content at load time (for gutter delta tracking)
     let gutterMarkers = $state<Map<number, string[]> | null>(null); // pre-computed markers from server
     let savedContent = $state('');          // disk content for unsaved-changes tracking
@@ -206,7 +220,7 @@
         const evt = pendingFsEvent;
         if (!evt) return;
         if (!active) return;
-        if (loading || !editorReady || fileNotFound || fileTooLarge) return;
+        if (loading || !editorReady || noBuffer) return;
         if (lastHandledEvent === evt) return;
         lastHandledEvent = evt;
         clearUnrelatedEventTimer();
@@ -216,7 +230,7 @@
         }
         unrelatedEventTimer = setTimeout(() => {
             unrelatedEventTimer = null;
-            if (!active || loading || fileNotFound || fileTooLarge) return;
+            if (!active || loading || noBuffer) return;
             void checkExternalChange();
         }, UNRELATED_EVENT_RECONCILE_MS);
     });
@@ -448,7 +462,7 @@
             key: 'Ctrl-s',
             macKey: 'Cmd-s',
             run: () => {
-                if (hasChanges && !fileTooLarge) {
+                if (saveIsNeeded()) {
                     handleSave();
                 }
                 return true;
@@ -778,6 +792,8 @@
         error = '';
         fileTooLarge = false;
         fileNotFound = false;
+        fileBinary = false;
+        imageFailed = false;
         cancelSaveRetry();
 
         // Destroy old editor and LSP client
@@ -864,17 +880,18 @@
                 }
             }
         } catch (e) {
-            // The two refusals that are answers rather than faults: the file is bigger than an editor
-            // shows, or it is gone. Anything else is said with the server's own sentence.
+            // The refusals that are answers rather than faults: the file is bigger than an editor shows,
+            // it is gone, or its bytes are not text. Anything else is said with the server's own sentence.
             if (e instanceof FsReadRefused && e.status === 413) fileTooLarge = true;
             else if (e instanceof FsReadRefused && e.status === 404) fileNotFound = true;
+            else if (e instanceof FsReadRefused && e.status === 415) fileBinary = true;
             else error = errorText(e, t('editor.readFailed'));
         } finally {
             loadedPath = requestPath;
         }
 
         // Create editor after DOM has updated (loading=false renders the editor div)
-        if (!error && !fileTooLarge && !fileNotFound) {
+        if (!error && !noBuffer) {
             await new Promise(resolve => requestAnimationFrame(resolve));
             if (editorEl && !view) {
                 createEditor();
@@ -945,7 +962,7 @@
      * the keydown handler below tries to allow it — left as it behaves today.
      */
     function saveIsNeeded(): boolean {
-        return hasChanges && !fileTooLarge && !fileNotFound;
+        return hasChanges && !noBuffer;
     }
 
     /**
@@ -1378,7 +1395,7 @@
     function handleKeyDown(e: KeyboardEvent) {
         if ((e.ctrlKey || e.metaKey) && e.key === 's') {
             e.preventDefault();
-            if (hasChanges && !fileTooLarge || fileNotFound) handleSave();
+            if (saveIsNeeded() || fileNotFound) handleSave();
             return;
         }
         if (e.key === 'Escape') {
@@ -1414,7 +1431,7 @@
         // say it was asked for twice. The diff editor has no request channel and
         // keeps revealing whenever its line changes.
         const request = reveal;
-        if (line >= 1 && (request === undefined || request > 0) && view && !loading && !fileTooLarge && !fileNotFound && !error && filePath) {
+        if (line >= 1 && (request === undefined || request > 0) && view && !loading && !noBuffer && !error && filePath) {
             requestAnimationFrame(() => jumpToLine(line));
         }
     });
@@ -1431,7 +1448,7 @@
     // Tracks baselineContent so it waits for loadFile() to complete.
     $effect(() => {
         const _ = baselineContent; // force dependency on load completion
-        if (!loading && !fileTooLarge && !fileNotFound && !view && editorEl && !editorCreating) {
+        if (!loading && !noBuffer && !view && editorEl && !editorCreating) {
             requestAnimationFrame(() => {
                 if (editorEl && !view && !editorCreating) {
                     createEditor();
@@ -1771,6 +1788,18 @@
                 </div>
             {:else if fileTooLarge}
                 <div id="file-editor-too-large" class="editor-placeholder">{t('editor.fileTooLarge')}</div>
+            {:else if fileBinary}
+                {#if imageSrc}
+                    <div class="editor-image">
+                        <img class="editor-image-img" src={imageSrc} alt={displayPath || filePath} loading="lazy"
+                            onerror={() => { imageFailed = true; }} />
+                    </div>
+                {:else}
+                    <div class="editor-placeholder">
+                        <p style="margin:0 0 8px">{imageFailed ? t('editor.imageFailed') : t('editor.binaryFile')}</p>
+                        <p style="margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)">{filePath}</p>
+                    </div>
+                {/if}
             {:else}
                 {#if conflicts > 0}
                     <!-- The markers in the buffer are the record; this only says how many there are and
@@ -1797,7 +1826,7 @@
         </div>
 
         <!-- Footer with line/char count -->
-        {#if !loading && !error && !fileTooLarge && !fileNotFound}
+        {#if !loading && !error && !noBuffer}
             <EditorFooter
                 {cursorLine}
                 {cursorCol}
@@ -1926,6 +1955,22 @@
         gap: 8px;
         color: var(--color-text-tertiary);
         font-size: var(--text-sm);
+    }
+    /* The browser reads the picture from disk, so it scrolls inside the editor rather than being scaled to
+       a size the file was never drawn at. */
+    .editor-image {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        display: flex;
+        padding: 16px;
+        background: var(--color-surface-2);
+    }
+    .editor-image-img {
+        max-width: 100%;
+        height: auto;
+        display: block;
+        margin: auto;
     }
     .editor-error {
         padding: 16px;

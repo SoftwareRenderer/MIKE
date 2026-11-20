@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"path/filepath"
 	"syscall"
 	"testing"
@@ -41,6 +42,10 @@ func TestFSReadRefusesANameThatIsNotARegularFile(t *testing.T) {
 	projectID, seed := fsSizeProject(t, s, "fs-irregular-name", "seed.txt", 4)
 	pipe := filepath.Join(filepath.Dir(seed), "pipe")
 	mkFifo(t, pipe)
+	// The control read needs text: a sparse file is NUL bytes, which a read refuses as not text.
+	if err := os.WriteFile(seed, []byte("seed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	q := url.Values{"path": {pipe}, "project": {projectID}}
 	req := testRequest(http.MethodGet, "/api/fs/read?"+q.Encode(), nil)

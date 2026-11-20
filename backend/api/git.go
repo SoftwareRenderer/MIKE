@@ -2,7 +2,6 @@ package api
 
 import (
 	"context"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -345,7 +344,6 @@ func (h *GitHandler) HandleBranches(w http.ResponseWriter, r *http.Request) {
 
 // HandleDiff returns project diff as parsed output.
 func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
-	projectID := r.PathValue("projectID")
 	project, ok := resolveProject(w, r, h.store)
 	if !ok {
 		return
@@ -383,10 +381,7 @@ func (h *GitHandler) HandleDiff(w http.ResponseWriter, r *http.Request) {
 	}
 	// returns parsed diff grammar.
 	files := git.ParseUnifiedDiff(string(out))
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.MarshalWrite(w, files); err != nil {
-		logging.For(logging.Git).Infof("encoding parsed diff for project %s: %v", projectID, err)
-	}
+	httputil.JSONResponse(w, http.StatusOK, files)
 }
 
 // gitAuthorOf answers who a commit in this project would be authored as, layering through
@@ -422,7 +417,7 @@ func (h *GitHandler) HandleStatus(w http.ResponseWriter, r *http.Request) {
 	ahead, behind := remoteAheadBehind(project.Path)
 	httputil.JSONResponse(w, http.StatusOK, map[string]any{
 		"clean":       clean,
-		"status":      string(out),
+		"status":      fsutil.ToText(string(out)),
 		"head":        headHash,
 		"authorName":  authorName,
 		"authorEmail": authorEmail,
@@ -509,7 +504,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 			contentOut, contentErr := io.ReadAll(io.LimitReader(f, maxDiffFileBytes))
 			f.Close()
 			if contentErr == nil {
-				fileContent = string(contentOut)
+				fileContent = fsutil.ToText(string(contentOut))
 				lineCount = strings.Count(fileContent, "\n")
 				if fileContent != "" && fileContent[len(fileContent)-1] != '\n' {
 					lineCount++
@@ -550,7 +545,7 @@ func (h *GitHandler) HandleProjectDiffFile(w http.ResponseWriter, r *http.Reques
 	}
 
 	resp := map[string]any{
-		"diff":       string(out),
+		"diff":       fsutil.ToText(string(out)),
 		"lines":      lines,
 		"line_count": lineCount,
 		"isBinary":   isBinary,
@@ -1088,7 +1083,7 @@ func (h *GitHandler) HandleTaskDiffFile(w http.ResponseWriter, r *http.Request) 
 					defer target.Close()
 					if size <= maxDiffFileBytes {
 						if data, readErr := io.ReadAll(io.LimitReader(target, maxDiffFileBytes)); readErr == nil {
-							lines = git.SplitLines(string(data))
+							lines = git.SplitLines(fsutil.ToText(string(data)))
 							truncated = false
 						}
 					}

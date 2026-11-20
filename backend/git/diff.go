@@ -118,7 +118,7 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 					if err != nil {
 						continue
 					}
-					fileLines := SplitLines(string(data))
+					fileLines := SplitLines(fsutil.ToText(string(data)))
 					untracked = append(untracked, UntrackedFile{Path: filePath, Lines: fileLines})
 				}
 			}
@@ -252,6 +252,10 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 	for _, f := range truncatedFiles {
 		truncatedSet[f] = true
 	}
+
+	// Repaired here because this is the only diff grammar: the patch carries the file's own bytes, and every
+	// row a panel shows is parsed out of them.
+	diff = fsutil.ToText(diff)
 
 	files := make(map[string]*TrackedDiffFile)
 	var current *TrackedDiffFile

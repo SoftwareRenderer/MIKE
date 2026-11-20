@@ -2156,6 +2156,9 @@ const catalog = {
     'editor.loadingEditor': 'Loading editor...',
     'editor.fileNotFound': 'File not found',
     'editor.fileTooLarge': 'File too large to edit (max 1MB)',
+    // The read refused the bytes as text; a paintable image is shown instead of this.
+    'editor.binaryFile': 'Binary file — not shown in the editor',
+    'editor.imageFailed': 'The picture could not be loaded',
     'editor.readFailed': 'Failed to read file',
     'editor.saveFailed': 'Failed to save',
     // The card a clicked hex value opens in a stylesheet.
