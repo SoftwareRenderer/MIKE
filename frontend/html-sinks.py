@@ -109,6 +109,9 @@ URL_SINKS: dict[tuple[str, str], str] = {
         "browser through Icon.svelte, which refuses anything that is not a lone sanitized <svg> root",
     ("src/lib/components/ImageDiffModal.svelte", "url"):
         "encoded-by:lib/api/fs — rawFileURL builds the query with URLSearchParams",
+    ("src/lib/components/FileEditor.svelte", "imageSrc"):
+        "encoded-by:lib/api/fs — rawFileURL builds the query with URLSearchParams, and the path is this "
+        "editor's own file made repository-relative",
     ("src/lib/components/Chat/DiagramFence.svelte", "diagram.imageSrc"):
         "literal — lib/utils/diagram.ts prefixes the markup that svgImageMarkup accepted, so it is never "
         "text a message wrote. __tests__/diagram.unit.ts pins that the bytes it decodes to are that markup",

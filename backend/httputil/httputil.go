@@ -8,6 +8,7 @@ import (
 	"encoding/json/v2"
 	"io"
 	"net/http"
+	"strconv"
 
 	"mike/backend/errs"
 	"mike/backend/types"
@@ -16,24 +17,40 @@ import (
 
 // JSONResponse sends a JSON response with the given status code.
 func JSONResponse(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	marshalToResponse(w, v)
+	writeJSON(w, status, v)
 }
 
 // JSONError sends a JSON error response.
 func JSONError(w http.ResponseWriter, status int, message string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	marshalToResponse(w, map[string]string{"error": message})
+	writeJSON(w, status, map[string]string{"error": message})
 }
 
-// marshalToResponse writes the body and has nowhere to report a failure: the status is already on the
-// wire, so a value that cannot be encoded leaves a short body and this log line as the only sign.
-func marshalToResponse(w http.ResponseWriter, v any) {
-	if err := json.MarshalWrite(w, v); err != nil {
+// internalErrorBody is Fail's default sentence, already encoded so the fallback cannot fail the way the
+// value it replaces did.
+var internalErrorBody = []byte(`{"error":"internal error"}`)
+
+// writeJSON encodes the whole value before any of the answer is on the wire, because a status already sent
+// cannot be retracted: marshalling straight to the ResponseWriter leaves a success code with a short body
+// behind it whenever the encoder refuses the value. The one class it refuses here is a string holding bytes
+// that are not valid UTF-8 — what a file's contents are when a route reads one as text — and such a value
+// describes no body, so the answer is Fail's default arm with the cause in the log. Every body here comes
+// from a read already capped, so the buffer costs nothing the route did not already allow.
+// docs/api-contract.md → Raw file bytes.
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	var body bytes.Buffer
+	if err := json.MarshalWrite(&body, v); err != nil {
 		logging.For(logging.HTTP).Errorf("response body could not be encoded: %v", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(internalErrorBody)
+		return
 	}
+	h := w.Header()
+	h.Set("Content-Type", "application/json")
+	// A HEAD request — which a GET pattern also answers — has nothing but this to state the length from.
+	h.Set("Content-Length", strconv.Itoa(body.Len()))
+	w.WriteHeader(status)
+	_, _ = w.Write(body.Bytes())
 }
 
 // MethodNotAllowed answers 405 with a plain-text body. It stays live even though every route declares

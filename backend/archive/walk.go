@@ -3,13 +3,11 @@ package archive
 import (
 	"archive/tar"
 	"archive/zip"
-	"bytes"
 	"compress/bzip2"
 	"compress/gzip"
 	"context"
 	"errors"
 	"io"
-	"unicode/utf8"
 
 	"mike/backend/fsutil"
 )
@@ -186,7 +184,7 @@ func readMember(r io.Reader, limit int64) ([]byte, error) {
 	if int64(len(b)) > limit {
 		return nil, ErrEntryTooLarge
 	}
-	if bytes.IndexByte(b, 0) >= 0 || !utf8.Valid(b) {
+	if !fsutil.IsText(b) {
 		return nil, ErrBinaryEntry
 	}
 	return b, nil

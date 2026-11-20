@@ -78,6 +78,18 @@ describe('the control a binary row wears', () => {
         expect(listingButtons(container).map((b) => b.textContent)).toEqual(['List contents']);
     });
 
+    it('offers the picture to a binary row the server gave no size for', () => {
+        // A tracked binary in a comparison with no annotations arrives as git's marker row and no `file_size`.
+        const marker = { lineNumber: null, variant: 'context' as const, text: 'Binary files a/docs/logo.png and b/docs/logo.png differ' };
+        const { container } = openViewer({
+            unstagedFiles: [diffFile('docs/logo.png', { fileSize: undefined, rows: [marker] })],
+        });
+
+        expect(pictureButtons(container).map((b) => b.textContent)).toEqual(['View image']);
+        expect(container.querySelector('.diff-binary-notice')?.textContent).toContain('Binary file');
+        expect(container.textContent).not.toContain('Binary files a/');
+    });
+
     it('gives the commit overlay the same pair, on the same rule', () => {
         const { container } = openCommit(everyKind('a/'));
         expect(pictureButtons(container).map((b) => b.textContent)).toEqual(['View image']);
