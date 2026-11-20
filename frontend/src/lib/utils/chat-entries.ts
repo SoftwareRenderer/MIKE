@@ -37,6 +37,21 @@ export function trimEntriesForRegenerate(entries: ChatEntry[], entryIndex: numbe
 /** What submitting an edited message does. The button's label and the click both read this. */
 export type EditSubmit = 'save' | 'send' | 'fork';
 
+/** The row an edit leaves behind: the same row with the words and pictures it now carries. An emptied tray is
+ * no tray, the shape the store keeps for a row with nothing attached. */
+export function applyMessageEdit(
+    entry: ChatEntry,
+    content: string,
+    attachments?: Array<{ mimeType: string; data: string }>,
+): ChatEntry {
+    return {
+        ...entry,
+        content,
+        attachments: attachments?.length ? attachments : undefined,
+        createdAt: new Date().toISOString(),
+    };
+}
+
 /** Where an edited message goes: a task in the backlog only saves, and in a started task only the thread's
  * last user message can be re-sent, so any other edit opens a new thread. `forcedSave` is the caller's own
  * in-place rewrite (summarized context, the mobile editor) and outranks the position. */

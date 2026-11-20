@@ -25,7 +25,7 @@
     import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
     import { offersResume } from '$lib/utils/review-bar';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesWithoutRows, takeEchoMatch, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesWithoutRows, takeEchoMatch, removeFailedSend, removeDismissedError, applyMessageEdit } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { useConnectionRestored } from '$lib/composables/use-connection-restored.svelte';
     import { useTaskEvents } from '$lib/composables/use-task-events.svelte';
@@ -1347,22 +1347,27 @@
         }
     }
 
+    /** The edit of a task that has never run: the row and the task's own prompt are rewritten where they
+     * stand, and nothing is started. */
+    function softEditMessage(entryId: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) {
+        stream.state.entries = stream.state.entries.map(e => e.id === entryId ? applyMessageEdit(e, newContent, attachments) : e);
+        updateTaskMessage(projectId, taskId, entryId, newContent, attachments).catch(e => dialogStore.showToast(String(e)));
+        updateTask(projectId, taskId, { prompt: newContent }).catch(e => dialogStore.showToast(String(e)));
+    }
+
     async function handleEditFork(entryId: string, _originalContent: string, newContent: string, attachments?: Array<{ mimeType: string; data: string }>) {
         const entry = entries.find(e => e.id === entryId);
         if (!entry) return;
         // Soft edit for backlog tasks: update message + task.prompt without triggering the LLM
         if (taskStatus === 'backlog') {
-            const idx = entries.findIndex(e => e.id === entryId);
-            if (idx !== -1) { entries[idx].content = newContent; entries[idx].createdAt = new Date().toISOString(); }
-            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => dialogStore.showToast(String(e)));
-            updateTask(projectId, taskId, { prompt: newContent }).catch(e => dialogStore.showToast(String(e)));
+            softEditMessage(entryId, newContent, attachments);
             return;
         }
         if (isLoading || startingTurn) return;
         startingTurn = true;
         try {
             const fromThreadId = entry.threadId || activeThreadId;
-            const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent);
+            const forked = await forkTaskThread(projectId, taskId, fromThreadId, entryId, newContent, attachments);
             threads = await getTaskThreads(projectId, taskId);
             activeThreadId = forked.id;
             // Clear streaming state before loading new thread's messages.
@@ -1394,18 +1399,17 @@
 
         // Backlog: persist edit only (soft edit, no LLM trigger)
         if (taskStatus === 'backlog') {
-            stream.state.entries = stream.state.entries.map((e, i) => i === idx ? { ...e, content: newContent, createdAt: new Date().toISOString() } : e);
-            updateTaskMessage(projectId, taskId, entryId, newContent).catch(e => dialogStore.showToast(String(e)));
-            updateTask(projectId, taskId, { prompt: newContent }).catch(e => dialogStore.showToast(String(e)));
+            softEditMessage(entryId, newContent, attachments);
             return;
         }
 
         if (isLoading) return;
         // The same shape the request produces: the edited row stands for everything after it.
         const optimisticId = genId();
+        const edited = applyMessageEdit(entries[idx], newContent, attachments);
         stream.state.entries = [...stream.state.entries.slice(0, idx), {
-            id: optimisticId, role: 'user', content: newContent, attachments, threadId: activeThreadId,
-            isStreaming: false, createdAt: new Date().toISOString(),
+            id: optimisticId, role: 'user', content: edited.content, attachments: edited.attachments,
+            threadId: activeThreadId, isStreaming: false, createdAt: edited.createdAt,
         }];
         stream.closeCurrentAssistant();
         scroll(true);

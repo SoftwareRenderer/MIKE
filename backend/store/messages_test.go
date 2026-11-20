@@ -184,7 +184,9 @@ func TestDeleteTaskMessagesAfterCutsItsScope(t *testing.T) {
 	}
 }
 
-func TestUpdateTaskMessage(t *testing.T) {
+// The two columns an edit owns are written independently: retyping the question keeps its pictures, and
+// taking the last picture off keeps the words.
+func TestEditTaskMessageWritesOnlyTheColumnsItNames(t *testing.T) {
 	s := testStore(t)
 	proj := newProject("proj-1", "test", "/tmp/test")
 	if err := s.CreateProject(proj); err != nil {
@@ -199,16 +201,49 @@ func TestUpdateTaskMessage(t *testing.T) {
 		t.Fatalf("create message: %v", err)
 	}
 
-	if err := s.UpdateTaskMessage("msg-1", "edited content"); err != nil {
-		t.Fatalf("update message: %v", err)
+	read := func() types.TaskMessage {
+		t.Helper()
+		got, err := s.GetTaskMessages("task-1", "")
+		if err != nil {
+			t.Fatalf("get messages: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("unexpected rows: %d", len(got))
+		}
+		return got[0]
 	}
 
-	got, err := s.GetTaskMessages("task-1", "")
-	if err != nil {
-		t.Fatalf("get messages: %v", err)
+	tray := `[{"mimeType":"image/png","data":"aGVsbG8="}]`
+	if err := s.EditTaskMessage("msg-1", ptrStr("edited content"), &tray); err != nil {
+		t.Fatalf("edit message: %v", err)
 	}
-	if len(got) != 1 || got[0].Content != "edited content" {
-		t.Fatalf("unexpected content: %s", got[0].Content)
+	if got := read(); got.Content != "edited content" || got.Attachments != tray {
+		t.Fatalf("edited row: %q / %q", got.Content, got.Attachments)
+	}
+
+	if err := s.EditTaskMessage("msg-1", ptrStr("words only"), nil); err != nil {
+		t.Fatalf("text-only edit: %v", err)
+	}
+	if got := read(); got.Content != "words only" || got.Attachments != tray {
+		t.Fatalf("a text-only edit moved the tray: %q / %q", got.Content, got.Attachments)
+	}
+
+	// The named column is the non-nil pointer, so it is the empty string inside it that says "clear" — and
+	// the column then holds the one value that means "nothing attached".
+	cleared := ""
+	if err := s.EditTaskMessage("msg-1", nil, &cleared); err != nil {
+		t.Fatalf("clearing edit: %v", err)
+	}
+	if got := read(); got.Content != "words only" || got.Attachments != "" {
+		t.Fatalf("an emptied tray left %q behind", got.Attachments)
+	}
+
+	// A request that names neither column writes nothing at all.
+	if err := s.EditTaskMessage("msg-1", nil, nil); err != nil {
+		t.Fatalf("a no-op edit: %v", err)
+	}
+	if got := read(); got.Content != "words only" || got.Attachments != "" {
+		t.Fatalf("an edit naming no column rewrote the row: %q / %q", got.Content, got.Attachments)
 	}
 }
 

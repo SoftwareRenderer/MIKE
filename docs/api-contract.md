@@ -550,11 +550,26 @@ would write a PNG where a GIF was asked for reports nothing.
 the task's `.mike-uploads/` and inserts the path, exactly as a dropped archive does. A toast names the reason.
 Where the surface has no task to write into, that is the sentence instead — an upload was not claimed.
 
-**The bound that follows is the message bound.** Four images at the byte cap are ~107 MB of base64. The two
-routes that carry a user message therefore read at `httputil.MaxMessageBodyBytes`: creating a task with a
-first prompt, and `POST …/tasks/{taskID}/send`. `MaxBodyMiddleware` carries the same number, so the largest
+**The bound that follows is the message bound.** Four images at the byte cap are ~107 MB of base64. Every route
+that carries a user message therefore reads at `httputil.MaxMessageBodyBytes`. There are four: creating a task
+with a first prompt, `POST …/tasks/{taskID}/send`, `PATCH …/messages/{messageID}`, and
+`POST …/tasks/{taskID}/threads/fork`. The last two are what an edit writes, the fork being where an edited
+question lands when it opens a new thread. `MaxBodyMiddleware` carries the same number, so the largest
 legitimate message arrives. Every other JSON route decodes at `MaxRequestBodyBytes`. Widening the message
 route must not widen the rest.
+
+**An edit writes the tray with the text.** Both edit routes take `attachments` as the JSON-encoded array, the
+shape the send body carries, so tray, body, row and the provider's part stay one picture. `readTray`
+(`backend/server/handler_message.go`) holds the one grammar: a value that is not a string, or not an array, is
+a 400 naming itself. An empty array stores no tray, and an absent field alone leaves the row's pictures where
+they are. That distinction is the whole of "take the picture off", so an emptied tray arrives as `"[]"` rather
+than being left out. The fork writes both columns of the question it rewrites. The regenerate-send after a fork
+matches the row it stands for by comparing text *and* pictures, so a row holding the old tray matches neither
+half, and the send appends a second copy of the question.
+
+Tests: `backend/server/handler_message_attachments_test.go`,
+`backend/server/handler_thread_attachments_test.go`, and
+`frontend/tests/e2e/chat-message-edit-image.spec.ts` for the save a browser makes.
 
 Tests: `frontend/src/lib/utils/__tests__/attachments.unit.ts` (the geometry table, and which bucket each pick
 lands in), `frontend/tests/e2e/chat-image-downscale.spec.ts` (a real pick resampled to the ceiling, and a pick

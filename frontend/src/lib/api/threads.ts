@@ -27,13 +27,13 @@ export async function switchTaskThread(projectId: string, taskId: string, thread
 }
 
 /** Fork a conversation thread from a specific message, creating a branch point; optionally includes new
- * content, and is queued when offline. The fork's id is fixed before it sets out, so the picker, the queue and
- * the server all name one branch. */
-export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string, clientToken = generateId()): Promise<Thread> {
+ * content and the tray that question was typed with, and is queued when offline. The fork's id is fixed
+ * before it sets out, so the picker, the queue and the server all name one branch. */
+export async function forkTaskThread(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string, attachments?: Array<{ mimeType: string; data: string }>, clientToken = generateId()): Promise<Thread> {
     if (getOfflineStatus()) {
-        return await queueWrite('forkTaskThread', { projectId, taskId, fromThreadId, fromMessageId, newContent, clientToken }, {
+        return await queueWrite('forkTaskThread', { projectId, taskId, fromThreadId, fromMessageId, newContent, attachments, clientToken }, {
             id: clientToken, task_id: taskId, name: '', is_active: true, created_at: new Date().toISOString(),
         } as Thread);
     }
-    return forkTaskThreadRaw(projectId, taskId, fromThreadId, fromMessageId, newContent, clientToken);
+    return forkTaskThreadRaw(projectId, taskId, fromThreadId, fromMessageId, newContent, attachments, clientToken);
 }

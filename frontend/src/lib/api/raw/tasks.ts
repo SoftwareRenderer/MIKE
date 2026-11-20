@@ -176,11 +176,14 @@ export async function deleteTaskMessageRaw(projectId: string, taskId: string, me
     if (!res.ok) throw await apiError(res, t('api.deleteMessage'));
 }
 
-export async function updateTaskMessageRaw(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
+export async function updateTaskMessageRaw(projectId: string, taskId: string, messageId: string, content: string, attachments?: Array<{ mimeType: string; data: string }>): Promise<void> {
+    const body: Record<string, any> = { content };
+    // A JSON string, not a nested value: the shape sendTaskMessageRaw() puts on the wire.
+    if (attachments) body.attachments = JSON.stringify(attachments);
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages/${messageId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify(body),
     });
     if (!res.ok) throw await apiError(res, t('api.updateMessage'));
 }

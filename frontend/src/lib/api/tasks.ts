@@ -395,11 +395,12 @@ export async function checkMessageDelete(projectId: string, taskId: string, mess
     return res.json();
 }
 
-/** Edit a message's content. */
-export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string): Promise<void> {
+/** Edit a message. `attachments` is the tray the editor holds: given, it replaces the row's pictures —
+ * an empty one clears them; omitted, the row keeps the ones it has. */
+export async function updateTaskMessage(projectId: string, taskId: string, messageId: string, content: string, attachments?: Array<{ mimeType: string; data: string }>): Promise<void> {
     await writeOrQueue(
-        { type: 'updateTaskMessage', params: { projectId, taskId, messageId, content } },
-        () => updateTaskMessageRaw(projectId, taskId, messageId, content),
+        { type: 'updateTaskMessage', params: { projectId, taskId, messageId, content, attachments } },
+        () => updateTaskMessageRaw(projectId, taskId, messageId, content, attachments),
     );
 }
 

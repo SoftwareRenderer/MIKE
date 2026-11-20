@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, endsOnReviewResult, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError } from '$lib/utils/chat-entries';
+import { findLastUserMessageBefore, trimEntriesForRegenerate, buildCheckpointStateMap, mergeToolCallsIntoAssistant, computeLastUserMessageIds, getCheckpointThreads, buildEntriesFromMessages, advisoryLabel, systemNoteText, pendingToolIds, endsOnReviewResult, editSubmitAction, takeEchoMatch, buildEntryMetas, removeFailedSend, removeDismissedError, applyMessageEdit } from '$lib/utils/chat-entries';
 import type { WindowRow } from '$lib/utils/chat-entries';
 import type { ChatEntry, Thread } from '$lib/types';
 import { PENDING_SEND_ID_PREFIX } from '$lib/utils/pending-sends';
@@ -653,6 +653,32 @@ describe('editSubmitAction', () => {
         // The summarized context and the mobile box rewrite where they stand regardless of position.
         expect(editSubmitAction({ ...shapes.middle, forcedSave: true })).toBe('save');
         expect(editSubmitAction({ ...shapes.last, forcedSave: true })).toBe('save');
+    });
+});
+
+describe('applyMessageEdit', () => {
+    // The row on screen after a save is the row the server holds: an emptied tray reaches the row rather than
+    // reading as "no tray given".
+    const picture = { mimeType: 'image/png', data: 'aGVsbG8=' };
+
+    it('carries the new words and the new pictures on the one row', () => {
+        const before = entry('user', 'the original question');
+        const after = applyMessageEdit(before, 'the edited question', [picture]);
+        expect(after).toMatchObject({
+            id: before.id, role: 'user', content: 'the edited question', attachments: [picture],
+        });
+    });
+
+    it('leaves the row with no pictures when the tray was emptied', () => {
+        const before = { ...entry('user', 'question'), attachments: [picture] };
+        expect(applyMessageEdit(before, 'question', []).attachments).toBeUndefined();
+    });
+
+    it('keeps the identity the checkpoint band and the echo are keyed on', () => {
+        const before = { ...entry('user', 'question'), threadId: 'th-1', attachments: [picture] };
+        const after = applyMessageEdit(before, 'asked again', [picture]);
+        expect(after.id).toBe(before.id);
+        expect(after.threadId).toBe('th-1');
     });
 });
 

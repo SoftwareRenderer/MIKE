@@ -84,3 +84,69 @@ describe('sendTaskMessage queueing on network failure', () => {
         expect(JSON.parse(sent[0].body)).toMatchObject(sentBody);
     });
 });
+
+// The tray is the other half of an edited message, and the server cannot invent it on the replay: a queue
+// that lost it would replay an edit that took the pictures off the row. An emptied tray matters most — "no
+// tray" and "no tray given" must not arrive as the same request.
+describe("an edited message's tray in the queue", () => {
+    let restoreIndexedDB: (() => void) | undefined;
+
+    const picture = { mimeType: 'image/png', data: 'aGVsbG8=' };
+
+    beforeEach(() => {
+        vi.resetModules();
+        restoreIndexedDB = installFakeIndexedDB();
+    });
+
+    afterEach(async () => {
+        // The offline flag and the queue are module state, so they go back whether or not the test threw.
+        const { clearQueue, setOfflineStatus } = await import('$lib/api/queue');
+        await clearQueue();
+        setOfflineStatus(false);
+        restoreIndexedDB?.();
+    });
+
+    /** Queues the write while the window is offline — what forkTaskThread() reads to decide — then replays it
+     * and answers the body that went out. */
+    async function replay(write: () => Promise<unknown>): Promise<Record<string, string>> {
+        const { loadQueue, flushQueueNow, setOfflineStatus } = await import('$lib/api/queue');
+        setOfflineStatus(true);
+        await write();
+        expect(await loadQueue()).toHaveLength(1);
+
+        const sent: { url: string; body: string }[] = [];
+        vi.stubGlobal('fetch', recordingFetch(sent));
+        await flushQueueNow();
+        expect(sent).toHaveLength(1);
+        return JSON.parse(sent[0].body);
+    }
+
+    it('replays an edit with the pictures the editor held', async () => {
+        const { updateTaskMessage } = await import('$lib/api/tasks');
+        const body = await replay(() => updateTaskMessage('p1', 't1', 'm1', 'worded differently', [picture]));
+        expect(body).toMatchObject({ content: 'worded differently', attachments: JSON.stringify([picture]) });
+    });
+
+    it('replays an emptied tray as a clearing, not as a tray left alone', async () => {
+        const { updateTaskMessage } = await import('$lib/api/tasks');
+        const body = await replay(() => updateTaskMessage('p1', 't1', 'm1', 'worded differently', []));
+        expect(body).toMatchObject({ content: 'worded differently', attachments: '[]' });
+    });
+
+    it("leaves the row's pictures alone when the edit never touched them", async () => {
+        const { updateTaskMessage } = await import('$lib/api/tasks');
+        const body = await replay(() => updateTaskMessage('p1', 't1', 'm1', 'worded differently'));
+        expect(Object.keys(body)).toEqual(['content']);
+    });
+
+    it("replays a fork of an edited question carrying that question's tray", async () => {
+        const { forkTaskThread } = await import('$lib/api/threads');
+        const body = await replay(() => forkTaskThread('p1', 't1', 'th-1', 'm1', 'asked differently', [picture]));
+        expect(body).toMatchObject({
+            from_thread_id: 'th-1',
+            from_message_id: 'm1',
+            new_content: 'asked differently',
+            attachments: JSON.stringify([picture]),
+        });
+    });
+});

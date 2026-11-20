@@ -63,7 +63,8 @@ describe('editing a user message', () => {
         const onFork = vi.fn(async () => { });
         const { container } = renderUser({ ...RUNNING, isFirstUserMessage: false, isLastUserMessage: true, onSend, onFork });
         await edit(container, 'asked again, differently');
-        expect(onSend).toHaveBeenCalledWith('m1', 'the original question', 'asked again, differently', undefined);
+        // The tray is forwarded as it stands, emptied included.
+        expect(onSend).toHaveBeenCalledWith('m1', 'the original question', 'asked again, differently', []);
         expect(onFork).not.toHaveBeenCalled();
     });
 
@@ -72,7 +73,7 @@ describe('editing a user message', () => {
         const onFork = vi.fn(async () => { });
         const { container } = renderUser({ ...RUNNING, isFirstUserMessage: false, isLastUserMessage: false, onSend, onFork });
         await edit(container, 'a different branch');
-        expect(onFork).toHaveBeenCalledWith('m1', 'the original question', 'a different branch', undefined);
+        expect(onFork).toHaveBeenCalledWith('m1', 'the original question', 'a different branch', []);
         expect(onSend).not.toHaveBeenCalled();
     });
 
@@ -110,12 +111,22 @@ describe('editing a user message', () => {
     it('saves whatever is edited while the task is still in the backlog', async () => {
         const onSend = vi.fn(async () => { });
         const onFork = vi.fn(async () => { });
-        const { container } = renderUser({ taskStatus: 'backlog', isFirstUserMessage: false, isLastUserMessage: false, onSend, onFork });
+        const { container } = renderUser({ taskStatus: 'backlog', isFirstUserMessage: false, isLastUserMessage: false, projectId: 'p1', taskId: 't1', onSend, onFork });
         const submit = await openEdit(container);
         expect(submit.title).toBe('Save');
+        const form = container.querySelector('.edit-form') as HTMLElement;
+        await fireEvent.drop(form, {
+            dataTransfer: { files: [new File(['img'], 'shot.png', { type: 'image/png' })], types: ['Files'], getData: () => '' },
+        });
+        await waitFor(() => expect(container.querySelector('.edit-attachment-chip')).toBeTruthy());
         await type(container, submit, 'worded differently before anything ran');
-        // The backlog branch of the send handler persists the text and starts nothing.
-        expect(onSend).toHaveBeenCalledWith('m1', 'the original question', 'worded differently before anything ran', undefined);
+        // The backlog save persists the text and the tray, and starts nothing.
+        expect(onSend).toHaveBeenCalledTimes(1);
+        const [id, original, text, atts] = onSend.mock.calls[0] as unknown as [string, string, string, unknown[]];
+        expect(id).toBe('m1');
+        expect(original).toBe('the original question');
+        expect(text).toBe('worded differently before anything ran');
+        expect(atts).toHaveLength(1);
         expect(onFork).not.toHaveBeenCalled();
     });
 });

@@ -13,9 +13,11 @@ export async function switchTaskThreadRaw(projectId: string, taskId: string, thr
     return res.json();
 }
 
-export async function forkTaskThreadRaw(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string, clientToken?: string): Promise<Thread> {
+export async function forkTaskThreadRaw(projectId: string, taskId: string, fromThreadId: string, fromMessageId: string, newContent?: string, attachments?: Array<{ mimeType: string; data: string }>, clientToken?: string): Promise<Thread> {
     const body: Record<string, string> = { from_thread_id: fromThreadId, from_message_id: fromMessageId };
     if (newContent) body.new_content = newContent;
+    // The tray travels as in updateTaskMessageRaw().
+    if (attachments) body.attachments = JSON.stringify(attachments);
     if (clientToken) body.client_token = clientToken;
     const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/threads/fork`, {
         method: 'POST',

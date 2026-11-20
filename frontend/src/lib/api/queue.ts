@@ -629,7 +629,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             await deleteTaskMessageRaw(p.projectId, taskId, p.messageId);
             break;
         case 'updateTaskMessage':
-            await updateTaskMessageRaw(p.projectId, taskId, p.messageId, p.content);
+            await updateTaskMessageRaw(p.projectId, taskId, p.messageId, p.content, p.attachments);
             break;
         case 'createTask':
             return createTaskRaw(p.projectId, p.taskData, p.clientToken);
@@ -676,7 +676,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             await switchTaskThreadRaw(p.projectId, taskId, p.threadId);
             break;
         case 'forkTaskThread':
-            await forkTaskThreadRaw(p.projectId, taskId, p.fromThreadId, p.fromMessageId, p.newContent, p.clientToken);
+            await forkTaskThreadRaw(p.projectId, taskId, p.fromThreadId, p.fromMessageId, p.newContent, p.attachments, p.clientToken);
             break;
         case 'updateConfig':
             await updateConfigRaw(p.config);

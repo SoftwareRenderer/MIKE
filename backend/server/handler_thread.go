@@ -1,6 +1,7 @@
 package server
 
 import (
+	"encoding/json/jsontext"
 	"errors"
 	"fmt"
 	"mike/backend/httputil"
@@ -265,17 +266,29 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 	var req struct {
-		FromThreadID  string `json:"from_thread_id"`
-		FromMessageID string `json:"from_message_id"`
-		NewContent    string `json:"new_content"`
-		ClientToken   string `json:"client_token"`
+		FromThreadID  string          `json:"from_thread_id"`
+		FromMessageID string          `json:"from_message_id"`
+		NewContent    string          `json:"new_content"`
+		Attachments   *jsontext.Value `json:"attachments"`
+		ClientToken   string          `json:"client_token"`
 	}
-	if !httputil.DecodeJSON(w, r, &req) {
+	// A message body: the forked question arrives with its pictures.
+	if !httputil.DecodeMessageJSON(w, r, &req) {
 		return
 	}
 	if req.FromThreadID == "" || req.FromMessageID == "" {
 		JSONError(w, http.StatusBadRequest, "from_thread_id and from_message_id required")
 		return
+	}
+	// Judged with the other refusals: a refused fork must not have touched the worktree.
+	var tray *string
+	if req.Attachments != nil {
+		written, err := readTray(*req.Attachments)
+		if err != nil {
+			JSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		tray = &written
 	}
 	if _, ok := s.taskInPath(w, projectID, taskID); !ok {
 		return
@@ -414,12 +427,13 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 			logging.For(logging.Thread).With(logging.TaskID, taskID).Warnf("could not pin inherited snapshot %.12s for message %s: %v", cp.CommitHash, cp.MessageID, pinErr)
 		}
 	}
-	// If new_content is provided, update the checkpoint message in the fork
-	// to the edited content. Find the last user message in the new thread
-	// (the copied checkpoint) and update its content.
+	// The copied checkpoint row becomes the edited question: the fork's last user row takes the new text and
+	// the new tray. The tray travels in the same step because the send that follows is a regenerate, which
+	// finds the row it stands for by comparing the question's text and its pictures.
 	if req.NewContent != "" {
 		if copiedMsgID, err := s.store.GetLastUserMessageInThread(newThreadID); err == nil && copiedMsgID != "" {
-			_ = s.store.UpdateTaskMessage(copiedMsgID, req.NewContent)
+			content := req.NewContent
+			_ = s.store.EditTaskMessage(copiedMsgID, &content, tray)
 		}
 	}
 	if err := s.store.SetActiveThread(newThreadID); err != nil {

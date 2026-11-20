@@ -601,11 +601,27 @@ type checkpointRef struct {
 	id, hash sql.NullString
 }
 
-// UpdateTaskMessage updates the content of a message.
-func (s *Store) UpdateTaskMessage(messageID, content string) error {
+// EditTaskMessage writes the columns an edit of a message changes: its prose and its pictures. A nil pointer
+// leaves its column alone. An emptied tray is stored as no tray, the value a message without pictures already
+// holds.
+func (s *Store) EditTaskMessage(messageID string, content, attachments *string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, err := s.db.Exec(`UPDATE task_messages SET content = ? WHERE id = ?`, content, messageID)
+	var sets []string
+	args := make([]any, 0, 3)
+	if content != nil {
+		sets = append(sets, "content = ?")
+		args = append(args, *content)
+	}
+	if attachments != nil {
+		sets = append(sets, "attachments = ?")
+		args = append(args, ptrStr(*attachments))
+	}
+	if len(sets) == 0 {
+		return nil
+	}
+	args = append(args, messageID)
+	_, err := s.db.Exec(`UPDATE task_messages SET `+strings.Join(sets, ", ")+` WHERE id = ?`, args...)
 	return err
 }
 

@@ -110,17 +110,18 @@
     /** Submit an edit. An attachment alone is a message, which the form's own submit already allows. */
     async function submitEdit(newContent: string, newAttachments?: Array<{ mimeType: string; data: string }>) {
         const text = newContent.trim();
-        const atts = newAttachments?.length ? newAttachments : undefined;
-        if (!messageId || (!text && !atts)) return;
+        if (!messageId || (!text && !newAttachments?.length)) return;
+        // The editor's tray is the message's tray, emptied included: folding an emptied one into "no tray
+        // given" is how a picture the person took off comes back when the row is next read.
         isSubmitting = true;
         try {
             // The summarized context is the one text a turn did not write, so it is rewritten in place.
             if (onEditSummary) {
                 await onEditSummary(text);
             } else if (editSubmitAction({ isFirstUserMessage, isLastUserMessage, taskStatus }) === 'fork') {
-                await onFork?.(messageId, content, text, atts);
+                await onFork?.(messageId, content, text, newAttachments);
             } else {
-                await onSend?.(messageId, content, text, atts);
+                await onSend?.(messageId, content, text, newAttachments);
             }
         } finally {
             isEditing = false;

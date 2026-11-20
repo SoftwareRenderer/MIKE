@@ -355,10 +355,12 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPatch {
 		var req struct {
-			Content    *jsontext.Value `json:"content"`
-			CommitHash string          `json:"git_commit_hash"`
+			Content     *jsontext.Value `json:"content"`
+			Attachments *jsontext.Value `json:"attachments"`
+			CommitHash  string          `json:"git_commit_hash"`
 		}
-		if !httputil.DecodeJSON(w, r, &req) {
+		// A message body: an edit carries the row's pictures.
+		if !httputil.DecodeMessageJSON(w, r, &req) {
 			return
 		}
 		// Absent leaves the row alone. A present value is written as given, but never a blank one: a
@@ -377,14 +379,21 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 			}
 			content = &written
 		}
-		if content != nil {
-			if err := s.store.UpdateTaskMessage(messageID, *content); err != nil {
-				Fail(w, err, "update message", "message not found")
+		var attachments *string
+		if req.Attachments != nil {
+			tray, err := readTray(*req.Attachments)
+			if err != nil {
+				JSONError(w, http.StatusBadRequest, err.Error())
 				return
 			}
-			if msg.Role == "summarization" {
-				s.publishSummaryEdit(projectID, taskID, msg, *content)
-			}
+			attachments = &tray
+		}
+		if err := s.store.EditTaskMessage(messageID, content, attachments); err != nil {
+			Fail(w, err, "update message", "message not found")
+			return
+		}
+		if content != nil && msg.Role == "summarization" {
+			s.publishSummaryEdit(projectID, taskID, msg, *content)
 		}
 		if req.CommitHash != "" {
 			// This hash is later handed to reset-worktree, so a forged one stored here
@@ -402,6 +411,27 @@ func (s *Server) handleTaskMessageByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	httputil.MethodNotAllowed(w)
+}
+
+// readTray decodes a request's `attachments` field into the text the column holds. The tray travels as the
+// JSON-encoded array the browser's tray holds, so the body, the row and the provider's image part are one
+// picture. An emptied tray is stored as no tray, the value a message without pictures already holds.
+func readTray(field jsontext.Value) (string, error) {
+	var written string
+	if err := json.Unmarshal(field, &written); err != nil {
+		return "", errors.New("attachments must be a string")
+	}
+	if written = strings.TrimSpace(written); written == "" {
+		return "", nil
+	}
+	var tray []any
+	if err := json.Unmarshal([]byte(written), &tray); err != nil || tray == nil {
+		return "", errors.New("attachments must be a JSON array")
+	}
+	if len(tray) == 0 {
+		return "", nil
+	}
+	return written, nil
 }
 
 // publishSummaryEdit broadcasts a summary edit and notifies the executor if
