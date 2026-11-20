@@ -1,5 +1,6 @@
 // Package procterm ends a spawned command: kill its whole process group, then flush what
-// it already wrote without waiting for an EOF that may never arrive.
+// it already wrote without waiting for an EOF that may never arrive. ProcessGone is how
+// both runners check that a kill reached a detached grandchild.
 //
 // Both bash runners need the pair — backend/exec on the host, the sandbox-bridge inside a
 // container — and the halves are one rule. A detached grandchild keeps the output pipe
@@ -8,7 +9,10 @@
 package procterm
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -36,6 +40,31 @@ func KillGroup(p *os.Process) error {
 		return p.Kill()
 	}
 	return nil
+}
+
+// ProcessGone reports whether pid is no longer running. A killed child is reparented to an
+// init that may never reap it, so a zombie counts as gone — signal 0 succeeds against one.
+// Without procfs the signal check alone decides, so a caller keeps polling instead of
+// treating an unreadable file as gone.
+func ProcessGone(pid int) bool {
+	if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
+		return true
+	}
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+	if err != nil {
+		return false
+	}
+	// /proc/pid/stat is "pid (comm) state …" and comm may contain spaces, so anchor on the last ')'.
+	stat := string(data)
+	idx := strings.LastIndex(stat, ") ")
+	if idx < 0 || idx+3 >= len(stat) {
+		return false
+	}
+	switch stat[idx+2] {
+	case 'Z', 'X', 'x':
+		return true
+	}
+	return false
 }
 
 // Drain waits for every reader to signal on done (one value each), closing the given read

@@ -41,6 +41,7 @@ pkg/logging/logging.go:Lines
 backend/auth/pairing.go:Live
 backend/sandbox/build.go:ActiveBuildCount
 backend/sandbox/sandbox.go:SetMountRoot
+pkg/procterm/procterm.go:ProcessGone
 "
 
 # pkg/logging, one reason each. deadcode walks a call graph, so it cannot see three legitimate shapes:
@@ -69,6 +70,9 @@ backend/sandbox/sandbox.go:SetMountRoot
 # backend/sandbox: SetMountRoot aims the container mount at a test's own tree, which is the only way to
 # stage a checkout at the path its own container mounts at (docs/confinement.md). main never calls it, so
 # production runs on the value MountRootPath() answers by itself.
+#
+# pkg/procterm: ProcessGone answers whether a pid is gone, which nothing production asks. The three waits
+# on it are backend/exec's and the bridge's bash-stream tests and this package's own.
 
 is_allowed() {
 	local file="$1" name="$2" entry

@@ -1,8 +1,6 @@
 package procterm
 
 import (
-	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -146,11 +144,10 @@ func TestKillGroupReachesGrandchildren(t *testing.T) {
 	if _, err := cmd.Process.Wait(); err != nil {
 		t.Fatalf("wait: %v", err)
 	}
-	// Polled, and a zombie counts as gone: the killed grandchild is reparented to an
-	// init that may never reap it, and signal 0 succeeds against a zombie.
+	// Polled: a group kill lands asynchronously.
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if processGone(grandchild) {
+		if ProcessGone(grandchild) {
 			return
 		}
 		if time.Now().After(deadline) {
@@ -182,31 +179,6 @@ func waitForGrandchildPID(t *testing.T, pidFile string) int {
 	}
 	t.Fatal("the command never reported its child's pid")
 	return 0
-}
-
-// processGone reports whether pid is still running. A killed child is reparented to an
-// init that may never reap it, so a zombie counts as gone.
-func processGone(pid int) bool {
-	if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-		return true
-	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		// No procfs: keep polling on the signal check rather than declare success.
-		return false
-	}
-	// /proc/pid/stat is "pid (comm) state …" and comm may contain spaces, so anchor on
-	// the last ')'.
-	stat := string(data)
-	idx := strings.LastIndex(stat, ") ")
-	if idx < 0 || idx+3 >= len(stat) {
-		return false
-	}
-	switch stat[idx+2] {
-	case 'Z', 'X', 'x':
-		return true
-	}
-	return false
 }
 
 func readEnds(pipes []pipePair) []*os.File {

@@ -144,20 +144,12 @@ func (p *MountPolicy) ValidateMounts(mounts []types.SandboxMount) error {
 	return nil
 }
 
-// ValidateCapability rejects a malformed capability string. There is no
-// denylist: a grant lands in a gVisor guest that started from --cap-drop ALL,
-// so callers judge it by what it can reach (sandboxruntime.GVisorIsolationForCaps).
-func ValidateCapability(cap string) error { return sandboxruntime.ValidateCapability(cap) }
-
-// ValidateCapabilities validates a capability list.
-func ValidateCapabilities(caps []string) error { return sandboxruntime.ValidateCapabilities(caps) }
-
 // ValidateSandboxAdditions checks the two fields that can widen a sandbox: host mounts and Linux capabilities.
 func (p *MountPolicy) ValidateSandboxAdditions(mounts []types.SandboxMount, capabilities []string) error {
 	if err := p.ValidateMounts(mounts); err != nil {
 		return err
 	}
-	return ValidateCapabilities(capabilities)
+	return sandboxruntime.ValidateCapabilities(capabilities)
 }
 
 // ShadowsToolState reports whether a path covers the language server's own

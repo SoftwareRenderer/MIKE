@@ -2,17 +2,16 @@ package main
 
 import (
 	"encoding/json/v2"
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"mike/pkg/bridge/protocol"
+	"mike/pkg/procterm"
 )
 
 // bashHarness drives handleBash over in-memory pipes and records every frame the
@@ -208,7 +207,7 @@ func TestHandleBash_TimeoutKillsProcessGroup(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if processGone(pid) {
+		if procterm.ProcessGone(pid) {
 			return // grandchild is gone — the group was killed
 		}
 		if time.Now().After(deadline) {
@@ -274,33 +273,6 @@ func TestHandleBash_StderrStreamedBeforeResult(t *testing.T) {
 	if br.ExitCode != 0 {
 		t.Errorf("exit code = %d, want 0", br.ExitCode)
 	}
-}
-
-// processGone reports whether pid is no longer running. A killed child whose
-// parent is gone is reparented to init — which in a container may be a process
-// that never reaps it — so a zombie counts as gone.
-func processGone(pid int) bool {
-	if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-		return true
-	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		// No procfs (or the entry is already gone) — keep polling on the signal
-		// check alone rather than declaring success, so the test stays meaningful.
-		return false
-	}
-	// /proc/pid/stat is "pid (comm) state …" and comm may contain spaces —
-	// anchor on the last ')'.
-	stat := string(data)
-	idx := strings.LastIndex(stat, ") ")
-	if idx < 0 || idx+3 >= len(stat) {
-		return false
-	}
-	switch stat[idx+2] {
-	case 'Z', 'X', 'x':
-		return true
-	}
-	return false
 }
 
 func tail(s string, n int) string {

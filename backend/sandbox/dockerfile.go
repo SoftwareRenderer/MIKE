@@ -330,10 +330,10 @@ func parseBuildInstruction(text string, line int) (*buildInstruction, error) {
 func readBuildFlags(instr *buildInstruction, rest string) string {
 	rest = strings.TrimLeft(rest, " \t")
 	for strings.HasPrefix(rest, "--") {
-		token, remainder := firstBuildToken(rest)
-		flag, value, _ := strings.Cut(strings.TrimPrefix(token, "--"), "=")
+		token := firstBuildToken(rest)
+		flag, value, _ := strings.Cut(strings.TrimPrefix(token.raw, "--"), "=")
 		instr.Flags[strings.ToLower(flag)] = value
-		rest = strings.TrimLeft(remainder, " \t")
+		rest = strings.TrimLeft(token.rest, " \t")
 	}
 	return rest
 }
@@ -348,56 +348,55 @@ func buildArgIndex(args []string, keyword string) int {
 	return -1
 }
 
-// firstBuildToken splits the leading whitespace-delimited token from the rest of the line, quotes kept.
-func firstBuildToken(s string) (token, rest string) {
-	var quote rune
-	for i, r := range s {
-		switch {
-		case quote != 0:
-			if r == quote {
-				quote = 0
-			}
-		case r == '\'' || r == '"':
-			quote = r
-		case r == ' ' || r == '\t':
-			return s[:i], s[i:]
-		}
-	}
-	return s, ""
+// buildToken is one whitespace-delimited token of a build line.
+type buildToken struct {
+	raw  string // as the file writes it, quotes included
+	text string // with the quotes that delimited it removed
+	rest string // the untouched remainder of the line
+	// closed says the token's quote ended; a line ending inside one holds no token.
+	closed bool
 }
 
-// buildShellWords splits an argument list on whitespace outside quotes. It is not a shell: no expansion, no
-// command substitution, no `$` handling — a token containing one stays text.
-func buildShellWords(s string) ([]string, error) {
+// firstBuildToken splits the leading token of a build line. A quote delimits only while its own kind is
+// open, so the other kind is text.
+func firstBuildToken(s string) buildToken {
 	var (
-		out   []string
-		cur   strings.Builder
 		quote rune
+		text  strings.Builder
 	)
-	for _, r := range s {
+	for i, r := range s {
 		switch {
 		case quote != 0:
 			if r == quote {
 				quote = 0
 				continue
 			}
-			cur.WriteRune(r)
+			text.WriteRune(r)
 		case r == '\'' || r == '"':
 			quote = r
 		case r == ' ' || r == '\t':
-			if cur.Len() > 0 {
-				out = append(out, cur.String())
-				cur.Reset()
-			}
+			return buildToken{raw: s[:i], text: text.String(), rest: s[i:], closed: true}
 		default:
-			cur.WriteRune(r)
+			text.WriteRune(r)
 		}
 	}
-	if quote != 0 {
-		return nil, fmt.Errorf("unclosed quote")
-	}
-	if cur.Len() > 0 {
-		out = append(out, cur.String())
+	return buildToken{raw: s, text: text.String(), closed: quote == 0}
+}
+
+// buildShellWords splits an argument list on whitespace outside quotes. It is not a shell: no expansion, no
+// command substitution, no `$` handling — a token containing one stays text. A token that unquotes to
+// nothing, `""` among them, contributes no word.
+func buildShellWords(s string) ([]string, error) {
+	var out []string
+	for s = strings.TrimLeft(s, " \t"); s != ""; s = strings.TrimLeft(s, " \t") {
+		token := firstBuildToken(s)
+		if !token.closed {
+			return nil, fmt.Errorf("unclosed quote")
+		}
+		if token.text != "" {
+			out = append(out, token.text)
+		}
+		s = token.rest
 	}
 	return out, nil
 }

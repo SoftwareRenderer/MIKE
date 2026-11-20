@@ -2,42 +2,16 @@ package exec
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"mike/backend/types"
+	"mike/pkg/procterm"
 )
-
-// processGone reports whether pid is no longer running. A killed child is
-// reparented to an init that may never reap it, so a zombie counts as gone.
-func processGone(pid int) bool {
-	if err := syscall.Kill(pid, 0); errors.Is(err, syscall.ESRCH) {
-		return true
-	}
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		// No procfs: keep polling on the signal check rather than declare success.
-		return false
-	}
-	// /proc/pid/stat is "pid (comm) state …" and comm may contain spaces —
-	// anchor on the last ')'.
-	stat := string(data)
-	idx := strings.LastIndex(stat, ") ")
-	if idx < 0 || idx+3 >= len(stat) {
-		return false
-	}
-	switch stat[idx+2] {
-	case 'Z', 'X', 'x':
-		return true
-	}
-	return false
-}
 
 func TestNormalizeBashTimeout(t *testing.T) {
 	for _, tc := range []struct{ in, want int64 }{
@@ -118,7 +92,7 @@ func TestExecCommandStream_KillsProcessGroupOnTimeout(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if processGone(pid) {
+		if procterm.ProcessGone(pid) {
 			return // grandchild is gone — the group was killed
 		}
 		if time.Now().After(deadline) {

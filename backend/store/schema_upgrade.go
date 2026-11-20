@@ -47,39 +47,56 @@ func parseTables(statements []string) ([]tableSpec, error) {
 
 // splitStatements cuts a DDL string into statements at the semicolons that end them. A semicolon inside a
 // comment or a quoted value belongs to that text, so both are stepped over rather than stripped.
-func splitStatements(sql string) []string {
+func splitStatements(sql string) []string { return splitDDL(sql, ';', false) }
+
+// splitDDL cuts a DDL string at every sep that ends a piece of it. A sep inside a quoted value or a line
+// comment is that text's own character, so both are stepped over rather than read as structure, and a piece
+// holding nothing but whitespace is dropped. parensHold makes a sep inside (...) part of the item around it:
+// a table body's items are parenthesised, while a statement's semicolon ends the statement whatever sits
+// around it.
+func splitDDL(ddl string, sep rune, parensHold bool) []string {
 	var (
-		out   []string
-		stmt  strings.Builder
-		quote rune // the open quote, or 0 outside quoted text
+		out     []string
+		piece   strings.Builder
+		depth   int
+		quote   rune // the open quote, or 0 outside quoted text
+		inLineC bool
 	)
-	runes := []rune(sql)
+	runes := []rune(ddl)
 	for i := 0; i < len(runes); i++ {
 		c := runes[i]
 		switch {
+		case inLineC:
+			if c == '\n' {
+				inLineC = false
+				piece.WriteRune(c)
+			}
 		case quote != 0:
-			stmt.WriteRune(c)
+			piece.WriteRune(c)
 			if c == quote {
 				quote = 0
 			}
 		case c == '\'' || c == '"' || c == '`':
 			quote = c
-			stmt.WriteRune(c)
-		case c == '-' && i+1 < len(runes) && runes[i+1] == '-' && quote == 0:
-			for i < len(runes) && runes[i] != '\n' {
-				i++
-			}
-			stmt.WriteRune('\n')
-		case c == ';':
-			if text := strings.TrimSpace(stmt.String()); text != "" {
+			piece.WriteRune(c)
+		case c == '-' && i+1 < len(runes) && runes[i+1] == '-':
+			inLineC = true
+		case c == '(' && parensHold:
+			depth++
+			piece.WriteRune(c)
+		case c == ')' && parensHold:
+			depth--
+			piece.WriteRune(c)
+		case c == sep && depth == 0:
+			if text := strings.TrimSpace(piece.String()); text != "" {
 				out = append(out, text)
 			}
-			stmt.Reset()
+			piece.Reset()
 		default:
-			stmt.WriteRune(c)
+			piece.WriteRune(c)
 		}
 	}
-	if text := strings.TrimSpace(stmt.String()); text != "" {
+	if text := strings.TrimSpace(piece.String()); text != "" {
 		out = append(out, text)
 	}
 	return out
@@ -156,51 +173,7 @@ func isTableConstraint(first string) bool {
 
 // splitTopLevelCommas cuts at the commas between table-body items. A comma inside parentheses or inside
 // quotes belongs to the item around it.
-func splitTopLevelCommas(body string) []string {
-	var (
-		out     []string
-		item    strings.Builder
-		depth   int
-		quote   rune
-		runes   = []rune(body)
-		inLineC bool
-	)
-	for i := 0; i < len(runes); i++ {
-		c := runes[i]
-		switch {
-		case inLineC:
-			if c == '\n' {
-				inLineC = false
-				item.WriteRune(c)
-			}
-		case quote != 0:
-			item.WriteRune(c)
-			if c == quote {
-				quote = 0
-			}
-		case c == '\'' || c == '"' || c == '`':
-			quote = c
-			item.WriteRune(c)
-		case c == '-' && i+1 < len(runes) && runes[i+1] == '-':
-			inLineC = true
-		case c == '(':
-			depth++
-			item.WriteRune(c)
-		case c == ')':
-			depth--
-			item.WriteRune(c)
-		case c == ',' && depth == 0:
-			out = append(out, item.String())
-			item.Reset()
-		default:
-			item.WriteRune(c)
-		}
-	}
-	if strings.TrimSpace(item.String()) != "" {
-		out = append(out, item.String())
-	}
-	return out
-}
+func splitTopLevelCommas(body string) []string { return splitDDL(body, ',', true) }
 
 // checkIdentifier accepts only the identifier shape this package's DDL uses. Every name reaching here
 // comes from that constant, and an identifier is the part of an ALTER that cannot be a bound parameter.

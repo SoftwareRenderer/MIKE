@@ -276,7 +276,7 @@ func buildExtensionCreateArgs(ext *Extension, containerName, image string, proje
 	// A malformed NAME is skipped individually so one stale entry doesn't block others.
 	var valid []string
 	for _, cap := range ext.SandboxConfig.Capabilities {
-		if err := ValidateCapability(cap); err != nil {
+		if err := sandboxruntime.ValidateCapability(cap); err != nil {
 			logging.For(logging.Sandbox).Infof("ext=%s SKIPPED capability %q: %v", ext.ID, cap, err)
 			continue
 		}

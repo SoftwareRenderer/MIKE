@@ -353,7 +353,7 @@ func (h *TaskHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		}
 		// Propagate subtasks_auto_merge change to all descendants
 		if task.SubtasksAutoMerge != originalSubtasksAutoMerge {
-			h.propagateSubtasksAutoMerge(projectID, taskID, task.SubtasksAutoMerge)
+			h.propagateSubtasksAutoMerge(taskID, task.SubtasksAutoMerge)
 		}
 		if h.configStore != nil {
 			enrichTaskWorktree(task, h.configStore.WorkspaceDir())
@@ -540,7 +540,7 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	// Skipped when nothing ran: dragging a parent whose children are all Done must not
 	// pull those Done children into review.
 	if !awaitingUser {
-		h.moveAllDescendants(projectID, taskID, task.Status)
+		h.moveAllDescendants(taskID, task.Status)
 	}
 
 	// If a subtask moved to review/done, auto-start the next sibling
@@ -553,47 +553,58 @@ func (h *TaskHandler) HandleMove(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, http.StatusOK, task)
 }
 
-// moveAllDescendantsToInProgress recursively moves descendants to in_progress/idle.
-func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
+// eachDescendant walks a row's descendants and saves every one mutate changed. reverse walks leaves
+// first, the order a column move needs so a child is written before its parent. A row is broadcast to
+// its own project's board: GetChildren selects by parent_task_id alone, so the row, not the request,
+// names the board that has to repaint.
+func (h *TaskHandler) eachDescendant(taskID string, reverse bool, mutate func(*types.Task) bool) {
 	descendants, err := h.store.GetAllDescendants(taskID)
 	if err != nil {
 		logging.For(logging.Merge).Warnf("failed to get descendants of %s: %v", taskID, err)
 		return
 	}
-	for i := range descendants {
+	for n := range descendants {
+		i := n
+		if reverse {
+			i = len(descendants) - 1 - n
+		}
 		d := &descendants[i]
-		if d.Status == types.StatusBacklog || (d.Status == types.StatusInProgress && d.ExecutionState != types.ExecStateRunning && d.ExecutionState != types.ExecStateFailed) {
-			d.Status = types.StatusInProgress
-			d.ExecutionState = types.ExecStateIdle
-			d.UpdatedAt = time.Now().UTC()
-			if err := h.store.UpdateTask(d); err != nil {
-				logging.For(logging.Merge).Warnf("failed to update descendant %s: %v", d.ID, err)
-			} else {
-				h.boardStreamMgr.BroadcastTaskUpdated(d.ProjectID, d)
-			}
+		if !mutate(d) {
+			continue
+		}
+		if err := h.store.UpdateTask(d); err != nil {
+			logging.For(logging.Merge).Warnf("failed to update descendant %s: %v", d.ID, err)
+		} else {
+			h.boardStreamMgr.BroadcastTaskUpdated(d.ProjectID, d)
 		}
 	}
 }
 
+// moveAllDescendantsToInProgress recursively moves descendants to in_progress/idle.
+func (h *TaskHandler) moveAllDescendantsToInProgress(taskID string) {
+	h.eachDescendant(taskID, false, func(d *types.Task) bool {
+		if d.Status == types.StatusBacklog || (d.Status == types.StatusInProgress && d.ExecutionState != types.ExecStateRunning && d.ExecutionState != types.ExecStateFailed) {
+			d.Status = types.StatusInProgress
+			d.ExecutionState = types.ExecStateIdle
+			d.UpdatedAt = time.Now().UTC()
+			return true
+		}
+		return false
+	})
+}
+
 // moveAllDescendants recursively moves descendants to target status, leaves first.
-func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus types.Status) {
-	descendants, err := h.store.GetAllDescendants(taskID)
-	if err != nil {
-		logging.For(logging.Merge).Warnf("failed to get descendants of %s: %v", taskID, err)
-		return
-	}
-	// Process in reverse order (leaves first) so children are moved before their parents
-	for i := len(descendants) - 1; i >= 0; i-- {
-		d := &descendants[i]
+func (h *TaskHandler) moveAllDescendants(taskID string, targetStatus types.Status) {
+	h.eachDescendant(taskID, true, func(d *types.Task) bool {
 		// Skip in-flight descendants
 		if d.ExecutionState.InFlight() {
-			continue
+			return false
 		}
 		// Moving to In Progress is a start: only backlog descendants join. Review
 		// awaits a human, done work is complete, and in_progress tasks are managed
 		// by the autostart chain — dragging them out would bypass the gates.
 		if targetStatus == types.StatusInProgress && d.Status != types.StatusBacklog {
-			continue
+			return false
 		}
 		// Stop the executor if the descendant was in In Progress and is being moved out
 		if d.Status == types.StatusInProgress && targetStatus != types.StatusInProgress && h.executor != nil {
@@ -615,12 +626,8 @@ func (h *TaskHandler) moveAllDescendants(projectID, taskID string, targetStatus 
 			}
 			// Keep existing state (failed, stopped, idle) if not overridden above
 		}
-		if err := h.store.UpdateTask(d); err != nil {
-			logging.For(logging.Merge).Warnf("failed to update descendant %s: %v", d.ID, err)
-		} else {
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, d)
-		}
-	}
+		return true
+	})
 }
 
 // unfinishedDescendants counts descendants not yet done.
@@ -662,28 +669,18 @@ func (h *TaskHandler) checkAncestorInProgress(task *types.Task) error {
 }
 
 // propagateSubtasksAutoMerge recursively sets auto_merge on descendants.
-func (h *TaskHandler) propagateSubtasksAutoMerge(projectID, taskID string, enabled bool) {
-	descendants, err := h.store.GetAllDescendants(taskID)
-	if err != nil {
-		logging.For(logging.Merge).Warnf("failed to get descendants of %s: %v", taskID, err)
-		return
-	}
-	for i := range descendants {
-		d := &descendants[i]
+func (h *TaskHandler) propagateSubtasksAutoMerge(taskID string, enabled bool) {
+	h.eachDescendant(taskID, false, func(d *types.Task) bool {
 		if d.AutoMerge == enabled {
-			continue // already matches
+			return false // already matches
 		}
 		d.AutoMerge = enabled
 		if enabled {
 			d.AutoCommit = true // prerequisite for auto_merge
 		}
 		d.UpdatedAt = time.Now().UTC()
-		if err := h.store.UpdateTask(d); err != nil {
-			logging.For(logging.Merge).Warnf("failed to update descendant %s: %v", d.ID, err)
-		} else {
-			h.boardStreamMgr.BroadcastTaskUpdated(projectID, d)
-		}
-	}
+		return true
+	})
 }
 
 // HandleCommitPreviewStream streams commit message generation via SSE.
@@ -1196,14 +1193,10 @@ func (h *TaskHandler) HandleStart(w http.ResponseWriter, r *http.Request) {
 	// User explicitly started this task: it goes to In Progress (started-but-pending) before
 	// anything under it runs, so the board shows the row the click named.
 	if len(children) > 0 && task.Status == types.StatusBacklog {
-		task.Status = types.StatusInProgress
 		task.ExecutionState = types.ExecStateIdle
-		task.UpdatedAt = time.Now().UTC()
-		if err := h.store.UpdateTask(task); err != nil {
-			httputil.Fail(w, err, "update task", "task not found")
+		if !h.markRowInProgress(w, projectID, task) {
 			return
 		}
-		h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 	}
 
 	out := h.startUnderSchedule(projectID, task, children)
@@ -1342,13 +1335,9 @@ func (h *TaskHandler) HandleStartSubtask(w http.ResponseWriter, r *http.Request)
 	if task.Status == types.StatusBacklog {
 		task.ExecutionState = types.ExecStateIdle
 	}
-	task.Status = types.StatusInProgress
-	task.UpdatedAt = time.Now().UTC()
-	if err := h.store.UpdateTask(task); err != nil {
-		httputil.Fail(w, err, "update task", "task not found")
+	if !h.markRowInProgress(w, projectID, task) {
 		return
 	}
-	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
 
 	children, err := h.store.GetChildren(taskID)
 	if err != nil {
@@ -1380,6 +1369,19 @@ func (h *TaskHandler) respondScheduleOutcome(w http.ResponseWriter, projectID, t
 	}
 	// Nothing started and nothing failed: the row rests on children that are still finishing.
 	h.respondWithTask(w, projectID, taskID)
+}
+
+// markRowInProgress writes the clicked row as started-but-pending and tells the board. Which rows
+// qualify stays with the route (AGENTS.md → Subtask Schedule).
+func (h *TaskHandler) markRowInProgress(w http.ResponseWriter, projectID string, task *types.Task) bool {
+	task.Status = types.StatusInProgress
+	task.UpdatedAt = time.Now().UTC()
+	if err := h.store.UpdateTask(task); err != nil {
+		httputil.Fail(w, err, "update task", "task not found")
+		return false
+	}
+	h.boardStreamMgr.BroadcastTaskUpdated(projectID, task)
+	return true
 }
 
 // reloadTask reads the row again after an operation that may have rewritten it. The row can be gone — a
