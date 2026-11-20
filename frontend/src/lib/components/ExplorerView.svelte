@@ -272,6 +272,7 @@
         branch={selectedBranch}
         projectId={projectId}
         projectPath={projectPath}
+        containerPath={mountPath}
         folderPath={currentFolderPath}
         changesOpen={changesOpen}
         onChangesOpen={onChangesOpen}

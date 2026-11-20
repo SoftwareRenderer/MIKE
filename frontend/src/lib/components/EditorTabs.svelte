@@ -15,11 +15,13 @@
     import fsExitIcon from '$lib/assets/icons/fullscreen-exit.svg?raw';
     import fsEnterIcon from '$lib/assets/icons/fullscreen-enter.svg?raw';
 
-    let { projectId, projectPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
+    let { projectId, projectPath, containerPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null,
         onLinesSelected = null, scrollTops, onScrollTop, isMobile = false }: {
         projectId: string;
         projectPath?: string;
+        /** The container root this tree is listed by, for a sandboxed project. */
+        containerPath?: string;
         taskId?: string;
         openFiles: OpenFileTab[];
         activeFilePath: string;
@@ -242,6 +244,7 @@
                     <FileEditor
                         projectId={projectId}
                         projectPath={projectPath}
+                        containerPath={containerPath}
                         taskId={taskId}
                         filePath={file.path}
                         targetLine={file.targetLine}

@@ -17,7 +17,7 @@
      * Everything an explorer screen shows below its header. The file browser is the one piece each
      * screen still writes for itself, so it arrives as a snippet.
      */
-    let { core, layout, isMobile, branch, projectId, projectPath, taskId,
+    let { core, layout, isMobile, branch, projectId, projectPath, containerPath, taskId,
         changesOpen, onChangesOpen, folderPath, onReviewUpdated, scrollTops, onScrollTop, browser }: {
         core: ExplorerCore;
         layout: ExplorerLayout;
@@ -25,6 +25,8 @@
         branch: string;
         projectId: string;
         projectPath: string;
+        /** The container root the listing opens files by, for a sandboxed project. */
+        containerPath?: string;
         taskId?: string;
         changesOpen: boolean;
         onChangesOpen: (open: boolean) => void;
@@ -168,6 +170,7 @@
                     <EditorTabs
                         projectId={projectId}
                         projectPath={projectPath}
+                        containerPath={containerPath}
                         taskId={taskId}
                         openFiles={core.openFiles}
                         activeFilePath={core.activeFilePath}

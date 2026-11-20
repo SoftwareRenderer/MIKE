@@ -217,11 +217,15 @@
         chatMaximize = chatManualToggleState(chatMaximize);
     }
 
+    /** The container root this task's tree is listed by — the name the raw route and the explorer both
+     *  address it by; '' when the task runs on the host. */
+    let containerPath = $derived(sandboxEnabled && projectName ? sandboxMountPath(projectName) : '');
+
     function resolveFilePath(relativePath: string): string | null {
         if (!task.id) return null;
         if (sandboxEnabled) {
-            if (!projectName) return null;
-            return `${sandboxMountPath(projectName)}/${relativePath}`;
+            if (!containerPath) return null;
+            return `${containerPath}/${relativePath}`;
         }
         if (!workspaceDir) return null;
 
@@ -1123,6 +1127,7 @@
                                 projectId={editingTaskProjectId}
                                 taskId={editingTaskId}
                                 projectPath={projectPath}
+                                containerPath={containerPath}
                                 workspaceDir={workspaceDir}
                                 baseRef={editingBaseRef}
                                 pendingFsEvent={pendingFsEvent}

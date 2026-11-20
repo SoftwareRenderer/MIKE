@@ -56,10 +56,10 @@ async function advance(ms: number) {
 }
 
 /** The editor open on `path` after the read refused it as text. */
-async function openRefused(path: string): Promise<HTMLElement> {
+async function openRefused(path: string, props: Record<string, unknown> = {}): Promise<HTMLElement> {
     readFsFile.mockRejectedValue(new FsReadRefused(415, 'this file is not text'));
     const { container } = render(FileEditor, {
-        props: { projectId: 'p1', projectPath: PROJECT, taskId: 't1', filePath: path, targetLine: 0, onClose: () => {} },
+        props: { projectId: 'p1', projectPath: PROJECT, taskId: 't1', filePath: path, targetLine: 0, onClose: () => {}, ...props },
     });
     await advance(1000);
     return container;
@@ -90,6 +90,34 @@ describe('a file whose bytes are not text', () => {
         expect(url.searchParams.get('project')).toBe('p1');
         expect(url.searchParams.get('task')).toBe('t1');
         expect(url.searchParams.get('path')).toBe('docs/logo.png');
+    });
+
+    it('asks for the picture of a sandboxed tree by the name its container lists it under', async () => {
+        // A sandboxed task's listing opens files under the project's own mount while projectPath is the
+        // worktree directory, so only the container root strips to a path the raw route accepts.
+        const el = await openRefused('/home/sandbox/immich-watchface/preview-tie.png', {
+            projectPath: '/repo/.worktrees/brave-fox',
+            containerPath: '/home/sandbox/immich-watchface',
+        });
+
+        const url = new URL(picture(el)!.getAttribute('src')!, 'http://x');
+        expect(url.pathname).toBe('/api/fs/raw');
+        expect(url.searchParams.get('task')).toBe('t1');
+        expect(url.searchParams.get('path')).toBe('preview-tie.png');
+    });
+
+    // The task card's diff panel opens a clicked file through the same states, under the same mount — and a
+    // folder not named like the project, so no guess at the mount can match.
+    it('paints that picture in the diff viewer too', async () => {
+        const el = await openRefused('/home/sandbox/immich-watchface/preview-tie.png', {
+            mode: 'diff',
+            projectPath: '/repo/watchfaces',
+            containerPath: '/home/sandbox/immich-watchface',
+        });
+
+        expect(el.querySelector('.editor-header')).toBeTruthy();   // the diff pane, not the tab's
+        const url = new URL(picture(el)!.getAttribute('src')!, 'http://x');
+        expect(url.searchParams.get('path')).toBe('preview-tie.png');
     });
 
     it('holds no buffer for it, so nothing can be saved back', async () => {

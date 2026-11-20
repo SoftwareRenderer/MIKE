@@ -7,8 +7,6 @@
  * `__tests__/line-selection.unit.ts`.
  */
 
-import { sandboxMountFromPath } from './path';
-
 /** Inclusive 1-based document line range. */
 export interface LineRange {
     start: number;
@@ -39,19 +37,21 @@ export function resolveGutterClickRange(
 }
 
 /**
- * Project-relative display path for the task description header.
+ * The path this file's tree knows it by — what `GET /api/fs/raw` reads and what a task description header
+ * names.
  *
- * Accepts the editor's file path, which is either the host project path
- * (`<projectPath>/...`) or the sandbox mount path
- * (`/home/sandbox/<projectName>/...`). Anything unrecognized is returned
- * as-is so the description always carries a usable path.
+ * The editor holds the path its listing handed over: the host path for a plain project, the container mount
+ * `/home/sandbox/<name>/...` for a sandboxed one. The host passes both roots it knows — the checkout, and the
+ * mount its listing navigates by, which the project row names and the folder need not. Nothing is guessed from
+ * a folder name: a host path under an unrelated `/home/sandbox/...` must not strip. Anything unrecognized is
+ * returned as-is, so a description still carries a usable path.
  */
-export function toProjectRelative(filePath: string, projectPath: string): string {
+export function toProjectRelative(filePath: string, hostRoot: string, containerRoot = ''): string {
     if (!filePath) return '';
-    const root = (projectPath || '').replace(/\/+$/, '');
-    if (root && filePath.startsWith(root + '/')) return filePath.slice(root.length + 1);
-    const mount = sandboxMountFromPath(root);
-    if (mount && filePath.startsWith(mount + '/')) return filePath.slice(mount.length + 1);
+    for (const root of [hostRoot, containerRoot]) {
+        const cut = (root || '').replace(/\/+$/, '');
+        if (cut && filePath.startsWith(cut + '/')) return filePath.slice(cut.length + 1);
+    }
     return filePath;
 }
 

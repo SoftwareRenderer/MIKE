@@ -64,6 +64,7 @@
     let {
         projectId,
         projectPath,
+        containerPath,
         taskId,
         filePath,
         targetLine,
@@ -93,6 +94,9 @@
     }: {
         projectId: string;
         projectPath?: string;
+        /** The container root this editor's tree is listed by — `/home/sandbox/<project name>` — for a
+         *  sandboxed project, where the explorer opens files by their container path. */
+        containerPath?: string;
         taskId?: string;
         filePath: string;
         targetLine: number;
@@ -142,11 +146,12 @@
     /** The states in which this editor holds no text: no CodeMirror, no draft, no save. Bytes the browser
      *  never held cannot be written back, so the save path closes on the same test. */
     const noBuffer = $derived(fileTooLarge || fileNotFound || fileBinary);
-    /** A refused image still has its bytes: the raw route reads them from disk, which needs the name the
-     *  explorer opened the file by — the repository-relative one. */
+    /** What this file's tree calls it: the name the raw route reads and a line selection names. */
+    const treeRelative = $derived(toProjectRelative(filePath || '', projectPath || '', containerPath || ''));
+    /** A refused image still has its bytes: the raw route reads them from disk. */
     const imageSrc = $derived(
         fileBinary && !imageFailed && isDisplayableImage(filePath || '')
-            ? rawFileURL({ project: projectId, task: taskId, path: toProjectRelative(filePath || '', projectPath || '') })
+            ? rawFileURL({ project: projectId, task: taskId, path: treeRelative })
             : ''
     );
     let baselineContent = $state('');       // disk content at load time (for gutter delta tracking)
@@ -924,7 +929,7 @@
         if (!relative) return target.path;
         // An editor path this helper does not recognize (a diff editor's worktree
         // path, say) is already in its explorer's space.
-        const ownRelative = toProjectRelative(filePath || '', projectPath || '');
+        const ownRelative = treeRelative;
         if (!ownRelative || ownRelative === filePath || !filePath.endsWith(ownRelative)) return target.path;
         return filePath.slice(0, filePath.length - ownRelative.length) + relative;
     }
@@ -1236,7 +1241,7 @@
         const lines: string[] = [];
         for (let ln = range.start; ln <= range.end; ln++) lines.push(doc.line(ln).text);
         onLinesSelected?.({
-            relativePath: toProjectRelative(filePath, projectPath || ''),
+            relativePath: treeRelative,
             startLine: range.start,
             lines,
         });

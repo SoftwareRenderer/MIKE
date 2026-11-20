@@ -161,6 +161,7 @@
         branch={selectedBranch}
         projectId={projectId}
         projectPath={taskPath}
+        containerPath={mountPath}
         taskId={taskId}
         folderPath={currentFolderPath}
         changesOpen={changesOpen}

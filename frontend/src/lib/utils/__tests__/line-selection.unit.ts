@@ -73,8 +73,13 @@ describe('toProjectRelative', () => {
         expect(toProjectRelative('/home/u/proj2/main.go', '/home/u/proj')).toBe('/home/u/proj2/main.go');
     });
 
-    it('strips the sandbox mount prefix', () => {
-        expect(toProjectRelative('/home/sandbox/proj/src/main.go', '/home/u/proj')).toBe('src/main.go');
+    it('strips the container root the listing navigates by', () => {
+        // A sandboxed task: its listing opens files under the project's own mount while the host root is the
+        // worktree directory, so only the container root matches — and no folder-name guess is trusted.
+        const listed = '/home/sandbox/immich-watchface/preview-tie.png';
+        const worktree = '/home/u/repos/watchface/.worktrees/brave-fox';
+        expect(toProjectRelative(listed, worktree)).toBe(listed);
+        expect(toProjectRelative(listed, worktree, '/home/sandbox/immich-watchface')).toBe('preview-tie.png');
     });
 
     it('falls back to the raw path when nothing matches', () => {
