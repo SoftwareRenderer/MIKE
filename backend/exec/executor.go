@@ -67,18 +67,16 @@ type TaskExecutor struct {
 	llmBackoff func(attempt int, err error) time.Duration
 	// Truncates one conversation from inside a running turn. See Deps.RewindConversation.
 	rewindConversation func(projectID, taskID, messageID string) error
-	// submoduleFetch is the operator's half of what a task may spend reaching the network for a submodule.
-	// The project's half is on its row; see prepareSubmodules.
+	// submoduleFetch is the operator's half of how a submodule address is screened. The project's half is
+	// simpler still: a task fetches nothing, so this only judges the remote a store fetch would dial.
 	submoduleFetch git.SubmoduleFetch
-	// submoduleFetcher is git.FetchSubmodules unless a test stood in for it. See Deps.FetchSubmodules.
-	submoduleFetcher func(ctx context.Context, projectPath string, paths []string, fetch git.SubmoduleFetch, onStatus func(string)) ([]string, error)
-	gate             *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
-	taskGate         *ConcurrencyGate // per-provider running-task limit
-	taskSlotWaits    queuedWaiters    // which task-slot queue entry each task is blocked behind; see queuedWaiters
-	memGate          *MemoryGate      // sandbox memory budget gate; capacity 0 = disabled
-	taskMu           sync.Mutex
-	llmAdapter       *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none
-	tasks            map[string]*executionState
+	gate           *ConcurrencyGate // per-LLM-request in-flight limit (incl. utility calls)
+	taskGate       *ConcurrencyGate // per-provider running-task limit
+	taskSlotWaits  queuedWaiters    // which task-slot queue entry each task is blocked behind; see queuedWaiters
+	memGate        *MemoryGate      // sandbox memory budget gate; capacity 0 = disabled
+	taskMu         sync.Mutex
+	llmAdapter     *llmadapter.Adapter // provider request adaptation (llm extensions); nil = none
+	tasks          map[string]*executionState
 	// Per-task mutexes to serialize worktree access across executors and merges.
 	worktreeMu taskWorktreeLocks // taskID -> the task's own worktree lock
 	// Manages branch and merge behavior of finished turns.
@@ -349,10 +347,6 @@ type Deps struct {
 	// AllowPrivateSubmoduleHosts is the operator's widening of the address screen a repository-chosen
 	// submodule URL is checked against. The zero value screens the private ranges out too.
 	AllowPrivateSubmoduleHosts bool
-	// FetchSubmodules is how a turn's submodule fetch reaches git. Nil is git.FetchSubmodules; a test that
-	// only needs "was a fetch asked for, and for which paths" stands in for it, the way LLMBackoff stands
-	// in for the retry ladder.
-	FetchSubmodules func(ctx context.Context, projectPath string, paths []string, fetch git.SubmoduleFetch, onStatus func(string)) ([]string, error)
 }
 
 // NewTaskExecutor wires an executor and the collaborators split out of it. Every TaskExecutor in
@@ -388,7 +382,6 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 		llmBackoff:         llmBackoff,
 		rewindConversation: deps.RewindConversation,
 		submoduleFetch:     git.SubmoduleFetch{AllowPrivateHosts: deps.AllowPrivateSubmoduleHosts},
-		submoduleFetcher:   deps.FetchSubmodules,
 		gate:               NewConcurrencyGate(),
 		taskGate:           NewConcurrencyGate(),
 		memGate:            &MemoryGate{},
@@ -398,9 +391,6 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 		logging.For(logging.Tools).With(logging.TaskID, taskID).Warnf(
 			"waited %s for the task's worktree lock - a tool call holds it", waited.Round(time.Second))
 	})
-	if te.submoduleFetcher == nil {
-		te.submoduleFetcher = git.FetchSubmodules
-	}
 	te.merge = te.newMergeOrchestrator()
 	te.summarize = te.newSummarizeOrchestrator()
 	te.tools = te.newToolRunner()

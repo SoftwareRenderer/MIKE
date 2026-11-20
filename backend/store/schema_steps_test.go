@@ -155,6 +155,18 @@ func TestSchemaStepDropsAProjectColumnAnOlderReleaseHad(t *testing.T) {
 			key:  dropStorageLimitColumnKey,
 			drop: dropProjectSandboxStorageLimit,
 		},
+		{
+			name:     "the submodule fetch consent",
+			column:   "auto_fetch_submodules",
+			declare:  "ALTER TABLE projects ADD COLUMN auto_fetch_submodules INTEGER NOT NULL DEFAULT 0",
+			id:       "afs",
+			wantName: "autofetch",
+			wantPath: "/tmp/autofetch",
+			seed: "INSERT INTO projects (id, name, path, auto_fetch_submodules, created_at, updated_at) " +
+				"VALUES ('afs', 'autofetch', '/tmp/autofetch', 1, '2026-10-20T00:00:00Z', '2026-10-20T00:00:00Z')",
+			key:  dropAutoFetchSubmodulesColumnKey,
+			drop: dropProjectAutoFetchSubmodules,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "drop-"+tc.column+".db")
@@ -208,6 +220,7 @@ func TestSchemaStepBootsOverADropWithNothingToDrop(t *testing.T) {
 	}{
 		{"the run-set hash", "sandbox_run_set_hash", dropProjectRunSetHash},
 		{"the storage limit", "sandbox_storage_limit", dropProjectSandboxStorageLimit},
+		{"the submodule fetch consent", "auto_fetch_submodules", dropProjectAutoFetchSubmodules},
 	} {
 		t.Run(tc.label, func(t *testing.T) {
 			s, _ := newStoreAt(t)

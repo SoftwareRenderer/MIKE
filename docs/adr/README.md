@@ -67,4 +67,5 @@ What this makes cheap, what it makes impossible, and what would reopen it.
 |---|---|---|
 | [0001](0001-key-decisions-are-recorded.md) | Key decisions get a numbered file, written when the choice is made and never backfilled | accepted |
 | [0002](0002-image-builds-run-in-a-sandbox-container-over-a-commit-subtree.md) | An image build runs in a one-shot gVisor container with the project's own sandbox configuration, over a subtree of a pinned commit | accepted |
-| [0003](0003-a-task-fetches-a-submodule-only-under-the-projects-two-switches.md) | A task fetches a submodule only where the project's two switches allow it, and otherwise stops for the person's click | accepted |
+| [0003](0003-a-task-fetches-a-submodule-only-under-the-projects-two-switches.md) | A task fetches a submodule only where the project's two switches allow it, and otherwise stops for the person's click | superseded by 0004 |
+| [0004](0004-a-task-fetches-no-submodule-the-persons-click-does.md) | A task fetches no submodule; the notice's button is the only fetch, and the project keeps no switch for it | accepted |

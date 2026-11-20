@@ -26,8 +26,6 @@ export class SandboxDraftOwner {
     // ── The edited values ────────────────────────────────────────────────────
     sandboxEnabled = $state(false);
     networkIsolation = $state(false);
-    /** The submodule fetch consent — see `SandboxDraft.autoFetchSubmodules`. */
-    autoFetchSubmodules = $state(false);
     /** What the isolation switch is measured against — see `SandboxDraft.networkIsolationBaseline`. */
     networkIsolationBaseline = $state(false);
     memoryLimitMB = $state<number | null>(null);
@@ -104,7 +102,6 @@ export class SandboxDraftOwner {
         const draft = draftFromProject(project);
         this.sandboxEnabled = draft.sandboxEnabled;
         this.networkIsolation = draft.networkIsolation;
-        this.autoFetchSubmodules = draft.autoFetchSubmodules;
         this.networkIsolationBaseline = draft.networkIsolationBaseline;
         this.memoryLimitMB = draft.memoryLimitMB;
         this.image = draft.image;
@@ -132,7 +129,6 @@ export class SandboxDraftOwner {
         return {
             sandboxEnabled: this.sandboxEnabled,
             networkIsolation: this.networkIsolation,
-            autoFetchSubmodules: this.autoFetchSubmodules,
             networkIsolationBaseline: this.networkIsolationBaseline,
             memoryLimitMB: this.memoryLimitMB,
             image: this.image,

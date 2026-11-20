@@ -1,6 +1,6 @@
 # ADR-0003 — A task fetches a submodule only under the project's two switches
 
-**Status:** accepted
+**Status:** superseded by 0004
 
 **Rules that follow:** `AGENTS.md → Git`, `docs/git-operations.md → Submodules`, `docs/api-contract.md → Submodules are read from the task and fetched by a click`
 

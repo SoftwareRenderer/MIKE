@@ -74,7 +74,7 @@ which writes each pattern once and never touches the project's own `.gitignore`.
 Two facts about that file, both measured:
 
 - **It lives in the common git dir.** A checkout made by `git worktree add` has a gitdir of its own, and git
-  reads `info/exclude` from the shared one only — a pattern written under the per-checkout gitdir is a silent
+  reads `info/exclude` from the shared one only. A pattern written under the per-checkout gitdir is a silent
   no-op, which is what the first version of this did for a project that is itself a worktree.
   `repoExcludeFile` asks git instead (`rev-parse --path-format=absolute --git-common-dir`);
   `TestEnsureExcludedFollowsAGitdirPointerToTheSharedGitDir` fails against reading the `.git` file by hand.
@@ -115,7 +115,8 @@ sweep that keeps the branch a live task's row names).
 ## Submodules: share the person's copy, never re-fetch
 
 The worktree is given its submodules from the repository the person already populated. A fetch of a
-repository-chosen URL happens at import, at the person's click, and — under two switches — at task start.
+repository-chosen URL happens at import and at the person's click, and never from a task, which stops and
+names what is missing instead.
 
 - **Neither clone nor `worktree add` populates a submodule.** `git worktree add` leaves the path an empty
   directory, and `CloneArgs` is not `--recursive`. `git status` stays clean over an empty gitlink, which is
@@ -148,7 +149,8 @@ repository-chosen URL happens at import, at the person's click, and — under tw
 - **MIKE never parses `.gitmodules`.** `ensureCommit` answers a pointer whose commit the shared store lacks
   with one `git fetch` *in that store*, using the store's own remote, bounded by the turn's context. That
   address lives in a config file MIKE did not write, so it is screened like any other and fetched over
-  `submoduleEnv`, and the fetch needs both switches — the same pair as the task's own fetch. A store
+  `submoduleEnv`, and the project's isolation switch alone refuses it (`allowStoreFetch`), because that fetch
+  leaves the machine from the server process. A store
   the person never populated stops the task and names the submodule, the checkout to work in, and the command
   to run there; the empty directory is never handed to the agent as if it were the code.
 - **That fetch is a tail, not the common path.** `fetch.recurseSubmodules` is `on-demand` by default, so a
@@ -167,21 +169,22 @@ repository-chosen URL happens at import, at the person's click, and — under tw
 - **The same verb answers one click.** `POST /api/projects/{projectID}/submodules/init` is `InitSubmodules`
   over the project's own checkout — the person asking for the state they were told to go and get. It is a
   click, which is what makes the fetch the person's own (`docs/api-contract.md → Submodules`).
-- **A task start fetches only under both switches.** `prepareSubmodules` (`backend/exec/submodules.go`) asks
-  the project's row: `auto_fetch_submodules` grants the fetch and `sandbox_network_isolation` refuses it, and
-  refusal outranks consent. The stale-pointer fetch of `PopulateSubmodules` asks the same pair
-  (`allowStoreFetch`), because it dials the store's remote from the server process. Anything still unpopulated
-  then stops the task on `git.SubmodulesUninitialized`, whose rows carry each path, its redacted address and
-  MIKE's reason; the fail code is `submodules_uninitialized`, which the card answers with the button rather
-  than a retry.
+- **A task start fetches nothing.** `prepareSubmodules` (`backend/exec/submodules.go`) lists what the task's
+  own commit names and the person's checkout does not hold, and stops the task on
+  `git.SubmodulesUninitialized`. Its rows carry each path, its redacted address and MIKE's reason, and the
+  fail code is `submodules_uninitialized`, which the card answers with the button rather than a retry. A task
+  reaching a repository-chosen URL would spend the operator's credentials on an address the repository's text
+  chose, so the approval is a click in that chat and no project row grants it away in advance. The
+  stale-pointer fetch of `PopulateSubmodules` is the one fetch a task leaves the machine for, and isolation
+  alone refuses it (`allowStoreFetch`), because it dials a remote the person already approved.
 - **Only the checkout's own gitlinks are fetchable.** A gitlink a *task's* commit names and the project's
   commit does not was put there by the model, and the model does not decide what MIKE downloads.
-  `FetchSubmodules` is the task's verb and skips such a row; `CheckoutSubmoduleStates` is what a click may
-  ask for.
+  `InitSubmodules` lists the gitlinks of the person's own checkout's HEAD, so such a row is never asked for;
+  `CheckoutSubmoduleStates` is what a click may ask for.
 - **No fetch asks git to recurse.** A nested `.gitmodules` is text that arrives inside a clone, so
   `fetchRounds` asks one level, re-lists, and asks again: a nested refusal is then a report, not a clone MIKE
-  never judged. Import is the same verb without the path filter, and a nested refusal still leaves the level
-  above it populated.
+  never judged. The import and the click are that one verb, and a nested refusal still leaves the level above
+  it populated.
 - **A submodule URL is screened before git sees it, and again as an address.** It is the one remote MIKE
   contacts on a repository's say-so, from the server process, outside every sandbox. `screenSubmoduleURL`
   refuses an empty or oversized URL, one naming no host, the loopback, link-local and unspecified addresses
@@ -221,10 +224,13 @@ repository-chosen URL happens at import, at the person's click, and — under tw
 Tests: `backend/git/submodules_test.go` — populated with the upstream deleted, nested stores, section names
 that differ from the path, a project that is itself a worktree, a store whose working copy is gone, an
 unpopulated store, and the prune. It fetches the stale commit, refuses a store remote naming a refused
-address, and repeats a population that already happened. Its `InitSubmodules` tests fetch what is missing, leave the person's checkout untouched, import
-despite an unreachable upstream, refuse a local submodule URL, refuse what the checkout records behind
-`.gitmodules`, and fetch only what the commit names. Its screen tests cover each refused address class and what
-the widening reaches. `backend/exec/submodules_test.go` covers the two switches for both fetch paths, and
+address, and repeats a population that already happened. Its `InitSubmodules` tests fetch what is missing and
+what the missing copy reveals underneath it, without asking git to recurse, and leave the person's checkout
+untouched. They import despite an unreachable upstream, refuse a local submodule URL, refuse what the checkout
+records behind `.gitmodules`, fetch only what the commit names and never what only a task's commit names, and
+refuse a second arrival while one fetch holds the checkout. Its screen tests cover each refused address class
+and what the widening reaches. `backend/exec/submodules_test.go` covers the refusal a missing copy gets, that
+neither of the project's switches is what refused it, and that the person's own fetch ends it; and
 `backend/api/project_submodules_test.go` that the listing and the click name the same rows the refusal named.
 
 ## Stash: the bracket and the identity
@@ -232,8 +238,8 @@ the widening reaches. `backend/exec/submodules_test.go` covers the two switches 
 - Work that must run against a temporarily clean tree goes through `WithStash`
   (`backend/git/stash_bracket.go`) — the only home for the push/run/restore bracket, which the merge
   paths take rather than writing the sequence themselves. A bracketed section begins with
-  `git checkout -f`, which silently reverts tracked modifications to HEAD when the tree is dirty, so
-  `WithStash` **refuses to run the work when `PushStash` fails** (`ErrNothingToStash` is the one
+  `git checkout -f`, which silently reverts tracked modifications to HEAD when the tree is dirty.
+  `WithStash` therefore **refuses to run the work when `PushStash` fails** (`ErrNothingToStash` is the one
   tolerated failure — there was nothing to take), and `fn` returns `ErrKeepStash` to leave the entry
   stacked for the turn that later resolves a merge conflict. The stash mutex is taken around the push and
   around the restore and held across neither, so `fn` may take the merge lock.
@@ -254,7 +260,7 @@ the widening reaches. `backend/exec/submodules_test.go` covers the two switches 
   bracket scoped to one call cannot express, and `loop_agent.go` restores by label with no push of its
   own.
 - **The restore keeps the work's staged/unstaged split.** A plain `git stash apply` brings a
-  modification back unstaged (a new file stays staged), and commit-and-done commits the index only, so a
+  modification back unstaged (a new file stays staged), and commit-and-done commits the index only. So a
   task whose own worktree was merged into — a subtask landing in its parent — loses its edits to
   existing files from its own commit and then loses the worktree. `PopStashByHash` restores with
   `--index` and falls back to a plain apply only when the refused attempt changed nothing: measured, git
@@ -263,7 +269,7 @@ the widening reaches. `backend/exec/submodules_test.go` covers the two switches 
 - **A conflicted restore is reported, with the paths read from git rather than from its wording.**
   `PopStashByHash` checks `git diff --name-only --diff-filter=U` after a failed apply and returns
   `*RestoreConflictError` (the paths and the entry's hash, classified with `errors.As`) only when the
-  index is unmerged: a conflict is a file a person has to resolve, a refusal left the tree alone, and
+  index is unmerged. A conflict is a file a person has to resolve, a refusal left the tree alone, and
   git's phrasing does not tell them apart. What a caller does with it is
   `docs/commit-and-done.md → Commit and Move to Done` — the merge paths finish the task on it, which is why the git layer states
   it separately instead of returning one error for the bracket.

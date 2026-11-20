@@ -823,39 +823,30 @@ func TestSubmoduleStatesReportsAGitlinkWithNoEntry(t *testing.T) {
 	}
 }
 
-// TestFetchSubmodulesBringsTheNestedCopyWithoutRecursing: a turn's fetch never asks git to recurse, so a level
-// MIKE had not listed when it started would stay missing forever if the loop did not re-list. It does.
-func TestFetchSubmodulesBringsTheNestedCopyWithoutRecursing(t *testing.T) {
+// TestInitSubmodulesBringsTheNestedCopyWithoutRecursing: the button's fetch never asks git to recurse, so a
+// level MIKE had not listed when it started would stay missing forever if the loop did not re-list. It does.
+func TestInitSubmodulesBringsTheNestedCopyWithoutRecursing(t *testing.T) {
 	t.Parallel()
 	inner := upstreamRepo(t, "deep\n")
 	outer := unpopulatedSubRepo(t, inner, "inner-name", "subdir/inner")
 	top := unpopulatedSubRepo(t, outer, "outer-name", "build-aux/outer")
 
-	populated, err := FetchSubmodules(t.Context(), top, []string{"build-aux/outer"}, submoduleLocalFetch, nil)
+	populated, err := InitSubmodules(t.Context(), top, submoduleLocalFetch, nil)
 	if err != nil {
-		t.Fatalf("FetchSubmodules: %v", err)
+		t.Fatalf("InitSubmodules: %v", err)
 	}
 	if !slices.Contains(populated, "build-aux/outer") {
-		t.Errorf("FetchSubmodules() = %v, want the asked-for copy among them", populated)
+		t.Errorf("InitSubmodules() = %v, want the asked-for copy among them", populated)
 	}
 	if _, err := os.Stat(filepath.Join(top, "build-aux", "outer", "subdir", "inner", "lib.txt")); err != nil {
 		t.Errorf("the nested copy never came down: %v", err)
 	}
-	// Nothing is left to ask for, which is the loop's whole job: re-list until the checkout holds what it
-	// records, and stop when it does.
-	again, err := FetchSubmodules(t.Context(), top, []string{"build-aux/outer", "build-aux/outer/subdir/inner"}, submoduleLocalFetch, nil)
-	if err != nil {
-		t.Fatalf("the second FetchSubmodules: %v", err)
-	}
-	if len(again) != 0 {
-		t.Errorf("a checkout that already holds what it records fetched again: %v", again)
-	}
 }
 
-// TestFetchSubmodulesNeverFetchesWhatOnlyTheTaskRecords: a task's worktree commit is one the model writes into,
+// TestInitSubmodulesNeverFetchesWhatOnlyTheTaskRecords: a task's worktree commit is one the model writes into,
 // so a gitlink that lives only there names an address nobody approved. The person's own commit is the only
 // thing that may ask for a fetch.
-func TestFetchSubmodulesNeverFetchesWhatOnlyTheTaskRecords(t *testing.T) {
+func TestInitSubmodulesNeverFetchesWhatOnlyTheTaskRecords(t *testing.T) {
 	t.Parallel()
 	project := superRepo(t, upstreamRepo(t, "lib v1\n"))
 	wt := taskWorktree(t, project, "task-model-added")
@@ -867,11 +858,11 @@ func TestFetchSubmodulesNeverFetchesWhatOnlyTheTaskRecords(t *testing.T) {
 	runGit(t, wt, "update-index", "--add", "--cacheinfo", "160000,"+revParse(t, other, "HEAD")+",vendor/sneaky")
 	commitAll(t, wt, "add a submodule nobody asked for")
 
-	got, err := FetchSubmodules(t.Context(), project, []string{"vendor/sneaky"}, submoduleLocalFetch, nil)
+	got, err := InitSubmodules(t.Context(), project, submoduleLocalFetch, nil)
 	if err != nil {
-		t.Fatalf("FetchSubmodules: %v", err)
+		t.Fatalf("InitSubmodules: %v", err)
 	}
-	if len(got) != 0 {
+	if slices.Contains(got, "vendor/sneaky") {
 		t.Errorf("a gitlink only the task's commit names was fetched: %v", got)
 	}
 	if _, err := os.Stat(filepath.Join(project, "vendor", "sneaky")); err == nil {
@@ -882,9 +873,9 @@ func TestFetchSubmodulesNeverFetchesWhatOnlyTheTaskRecords(t *testing.T) {
 	}
 }
 
-// TestFetchSubmodulesReportsTheFetchAlreadyRunning: the import, the button and a turn all write one checkout's
+// TestInitSubmodulesReportsTheFetchAlreadyRunning: the import and the button both write one checkout's
 // `.git/config` and `modules` tree, so a second arrival says so instead of racing it.
-func TestFetchSubmodulesReportsTheFetchAlreadyRunning(t *testing.T) {
+func TestInitSubmodulesReportsTheFetchAlreadyRunning(t *testing.T) {
 	// Not parallel: the wait it shortens is one the whole package shares.
 	project := superRepo(t, upstreamRepo(t, "lib v1\n"))
 	restore := submoduleFetchWait
@@ -896,7 +887,7 @@ func TestFetchSubmodulesReportsTheFetchAlreadyRunning(t *testing.T) {
 	}
 	defer release()
 
-	if _, err := FetchSubmodules(t.Context(), project, []string{"vendor/lib"}, submoduleLocalFetch, nil); err == nil ||
+	if _, err := InitSubmodules(t.Context(), project, submoduleLocalFetch, nil); err == nil ||
 		!strings.Contains(err.Error(), "already running") {
 		t.Errorf("a second fetch of one checkout should be refused, got %v", err)
 	}

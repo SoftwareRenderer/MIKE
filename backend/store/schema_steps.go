@@ -38,6 +38,11 @@ var schemaSteps = []schemaStep{
 		OneWay: true,
 		Apply:  dropProjectSandboxStorageLimit,
 	},
+	{
+		Key:    dropAutoFetchSubmodulesColumnKey,
+		OneWay: true,
+		Apply:  dropProjectAutoFetchSubmodules,
+	},
 }
 
 // dropRunSetHashColumnKey is the step's key, named so the test asserts on the same string the file records.
@@ -45,6 +50,9 @@ const dropRunSetHashColumnKey = "2026-11-02-drop-project-run-set-hash"
 
 // dropStorageLimitColumnKey is the second dropped column's key, named for the same reason.
 const dropStorageLimitColumnKey = "2026-11-12-drop-project-sandbox-storage-limit"
+
+// dropAutoFetchSubmodulesColumnKey is the third dropped column's key, named for the same reason.
+const dropAutoFetchSubmodulesColumnKey = "2026-11-20-drop-project-auto-fetch-submodules"
 
 // runSchemaSteps runs the steps this file has not recorded. A step that fails stops the boot and names
 // itself, so no board is served over partly moved data.
@@ -175,6 +183,15 @@ func dropProjectRunSetHash(s *Store) error {
 // it by name.
 func dropProjectSandboxStorageLimit(s *Store) error {
 	return dropProjectColumn(s, "sandbox_storage_limit")
+}
+
+// dropProjectAutoFetchSubmodules removes the column that held a project's consent to fetch a submodule during
+// a task. A task fetches none: the person's click on a task's notice is what runs the fetch
+// (docs/git-operations.md → Submodules), so the column can hold only what a file from its own era wrote there.
+//
+// One-way on the same reading as the two above: a build from that era selects the column by name.
+func dropProjectAutoFetchSubmodules(s *Store) error {
+	return dropProjectColumn(s, "auto_fetch_submodules")
 }
 
 // dropProjectColumn drops one column from projects when the file still has it, and does nothing when the

@@ -700,7 +700,6 @@ func (te *TaskExecutor) setupSandbox(setup *taskExecSetup) (string, *bridge.Clie
 			return "", nil, err
 		}
 		submodules, err := git.PopulateSubmodules(setup.ctx, worktreePath, setup.project.Path, git.PopulateOpts{
-			// The same two switches as the fetch above: this one dials the store's own remote too.
 			AllowStoreFetch: allowStoreFetch(setup.project),
 			Fetch:           te.submoduleFetch,
 		})

@@ -5,11 +5,10 @@ package git
 // once per task. A store is found by asking git, never derived from the path, and MIKE never reads a
 // `.gitmodules` byte itself: the URL it shows and screens is read out of that file by git's own config reader.
 //
-// Fetching a repository-chosen URL happens at project import, at a person's click, or automatically for a
-// project whose two switches allow it — which of those is the executor's decision, not this package's. What is
-// guaranteed here is that a fetch is asked for by the project checkout's own commit and never by a task
-// worktree's (the model writes that one), that the URL was screened before git was handed it, and that one
-// fetch runs at a time per checkout.
+// Fetching a repository-chosen URL happens at project import and at a person's click — never from a task, which
+// stops and names what is missing instead. What is guaranteed here is that a fetch is asked for by the project
+// checkout's own commit and never by a task worktree's (the model writes that one), that every address was
+// screened before git was handed it, and that one fetch runs at a time per checkout.
 //
 // docs/git-operations.md → Submodules: share the person's copy, never re-fetch.
 
@@ -810,17 +809,6 @@ func (f SubmoduleFetch) screenAddresses(ctx context.Context, parentStore, requir
 	return nil
 }
 
-// FetchSubmodules fetches, into the person's checkout, the named submodules where that checkout's own commit
-// records them, and returns the paths it populated.
-func FetchSubmodules(ctx context.Context, projectPath string, paths []string, fetch SubmoduleFetch, onStatus func(string)) ([]string, error) {
-	if len(paths) == 0 {
-		return nil, nil
-	}
-	return fetchRounds(ctx, projectPath, fetch, onStatus, nil, func(s submodule) bool {
-		return wantedSubmodule(paths, s.path)
-	})
-}
-
 // fetchRounds brings the named submodules down and then, round by round, whatever their copies reveal
 // underneath them, all under one lock on the checkout.
 //
@@ -829,7 +817,7 @@ func FetchSubmodules(ctx context.Context, projectPath string, paths []string, fe
 // names. Re-listing between rounds makes every contacted address one MIKE enumerated and judged. `first` is
 // the round-0 listing where the caller already holds one; a row is asked for once, so a refused address or an
 // unreachable remote is reported once rather than on every round.
-func fetchRounds(ctx context.Context, projectPath string, fetch SubmoduleFetch, onStatus func(string), first []submodule, want func(submodule) bool) ([]string, error) {
+func fetchRounds(ctx context.Context, projectPath string, fetch SubmoduleFetch, onStatus func(string), first []submodule) ([]string, error) {
 	release, err := lockSubmoduleFetch(projectPath)
 	if err != nil {
 		return nil, err
@@ -847,11 +835,10 @@ func fetchRounds(ctx context.Context, projectPath string, fetch SubmoduleFetch, 
 		}
 		var refs []submodule
 		for _, link := range links {
-			if asked[link.path] || !want(link) {
-				continue
+			if !asked[link.path] {
+				asked[link.path] = true
+				refs = append(refs, link)
 			}
-			asked[link.path] = true
-			refs = append(refs, link)
 		}
 		if len(refs) == 0 {
 			return populated, nil
@@ -878,21 +865,10 @@ func missingLinks(projectPath string) ([]submodule, error) {
 	return out, nil
 }
 
-// wantedSubmodule asks whether a path is one the caller named or sits under one. Naming a submodule brings its
-// nested ones, which only become listable once it is fetched — the levels below a copy nobody downloaded are
-// still the same submodule's tree, not something a stranger asked for.
-func wantedSubmodule(paths []string, p string) bool {
-	for _, w := range paths {
-		if p == w || strings.HasPrefix(p, w+"/") {
-			return true
-		}
-	}
-	return false
-}
-
 // InitSubmodules fetches, into the person's own checkout, the working copy of every submodule that checkout's
-// commit names, nested ones included, and returns the paths it populated. It belongs to project import and to
-// the button that re-runs it: the fetch spends the operator's own credentials (`credential.helper`, their ssh
+// commit names, nested ones included, and returns the paths it populated. It is the only fetch MIKE makes for
+// a submodule that has never been brought down, and it is always asked for by a person — at project import, or
+// by the button on a task's notice: the fetch spends the operator's own credentials (`credential.helper`, their ssh
 // agent) on a destination the repository's text chose, and leaves that destination as the store's `origin`,
 // which every later fetch then treats as the person's own remote.
 //
@@ -921,7 +897,7 @@ func InitSubmodules(ctx context.Context, projectPath string, fetch SubmoduleFetc
 		links[i].dir = projectPath
 		links[i].parentStore = gitDir
 	}
-	return fetchRounds(ctx, projectPath, fetch, onStatus, links, func(submodule) bool { return true })
+	return fetchRounds(ctx, projectPath, fetch, onStatus, links)
 }
 
 // initCheckouts runs git's own verb for each named link, in the checkout that records it, and reports every
