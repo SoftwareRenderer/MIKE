@@ -30,7 +30,8 @@ var (
 	ErrNotArchive    = errors.New("not a readable archive")
 	ErrNoEntry       = errors.New("no such file in the archive")
 	ErrEntryTooLarge = errors.New("file too large")
-	ErrBinaryEntry   = errors.New("not a text file")
+	// ErrBinaryEntry is fsutil's refusal, so an archive member and a file cannot say it differently.
+	ErrBinaryEntry = fsutil.ErrNotText
 )
 
 // Entry is one member as the listing shows it. ModTime is fixed-width UTC text, empty when the archive

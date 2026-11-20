@@ -76,13 +76,21 @@ marshal that string — the task frame, the stored tool_call row and the convers
 marshal error is discarded, so foreign bytes would persist a half-written row. The per-result cap also
 cuts on a byte index and can split a rune. `backend/exec/tool_result_utf8_test.go` fails when the repair
 goes. Bytes from any other foreign source (a commit message, a provider's own response) still meet a hard
-error: a route carrying them answers with a short body and a log line, and a request carrying one fails to
-build.
+error, and a request body carrying one fails to build.
+
+**An encoder refusal is a 500, never a success with a short body.** `JSONResponse` and `JSONError` marshal
+into a buffer, and write status and headers only once the whole body exists. `SetHeader` and `WriteHeader`
+reach the wire the moment they are called, so the old order set the status, found the value unencodable,
+logged the failure and returned — a `200 OK` with nothing behind it, which the browser reads as JSON and
+reports as `Unexpected end of JSON input`. A value the server cannot encode is the server's fault: the
+answer is MIKE's sentence at 500 and the cause at `component=http`. A route that means to refuse should
+refuse itself, and `fsutil.IsText` is what a file's bytes are asked before they become a string.
+Tests: `backend/httputil/json_response_test.go`.
 
 A payload forwarded without being understood is a `jsontext.Value` from `encoding/json/jsontext`. That is
 exactly what `json.RawMessage` is: v1 defines it as an alias of that type.
 
-Tests: `backend/httputil/json_defaults_test.go`.
+Tests: `backend/httputil/json_defaults_test.go`, `backend/httputil/json_response_test.go`.
 
 ## Frames
 
@@ -671,6 +679,21 @@ comparison. The committed patch is never truncated, so counting it is git's own 
 file with no worktree half with `rows: []`, so an empty array there is the absence of that half, not a half of
 its own. Tests: `frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`.
 
+**Text a person only reads is repaired, not refused.** `fsutil.ToText` turns every run of bytes that was
+not decodable into one `U+FFFD`. It is applied where file or patch bytes become a JSON string — an
+untracked file's lines, one file's patch text, a status entry's body — because refusing the whole answer
+would hide work that is plainly visible in it. A string that may be written back is the opposite case and
+takes `fsutil.IsText`'s refusal instead, so the two rules are chosen by what happens to the value later.
+A file no browser can read as text still answers `isBinary` and `file_size` with no rows. Tests:
+`backend/api/git_diff_file_text_test.go`, `backend/git/diff_text_test.go`,
+`backend/fsutil/text_test.go`.
+
+**A binary row's notice does not wait for a size.** A file git called binary in a comparison with no
+annotations arrives as one marker row and no `file_size`. `DiffViewer.svelte` renders the notice from
+`isBinary` alone and drops git's line: the row would print the notice as prose under a size the server
+never priced. Without a size the row says "Binary file", not "Binary file — 0 B". Tests:
+`frontend/src/lib/components/__tests__/binary-file-affordances.unit.svelte.ts`.
+
 **A ref comparison never reads the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` answers one
 of two questions, and which one the request says. Without refs it answers the task's worktree against HEAD at
 the baseline `git.WorktreeManager.TaskDiffBaseline` names for that task, which is all `api.taskDiffCache`
@@ -710,6 +733,18 @@ copy of every byte. A file route never runs a command inside a container.
 - **A symlinked directory is a row only while the jail resolves it inside the tree** (`listingIsDir`).
   One that leaves the tree is listed as a file, because the row would promise a browse the next request
   refuses.
+- **Bytes that are not text are refused, not encoded.** `GET /api/fs/read` answers 415 (`fsutil.ErrNotText`)
+  when what it read holds a NUL or is not valid UTF-8, on the working tree and the `?ref=` branch alike. The
+  size caps run first, so an oversized file still costs one stat. `GET /api/fs/archive/entry` asks the same
+  predicate — `archive.ErrBinaryEntry` *is* `fsutil.ErrNotText` — so a member and a file cannot drift apart.
+  Refusing is what protects the file as much as the response. This route feeds the editor's buffer, and
+  bytes repaired on the way in are bytes a save would write back repaired.
+- **The editor turns that refusal into a state rather than a fault.** A displayable image is painted from
+  `/api/fs/raw`, its `path` made repository-relative by `toProjectRelative`; anything else says it is
+  binary. Neither has a buffer, a dirty flag or a save. Tests:
+  `backend/server/handler_fs_read_text_test.go`,
+  `frontend/src/lib/components/__tests__/file-editor-binary.unit.svelte.ts`, and
+  `frontend/tests/e2e/explorer-binary-read.spec.ts` for the bytes crossing the wire.
 
 Tests: `go test ./backend/server/ -run TestFSListingOfASandboxedProject` — a sandboxed listing that
 started a container, answered a host path, or offered an escaping link as a folder fails there — and
@@ -759,16 +794,18 @@ vanish or stop being dimmed.
 ## Raw file bytes
 
 `GET /api/fs/raw?project=&task=&path=&ref=` is the only route that returns a project file's **bytes**.
-`/api/fs/read` answers JSON, and a JSON string of a PNG is that PNG with every byte that is not valid
-UTF-8 replaced, so the diff panel's "View image" cannot use it. Because the response is an `<img>`
-subresource, what it can carry is the whole permission:
+`/api/fs/read` answers JSON and refuses a non-text file outright (above), so the picture a diff row or an
+opened file shows is read from here — the browser loads this URL itself as an `<img>` subresource and
+"Open image in new tab" comes with it. Because the response is an `<img>` subresource, what it can carry
+is the whole permission:
 
 - `path` is **relative to the repository root** — the shape every diff surface already holds. An
   absolute path is refused rather than translated, so the route never has to guess whether it was sent a
   host path or a container path.
 - One map (`rawImageTypes`) is both the allowlist and the `Content-Type`. A name off it is a 415, which
   is what keeps SVG out: SVG is markup, served inline from the app's own origin it would run, and no CSP
-  header on an image response stops that. `frontend/src/lib/utils/diff-image.ts` holds the same set.
+  header on an image response stops that. `frontend/src/lib/utils/diff-image.ts` holds the same set, and a
+  name the browser offers to ask for and this map refuses is a button that can only ever fail.
 - `Cache-Control: no-store`, because the same URL answers differently after the next edit. `nosniff` and
   the `img-src 'self'` CSP come from `CORSMiddleware` like everywhere else.
 - **No `Content-Disposition`.** The name comes from the repository, and putting it in a header makes a

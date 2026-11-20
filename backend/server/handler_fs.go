@@ -137,6 +137,12 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
 		return
 	}
+	// Unlike the cap above, this cannot run before the read: only the bytes say what they are.
+	// docs/api-contract.md → Raw file bytes.
+	if !fsutil.IsText(content) {
+		JSONError(w, http.StatusUnsupportedMediaType, fsutil.ErrNotText.Error())
+		return
+	}
 	// Compute gutter markers (diff vs HEAD) for non-ref reads
 	var markers map[int][]string
 	if ref == "" {
