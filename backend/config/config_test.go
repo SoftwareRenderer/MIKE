@@ -119,6 +119,13 @@ func TestUIFlagPreferences(t *testing.T) {
 			get:  func(c *types.Config) *bool { return c.AutoMaximizeChatMobile },
 		},
 		{
+			// Reasoning streams as it is written until a person asks for the collapsed chat.
+			name:     "collapse_reasoning",
+			set:      func(c *types.Config, v *bool) { c.CollapseReasoning = v },
+			get:      func(c *types.Config) *bool { return c.CollapseReasoning },
+			accessor: func(cs *ConfigStore) bool { return cs.GetCollapseReasoning() },
+		},
+		{
 			// Off until a person turns it on.
 			name:     "reclaim_idle_sandbox",
 			set:      func(c *types.Config, v *bool) { c.ReclaimIdleSandbox = v },

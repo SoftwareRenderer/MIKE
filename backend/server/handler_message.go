@@ -223,12 +223,11 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 				messages[i].ToolCalls = redactWriteFileContent(messages[i].ToolCalls)
 			}
 			if messages[i].ReasoningContent != "" {
-				suppressed := shouldSuppressReasoning(
+				if types.ShouldHideReasoning(
 					messages[i].ReasoningContent,
 					messages[i].Content,
-					messages[i].ToolCalls,
-				)
-				if suppressed {
+					messages[i].ToolCalls != "",
+				) {
 					messages[i].ReasoningContent = "[HIDDEN]"
 					messages[i].HasReasoning = true
 				}
@@ -591,21 +590,6 @@ func redactWriteFileContent(toolCallsJSON string) string {
 		return toolCallsJSON
 	}
 	return string(redacted)
-}
-
-// shouldSuppressReasoning returns true if reasoning should be collapsed to save bandwidth.
-func shouldSuppressReasoning(reasoningContent, content, toolCalls string) bool {
-	// Auto-expand conditions (keep reasoning visible):
-	// 1. Short reasoning (<=200 chars) with no regular content
-	if len(reasoningContent) <= 200 && content == "" {
-		return false
-	}
-	// 2. Has tool calls and no regular content
-	if toolCalls != "" && content == "" {
-		return false
-	}
-	// Otherwise, suppress
-	return true
 }
 
 // truncateToolResult truncates bash and read_file output to 10 lines / 1KB.

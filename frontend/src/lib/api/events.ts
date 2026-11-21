@@ -11,6 +11,7 @@ import type { StorageUsage, TaskSpaceFigure } from '$lib/types';
 export type AppStreamEventType =
    'token'
     | 'reasoning'
+    | 'reasoning_progress'
     | 'tool_call'
     | 'tool_progress'
     | 'tool_output'

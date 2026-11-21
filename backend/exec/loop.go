@@ -187,6 +187,10 @@ type streamFlusher struct {
 	taskID         string
 	send           func(projectID, taskID string, event types.StreamEvent)
 	loopDetector   *loopDetector // for phrase repetition detection on tokens
+	// collapsedReasoning is this run's decision, handed in — see loopContext.collapsedReasoning.
+	collapsedReasoning bool
+	reasoningChars     int
+	reasoningAnnounced int
 }
 
 // toolCallDelta holds buffered delta info for a single tool call.
@@ -202,13 +206,14 @@ type toolCallDelta struct {
 
 const streamThrottleInterval = 100 * time.Millisecond
 
-func newStreamFlusher(projectID, taskID string, send func(projectID, taskID string, event types.StreamEvent), detector *loopDetector) *streamFlusher {
+func newStreamFlusher(projectID, taskID string, send func(projectID, taskID string, event types.StreamEvent), detector *loopDetector, collapsedReasoning bool) *streamFlusher {
 	return &streamFlusher{
-		toolCallDeltas: make(map[string]toolCallDelta),
-		projectID:      projectID,
-		taskID:         taskID,
-		send:           send,
-		loopDetector:   detector,
+		toolCallDeltas:     make(map[string]toolCallDelta),
+		projectID:          projectID,
+		taskID:             taskID,
+		send:               send,
+		loopDetector:       detector,
+		collapsedReasoning: collapsedReasoning,
 	}
 }
 
@@ -221,8 +226,12 @@ func (f *streamFlusher) appendToken(text string) {
 
 func (f *streamFlusher) appendReasoning(text string) {
 	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.collapsedReasoning {
+		f.reasoningChars += len(text)
+		return
+	}
 	f.reasoningBuf.WriteString(text)
-	f.mu.Unlock()
 }
 
 func (f *streamFlusher) appendToolCall(toolID, toolName, displayName, path, args string, argLen, prevLen int, sandbox bool) {
@@ -268,6 +277,7 @@ func (f *streamFlusher) flush() {
 		f.reasoningBuf.Reset()
 		f.send(f.projectID, f.taskID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": text}})
 	}
+	f.announceReasoningLocked()
 
 	// Flush buffered tool call deltas.
 	if len(f.toolCallDeltas) > 0 {
@@ -303,12 +313,36 @@ func (f *streamFlusher) flush() {
 	}
 }
 
+// announceReasoningLocked reports how much the call has reasoned, and only when that number moved. The
+// caller holds f.mu, which is what keeps a fast provider to one count frame per tick.
+func (f *streamFlusher) announceReasoningLocked() {
+	if !f.collapsedReasoning || f.reasoningChars == f.reasoningAnnounced {
+		return
+	}
+	f.reasoningAnnounced = f.reasoningChars
+	f.send(f.projectID, f.taskID, types.StreamEvent{Type: types.WSTypeReasoningProgress, Data: map[string]any{"chars": f.reasoningChars}})
+}
+
+// sendHeldReasoning sends the reasoning the collapse held back, once the call is over and only when it is
+// that call's whole answer. Called after the final flush, so the cards it carried are already on screen.
+func (f *streamFlusher) sendHeldReasoning(reasoning, content string, hasToolCalls bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.collapsedReasoning || types.ShouldHideReasoning(reasoning, content, hasToolCalls) {
+		return
+	}
+	f.send(f.projectID, f.taskID, types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": reasoning}})
+}
+
 // reset clears all buffered content. Called before retry.
 func (f *streamFlusher) reset() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.tokenBuf.Reset()
 	f.reasoningBuf.Reset()
+	// A retry re-reasons from nothing, so the count the client follows restarts with it.
+	f.reasoningChars = 0
+	f.reasoningAnnounced = 0
 	f.toolCallDeltas = make(map[string]toolCallDelta)
 }
 
@@ -332,6 +366,9 @@ type loopContext struct {
 	providerName   string
 	contextWindow  *int
 	sandboxEnabled bool
+	// collapsedReasoning is this run's answer to the preference, read once so a run never changes its own
+	// wire: the flusher, the held-text send and the row announcement all have to agree.
+	collapsedReasoning bool
 	// tools is the set this run offers: the operating mode picks the acting set, so a mode change
 	// that recreates the container re-reads it.
 	tools         []types.ChatTool
@@ -617,6 +654,29 @@ func (te *TaskExecutor) rowsDurable(projectID, taskID string) {
 		return
 	}
 	te.appStreamMgr.DurableThrough(projectID, taskID)
+}
+
+// heldReasoningFrame is the announcement a collapsed call owes when its reasoning stays hidden: the total
+// the reader never saw, and the row that stores it. `complete` names only the run's last row, so without
+// this every earlier call of a multi-call turn would be unopenable until the thread was read again.
+func heldReasoningFrame(msgID, reasoning, content string, hasToolCalls, collapsed bool) (types.StreamEvent, bool) {
+	// Nothing reasoned is nothing withheld: a frame here would hand the reader a toggle over an empty row.
+	if !collapsed || reasoning == "" || !types.ShouldHideReasoning(reasoning, content, hasToolCalls) {
+		return types.StreamEvent{}, false
+	}
+	return types.StreamEvent{Type: types.WSTypeReasoningProgress, Data: map[string]any{
+		"chars": len(reasoning), "message_id": msgID,
+	}}, true
+}
+
+// announceHeldReasoning asks where the row is written. The frame is what a reader needs to open the
+// reasoning through `?full=1`; the reader already holding the text is owed nothing.
+func (te *TaskExecutor) announceHeldReasoning(projectID, taskID, msgID, reasoning, content string, hasToolCalls, collapsed bool) {
+	frame, ok := heldReasoningFrame(msgID, reasoning, content, hasToolCalls, collapsed)
+	if !ok {
+		return
+	}
+	te.appStreamMgr.SendTaskEvent(projectID, taskID, frame)
 }
 
 // finalizeTurn handles what follows one LLM call: persist the assistant message and run its tool

@@ -4,8 +4,12 @@ package types
 type WSMessageType string
 
 const (
-	WSTypeToken              WSMessageType = "token"
-	WSTypeReasoning          WSMessageType = "reasoning"
+	WSTypeToken     WSMessageType = "token"
+	WSTypeReasoning WSMessageType = "reasoning"
+	// WSTypeReasoningProgress replaces a collapsed call's reasoning frames: `{"chars": N}` is the total
+	// this call has reasoned, which the client prices into a token rate. The last one of a call whose text
+	// stays hidden also carries `message_id`, naming the row that stores it. docs/llm-streaming.md.
+	WSTypeReasoningProgress  WSMessageType = "reasoning_progress"
 	WSTypeToolCall           WSMessageType = "tool_call"
 	WSTypeToolProgress       WSMessageType = "tool_progress"
 	WSTypeToolOutput         WSMessageType = "tool_output"

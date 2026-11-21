@@ -1490,3 +1490,180 @@ describe('merge_resolution frame', () => {
         expect(stream.state.entries[1].isError).toBe(true);
     });
 });
+
+// A collapsed turn's reasoning never arrives: what arrives is how much of it there is. The screen says
+// "still thinking, at this rate" without seeing a word, and still places a tool card at the offset the
+// reasoning had reached when the call emitted it.
+describe('a collapsed turn announces its reasoning size, never its text', () => {
+    function setup() {
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, makeCallbacks());
+        return { stream, handleEvent };
+    }
+
+    it('counts what it was never sent', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 120 } }, false);
+        handleEvent({ type: 'reasoning_progress', data: { chars: 200 } }, false);
+
+        const entry = stream.state.entries[0];
+        expect(entry.role).toBe('assistant');
+        expect(entry.hasReasoning).toBe(true);
+        expect(entry.reasoningContent).toBeUndefined();
+        expect(entry.reasoningPending?.chars).toBe(200);
+        expect(entry.reasoningPending?.startedAt).toBeTypeOf('number');
+    });
+
+    it('keeps the rate honest across a reconnect, where the replayed state frame is the newest total', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 500 } }, false);
+        handleEvent({ type: 'reasoning_progress', data: { chars: 40 } }, false);
+
+        expect(stream.state.entries[0].reasoningPending?.chars).toBe(500);
+    });
+
+    it('prices the window by what the text would have cost', () => {
+        const { stream, handleEvent } = setup();
+        stream.state.lastPromptTokens = 1000;
+        handleEvent({ type: 'reasoning_progress', data: { chars: 400 } }, false);
+        expect(stream.state.streamTokenCount).toBe(100);
+        expect(stream.state.contextState.used).toBe(1100);
+
+        handleEvent({ type: 'reasoning_progress', data: { chars: 800 } }, false);
+        expect(stream.state.streamTokenCount).toBe(200);
+        expect(stream.state.contextState.used).toBe(1200);
+    });
+
+    it('stamps a card with the offset the reasoning had reached, not with the text it never got', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 240 } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: { command: 'ls' } } }, false);
+
+        expect(stream.state.entries[0].toolCalls![0].reasoningIndex).toBe(240);
+    });
+
+    it('starts no entry for a count that arrived with the events suppressed', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 120 } }, true);
+
+        expect(stream.state.entries).toEqual([]);
+        expect(stream.state.streamTokenCount).toBe(0);
+    });
+
+    // The count that closes a hidden call is what "Show reasoning" spends: without the row's id the click
+    // asks the store for nothing.
+    it('names the row whose reasoning the reader may still ask for', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 300 } }, false);
+        const streamedId = stream.state.entries[0]!.id;
+
+        handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-7' } }, false);
+
+        const entry = stream.state.entries[0];
+        expect(entry.id).toBe('row-7');
+        expect(streamedId).not.toBe('row-7');
+        // Nothing more is arriving to average, so the rate is over.
+        expect(entry.reasoningPending).toBeUndefined();
+        expect(entry.hasReasoning).toBe(true);
+        expect(entry.reasoningContent).toBeUndefined();
+    });
+
+    it('drops the streaming copy once the read has drawn the row a count names', () => {
+        const { stream, handleEvent } = setup();
+        const rows = [{ id: 'row-7', role: 'assistant', content: '', created_at: '2026-01-01T00:00:00Z' }];
+        const built = buildEntriesFromMessages(rows);
+        stream.state.entries = mergeLoadedHistory(built.entries, rows.map(r => r.id), stream.state.entries, false);
+
+        handleEvent({ type: 'reasoning_progress', data: { chars: 400 } }, false);
+        expect(stream.state.entries).toHaveLength(2);
+
+        // One row, two entries: the keyed each refuses that, and the streaming half holds only a count.
+        handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-7' } }, false);
+        expect(stream.state.entries.map(e => e.id)).toEqual(['row-7']);
+    });
+
+    it('opens a fresh entry for the next call, whose row the count has not named', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-7' } }, false);
+
+        handleEvent({ type: 'token', data: { text: 'the answer' } }, false);
+
+        // The second call is its own row, so its text cannot land under the first call's row.
+        expect(stream.state.entries.map(e => [e.role, e.content])).toEqual([['assistant', ''], ['assistant', 'the answer']]);
+        expect(stream.state.entries[1]!.id).not.toBe('row-7');
+    });
+});
+
+// `complete` names the assistant row, and a run can close its streaming entry before that frame lands — a
+// steering hint, or the tool result that ends the call. An entry left under its generated id owns no row.
+describe('the entry complete names', () => {
+    function setup() {
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, makeCallbacks());
+        return { stream, handleEvent };
+    }
+
+    const complete = (assistant_message_id: string): StreamEvent => ({
+        type: 'complete',
+        data: { state: 'idle', model_name: 'm', prompt_tokens: 1, predicted_tokens: 2, prompt_ms: 3, predicted_ms: 4, duration: 5, assistant_message_id },
+    });
+
+    it('renames the entry a steering hint closed mid-run', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'thinking' } }, false);
+        handleEvent({ type: 'hint', data: { id: 'h-1', role: 'user', content: 'Is the task complete?', created_at: '2026-01-01T00:00:00Z' } }, false);
+        handleEvent({ type: 'token', data: { text: ' the answer' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: { command: 'ls' } } }, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc-1', success: true, output: 'ok', duration: 2 } }, false);
+        const streamedId = stream.state.entries[stream.state.entries.length - 1]!.id;
+
+        handleEvent(complete('row-9'), false);
+
+        expect(stream.state.entries[stream.state.entries.length - 1]!.id).toBe('row-9');
+        expect(streamedId).not.toBe('row-9');
+    });
+
+    it('names no row twice: what a count already named keeps that name', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-7' } }, false);
+        handleEvent({ type: 'token', data: { text: 'the answer' } }, false);
+
+        handleEvent(complete('row-9'), false);
+
+        // The reasoning row keeps the id the count gave it.
+        expect(stream.state.entries.map(e => e.id)).toEqual(['row-7', 'row-9']);
+    });
+
+    it('names no entry an earlier call of the same run closed', () => {
+        const { stream, handleEvent } = setup();
+        // Call one says its piece and asks for a card; the answer closes that entry.
+        handleEvent({ type: 'token', data: { text: 'first' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: { command: 'ls' } } }, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc-1', success: true, output: 'ok', duration: 2 } }, false);
+        const firstEntry = stream.state.entries[0]!.id;
+
+        // Call two reasons behind the collapse, so its row is named while it streams.
+        handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-9' } }, false);
+
+        handleEvent(complete('row-9'), false);
+
+        // Only the run's last call owns that row.
+        expect(stream.state.entries.map(e => e.id)).toEqual([firstEntry, 'row-9']);
+        expect(firstEntry).not.toBe('row-9');
+    });
+
+    it('names nothing from the turn before the prompt that started this one', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'an earlier answer' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: { command: 'ls' } } }, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc-1', success: true, output: 'ok', duration: 2 } }, false);
+        handleEvent({ type: 'user_message', data: { id: 'row-0', role: 'user', content: 'and now?' } }, false);
+
+        handleEvent(complete('row-9'), false);
+
+        // The earlier turn's entry keeps the id the stream gave it.
+        const earlierId = stream.state.entries[0]!.id;
+        expect(earlierId).not.toBe('row-9');
+        expect(stream.state.entries.map(e => e.id)).toEqual([earlierId, 'row-0']);
+    });
+});

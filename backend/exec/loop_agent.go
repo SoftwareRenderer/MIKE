@@ -181,6 +181,12 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 	var stopReason string
 	var totalPromptTokens, totalPredictedTokens int
 
+	// The collapsed-reasoning decision is read once for the run, so a run never changes its own wire.
+	collapsedReasoning := te.configStore.GetCollapseReasoning()
+	reasoningFeed := newAgentReasoningFeed(func(event types.StreamEvent) {
+		te.sendAgentStreamEvent(projectID, task.ID, event)
+	}, collapsedReasoning)
+
 	// broadcast cumulative session stats. Cost falls back to per-message accumulation if stats report 0.
 	sendAgentStats := func(stats pkgagent.SessionStatsData) {
 		if stats.ContextWindow <= 0 {
@@ -258,7 +264,7 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 			}
 
 			if streamEvent := toStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
-				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
+				reasoningFeed.forward(streamEvent, event.Thinking)
 			}
 
 			switch event.Type {
@@ -280,10 +286,15 @@ func (te *TaskExecutor) executeTaskWithAgent(setup *taskExecSetup) {
 						event.PersistEntries[i].PredictedMs = predictedMs
 					}
 				}
-				pt, ptok := te.persistAgentTurnEntries(projectID, task.ID, task.CurrentThreadID, event.PersistEntries, turnStartTime, sandboxEnabled)
+				pt, ptok := te.persistAgentTurnEntries(projectID, task.ID, task.CurrentThreadID, event.PersistEntries, turnStartTime, sandboxEnabled, collapsedReasoning)
 				totalPromptTokens += pt
 				totalPredictedTokens += ptok
 				firstTokenTime = time.Time{} // reset for next turn
+
+				// The rows are written: say what the rules still owe this turn's reader, then count the next
+				// turn from nothing.
+				reasoningFeed.held(event.PersistEntries)
+				reasoningFeed.reset()
 
 				checkpointMsgID := uuid.New().String()
 				te.createCheckpoint(ctx, projectID, task.ID, checkpointMsgID)
@@ -595,7 +606,7 @@ func (te *TaskExecutor) handleAgentTurnComplete(task *types.Task, projectID, wor
 
 // persistAgentTurnEntries saves agent turns to the database.
 // Sandbox flag is added to ToolCallsJSON for frontend visibility.
-func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID string, entries []pkgagent.PersistEntry, startTime time.Time, sandbox bool) (totalPromptTokens, totalPredictedTokens int) {
+func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID string, entries []pkgagent.PersistEntry, startTime time.Time, sandbox, collapsed bool) (totalPromptTokens, totalPredictedTokens int) {
 	if len(entries) == 0 {
 		return 0, 0
 	}
@@ -603,8 +614,9 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 	for _, entry := range entries {
 		switch entry.Role {
 		case "assistant":
+			msgID := uuid.New().String()
 			te.store.CreateTaskMessage(&types.TaskMessage{
-				ID:               uuid.New().String(),
+				ID:               msgID,
 				TaskID:           taskID,
 				ThreadID:         threadID,
 				Role:             "assistant",
@@ -619,6 +631,7 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 				Duration:         time.Since(startTime).Milliseconds(),
 				CreatedAt:        time.Now().UTC(),
 			})
+			te.announceHeldReasoning(projectID, taskID, msgID, entry.ReasoningContent, entry.Content, batchHasToolCall(entries), collapsed)
 			totalPromptTokens += entry.PromptTokens
 			totalPredictedTokens += entry.PredictedTokens
 
@@ -760,6 +773,70 @@ func (te *TaskExecutor) sendAgentStreamEvent(projectID, taskID string, event typ
 	te.appStreamMgr.SendTaskEvent(projectID, taskID, event)
 }
 
+// agentReasoningProgressInterval floors how often a collapsed agent turn announces its reasoning size.
+const agentReasoningProgressInterval = 250 * time.Millisecond
+
+// agentReasoningFeed is a collapsed agent turn's reasoning stream: the text stays in the process and the
+// wire carries how big it is. An uncollapsed feed forwards reasoning frames as it always did.
+type agentReasoningFeed struct {
+	send      func(event types.StreamEvent)
+	collapsed bool
+	interval  time.Duration
+	chars     int
+	announced int
+	at        time.Time
+}
+
+func newAgentReasoningFeed(send func(event types.StreamEvent), collapsed bool) *agentReasoningFeed {
+	return &agentReasoningFeed{send: send, collapsed: collapsed, interval: agentReasoningProgressInterval}
+}
+
+// forward writes one agent frame. A collapsed turn's reasoning frame is answered with a count instead,
+// at most once per interval.
+func (r *agentReasoningFeed) forward(event types.StreamEvent, thinking string) {
+	if !r.collapsed || event.Type != types.WSTypeReasoning {
+		r.send(event)
+		return
+	}
+	r.chars += len(thinking)
+	if r.chars == r.announced || (!r.at.IsZero() && time.Since(r.at) < r.interval) {
+		return
+	}
+	r.announced = r.chars
+	r.at = time.Now()
+	r.send(types.StreamEvent{Type: types.WSTypeReasoningProgress, Data: map[string]any{"chars": r.chars}})
+}
+
+// reset starts the count over for the next turn, whose reasoning the client has not seen any of.
+func (r *agentReasoningFeed) reset() {
+	r.chars, r.announced, r.at = 0, 0, time.Time{}
+}
+
+// batchHasToolCall reports whether the adapter is storing a call alongside these rows.
+func batchHasToolCall(entries []pkgagent.PersistEntry) bool {
+	for _, e := range entries {
+		if e.Role == "tool_call" {
+			return true
+		}
+	}
+	return false
+}
+
+// held sends the reasoning a collapsed turn kept to itself, for the rows the rules say a reader must see:
+// the ones whose reasoning is that row's whole answer.
+func (r *agentReasoningFeed) held(entries []pkgagent.PersistEntry) {
+	if !r.collapsed {
+		return
+	}
+	hasToolCall := batchHasToolCall(entries)
+	for _, e := range entries {
+		if e.Role != "assistant" || types.ShouldHideReasoning(e.ReasoningContent, e.Content, hasToolCall) {
+			continue
+		}
+		r.send(types.StreamEvent{Type: types.WSTypeReasoning, Data: map[string]string{"text": e.ReasoningContent}})
+	}
+}
+
 // toStreamEvent converts a generic agent event to a Kanban StreamEvent for WebSocket broadcasting.
 func toStreamEvent(event pkgagent.Event, sandbox bool) types.StreamEvent {
 	switch event.Type {
@@ -825,6 +902,9 @@ func (te *TaskExecutor) validateAgentStart(ctx context.Context, runner *agent.Ag
 	defer startupCancel()
 
 	startupValidated := false
+	startupReasoning := newAgentReasoningFeed(func(event types.StreamEvent) {
+		te.sendAgentStreamEvent(projectID, task.ID, event)
+	}, te.configStore.GetCollapseReasoning())
 	for !startupValidated {
 		select {
 		case event, ok := <-runner.EventChan():
@@ -836,7 +916,7 @@ func (te *TaskExecutor) validateAgentStart(ctx context.Context, runner *agent.Ag
 			}
 			logging.For(logging.Agent).With(logging.TaskID, task.ID).Infof("startup event: %s", event.Type)
 			if streamEvent := toStreamEvent(event, sandboxEnabled); streamEvent.Type != "" {
-				te.sendAgentStreamEvent(projectID, task.ID, streamEvent)
+				startupReasoning.forward(streamEvent, event.Thinking)
 			}
 			switch event.Type {
 			case pkgagent.EventTypeStatus:

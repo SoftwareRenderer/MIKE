@@ -422,6 +422,7 @@ type configResponse struct {
 	RunSiblingsParallel           *bool                    `json:"run_siblings_parallel,omitzero"`
 	SortOldestFirst               *bool                    `json:"sort_oldest_first,omitzero"`
 	AutoMaximizeChatMobile        *bool                    `json:"auto_maximize_chat_mobile,omitzero"`
+	CollapseReasoning             *bool                    `json:"collapse_reasoning,omitzero"`
 	ReclaimIdleSandbox            *bool                    `json:"reclaim_idle_sandbox,omitzero"`
 	LoopBreaker                   *bool                    `json:"loop_breaker,omitzero"`
 	KeyboardShortcuts             *types.KeyboardShortcuts `json:"keyboard_shortcuts,omitzero"`
@@ -549,6 +550,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		RunSiblingsParallel:           cfg.RunSiblingsParallel,
 		SortOldestFirst:               cfg.SortOldestFirst,
 		AutoMaximizeChatMobile:        cfg.AutoMaximizeChatMobile,
+		CollapseReasoning:             cfg.CollapseReasoning,
 		ReclaimIdleSandbox:            cfg.ReclaimIdleSandbox,
 		LoopBreaker:                   cfg.LoopBreaker,
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
@@ -668,6 +670,11 @@ func (cs *ConfigStore) GetRunSiblingsParallel() bool {
 // past the reclaim grace.
 func (cs *ConfigStore) GetReclaimIdleSandbox() bool {
 	return cs.storedFlag(prefReclaimIdleSandbox)
+}
+
+// GetCollapseReasoning reports whether a turn's reasoning text is kept off the wire while it streams.
+func (cs *ConfigStore) GetCollapseReasoning() bool {
+	return cs.storedFlag(prefCollapseReasoning)
 }
 
 // GetLoopBreaker reports whether a run that reaches its consecutive-failed-turn limit is recovered from

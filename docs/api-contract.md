@@ -199,6 +199,31 @@ state and clears when the retried call streams (`clearAwaiting`) or when the tur
 call never reached `finalizeTurn`, which is what persists it. So the client drops the half-streamed
 text with `dropAbandonedTurn()` and the retry streams the answer in its place.
 
+### A collapsed turn's reasoning rides as a count, never as text
+
+`collapse_reasoning` (Settings → Preferences, `docs/adding-a-preference.md`) keeps a call's reasoning text off
+the wire while it is being written. What replaces every `reasoning` frame of that call is `reasoning_progress`:
+`{"chars": N}`, the characters this LLM call has reasoned. The client prices that count into the token rate it
+shows, and never estimates one from a partial text, because no text arrives.
+
+`chars` is cumulative for one LLM call and resets with it — the boundary that resets `newStreamFlusher`
+(`backend/exec/loop.go`) — because the client accumulates per assistant entry and an entry is one call. It is
+a **state** frame, not a content frame: `bufferContentFrames` (`backend/stream/app_stream.go`) leaves it out,
+so a reconnect replays the newest count and rebuilds the rate from one frame rather than a transcript of them.
+
+When the call ends the reader is shown what the rules say they must see. `types.ShouldHideReasoning`
+(`backend/types/reasoning.go`) is that rule, the same predicate the message window's redaction pass applies, so
+a row cannot be readable by one path and withheld by the other. Reasoning that is the call's whole answer
+comes once, as one `reasoning` frame holding the complete text. Reasoning that stays hidden costs one more
+field: the last count of that call carries `message_id`, naming the row that stores what was never sent. That is
+what "Show reasoning" reads through `?full=1`. `complete` names only the run's last row, so without that field
+every earlier call of a multi-call turn would stay unopenable until the thread was read again. That last count
+keeps its `chars`: it is the call's full total, and the client counts it into the context donut because stored
+reasoning costs the next call's context. A call that reasoned nothing sends no such frame, because a row named
+over an empty reasoning is a toggle over nothing.
+Tests: `backend/exec/loop_reasoning_test.go`, `stream-handler.unit.ts`,
+`frontend/tests/e2e/collapsed-reasoning.spec.ts`.
+
 ### A broken failure loop adds no frame shape
 
 The `loop_breaker` preference (Settings → Task defaults, `docs/adding-a-preference.md`) answers the run that
