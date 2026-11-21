@@ -78,10 +78,11 @@ describe('cloneProject reads the server frame stream', () => {
         expect(percents).toEqual([0]);
     });
 
-    it('reports a status line as a line, never as a percentage or a failure', async () => {
+    it('reports a status line as a line, and drops one that says nothing', async () => {
         stubCloneResponse(
             'data: {"message":"Cloning into /root/sse-clones/sse-src...","type":"status"}\n\n',
             'data: {"message":"Receiving objects...","type":"status"}\n\n',
+            'data: {"type":"status"}\n\n',
             'data: {"percent":10,"type":"progress"}\n\n',
             `${doneFrame}\n\n`,
         );

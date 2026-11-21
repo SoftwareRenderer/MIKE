@@ -942,7 +942,7 @@ func initCheckouts(ctx context.Context, projectPath string, links []submodule, f
 		}
 		// The origin git recorded is what was contacted — the address the screen ran against came out of the
 		// same file, and this is the reading that says git ended up where that address said.
-		report("submodule %s was fetched from %s", link.path, types.RedactURL(contactedRemote(link, checkout)))
+		report("submodule %s was fetched from %s", link.path, contactedRemote(link, checkout))
 		populated = append(populated, link.path)
 	}
 	return populated, nil
@@ -956,10 +956,11 @@ func submoduleInitArgs(s submodule) []string {
 }
 
 // submoduleReporter sends every outcome a person should see to whoever asked for the fetch, and to the log as
-// well: a fetch that quietly refused an address must be findable afterwards.
+// well: a fetch that quietly refused an address must be findable afterwards. Git quotes the address it reached
+// back into its own words, so this is where a line is read for a credential before it leaves the package.
 func submoduleReporter(projectPath string, onStatus func(string)) func(string, ...any) {
 	return func(format string, args ...any) {
-		line := fmt.Sprintf(format, args...)
+		line := types.RedactLine(fmt.Sprintf(format, args...))
 		if onStatus != nil {
 			onStatus(line)
 		}

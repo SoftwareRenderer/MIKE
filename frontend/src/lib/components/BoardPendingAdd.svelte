@@ -2,21 +2,29 @@
     import { t } from '$lib/i18n';
     import type { BoardPending } from '$lib/utils/board-pending';
 
-    /**
-     * The backlog column's add-task slot while the project it belongs to has no row on the server: the
-     * bar of the add in flight, the line the server last said, and once it stopped, git's own output —
-     * the one thing the person can act on. Nothing here recovers the add, so the box offers the exit.
-     */
+    /** The backlog column's add-task slot while its project has no row on the server. */
     let { pending, onDismiss }: { pending: BoardPending; onDismiss?: () => void } = $props();
+
+    const measuring = $derived(pending.percent !== null);
 </script>
 
 <div class="pending-add" class:failed={pending.failed}>
     <div class="pending-bar-row">
-        <span class="pending-bar" role="progressbar" aria-label={t('board.pending.progressAria')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pending.percent}>
-            <span class="pending-bar-fill" style={`width: ${pending.percent}%`}></span>
+        <span class="pending-bar" class:indeterminate={!measuring} role="progressbar" aria-label={t('board.pending.progressAria')}
+              aria-valuemin={measuring ? 0 : undefined} aria-valuemax={measuring ? 100 : undefined} aria-valuenow={pending.percent ?? undefined}>
+            <span class="pending-bar-fill" style={measuring ? `width: ${pending.percent}%` : undefined}></span>
         </span>
-        <span class="pending-percent">{pending.percent}%</span>
+        {#if measuring}
+            <span class="pending-percent">{pending.percent}%</span>
+        {/if}
     </div>
+    {#if pending.history.length}
+        <ul class="pending-history">
+            {#each pending.history as line}
+                <li>{line}</li>
+            {/each}
+        </ul>
+    {/if}
     <p class="pending-caption" role={pending.failed ? 'alert' : undefined}>{pending.caption}</p>
     {#if pending.detail}
         <pre class="pending-detail">{pending.detail}</pre>
@@ -42,7 +50,6 @@
         align-items: center;
         gap: 8px;
     }
-    /* Determinate: the width is the streamed percentage. */
     .pending-bar {
         flex: 1;
         min-width: 48px;
@@ -58,6 +65,16 @@
         background: var(--color-accent);
         transition: width var(--dur-md) ease;
     }
+    /* Nothing to measure: the bar says the add is running, not how far it has come. */
+    .pending-bar.indeterminate .pending-bar-fill {
+        width: 33%;
+        transition: none;
+        animation: pending-sweep 1.2s ease-in-out infinite;
+    }
+    @keyframes pending-sweep {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(400%); }
+    }
     .pending-add.failed .pending-bar-fill {
         background: var(--color-status-red);
     }
@@ -67,11 +84,23 @@
         color: var(--color-text-tertiary);
         font-variant-numeric: tabular-nums;
     }
+    .pending-history {
+        margin: 0;
+        padding: 0;
+        list-style: none;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        max-height: 7em;
+        overflow: auto;
+        font-size: var(--text-xs);
+        color: var(--color-text-tertiary);
+        overflow-wrap: anywhere;
+    }
     .pending-caption {
         margin: 0;
         overflow-wrap: anywhere;
     }
-    /* Scrolled rather than truncated. */
     .pending-detail {
         margin: 0;
         max-height: 9em;

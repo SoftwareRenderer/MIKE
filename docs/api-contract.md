@@ -117,9 +117,11 @@ Tests: `backend/httputil/json_defaults_test.go`, `backend/httputil/json_response
   Test: `api/__tests__/event-stream.unit.ts`.
 - The **clone stream** (`POST /api/projects/clone`) writes one JSON object per `data:` frame, typed by
   `type`: `progress` carries `percent`, `status` carries `message`, `done` carries `project`, `error`
-  carries `message` and a bounded `detail`. A `status` message is the server's own sentence or the phase
-  `git clone --progress` names, and only the phases in `clonePhases` (`backend/git/clone.go`) are forwarded
-  — the whitelist is what keeps a repository's text out of a browser. A frame whose payload is none of
+  carries `message` and a bounded `detail`. A `status` message is the server's own sentence, the phase
+  `git clone --progress` names, or one submodule outcome from `submoduleReporter`
+  (`backend/git/submodules.go`). Only the phases in `clonePhases` (`backend/git/clone.go`) are forwarded,
+  which is what keeps a repository's text out of a browser. The reporter redacts every line it emits, so an
+  address git dialed with a credential in it never arrives whole. A frame whose payload is none of
   these is dropped by the reader, which is also what the reader does with a build log line. Tests:
   `backend/api/project_test.go` for the writer, `api/__tests__/project-clone.unit.ts` for the reader.
 - Use optimistic UI for user messages (add immediately, skip the echo).

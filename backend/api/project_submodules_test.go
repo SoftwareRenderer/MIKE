@@ -176,6 +176,18 @@ func TestHandleTaskSubmodulesReadsTheTasksOwnCommit(t *testing.T) {
 	}
 }
 
+// TestImportSubmodulesTellsTheReaderWhatItCouldNotRead: the import never fails the project, so the one line
+// saying no submodule could be read at all is the person's only knowledge of it — otherwise it is the log's.
+func TestImportSubmodulesTellsTheReaderWhatItCouldNotRead(t *testing.T) {
+	h := newSubmoduleHandler(t, t.TempDir())
+
+	var lines []string
+	h.importSubmodules(t.Context(), filepath.Join(t.TempDir(), "not-a-repo"), func(l string) { lines = append(lines, l) })
+	if len(lines) != 1 || !strings.Contains(lines[0], "submodules") {
+		t.Errorf("a checkout whose submodules could not be read went unreported: %v", lines)
+	}
+}
+
 // TestHandleInitSubmodulesReportsWhatStayedMissing: the click cannot be answered with a 500 when an address
 // was refused or an upstream is gone — the person has to be told which, and stay able to act on it.
 func TestHandleInitSubmodulesReportsWhatStayedMissing(t *testing.T) {

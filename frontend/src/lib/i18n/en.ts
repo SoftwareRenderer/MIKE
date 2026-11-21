@@ -397,7 +397,7 @@ const catalog = {
     'settings.preferences.autoMaximizeChatDesc': 'Maximize the chat panel while the chat input has focus',
     'settings.preferences.autoMaximizeCodeViewer': 'Auto maximize code viewer',
     'settings.preferences.collapseReasoning': 'Collapse reasoning text',
-    'settings.preferences.collapseReasoningDesc': 'Do not show the model reasoning as it is written. A thinking turn shows a spinner and its token rate instead, and the finished reasoning opens with Show reasoning.',
+    'settings.preferences.collapseReasoningDesc': 'Show a spinner instead of streaming reasoning text, which uses less bandwidth. Reasoning text will still be available.',
     'settings.preferences.autoMaximizeCodeViewerDesc': 'When clicking on a line of code in the diff panel, maximize the view if the column is narrow',
     'settings.preferences.notifyOnReview': 'Notify when a task enters Review',
     'settings.preferences.notifyOnReviewDesc': 'Send a browser notification when a task starts waiting for you while you are looking elsewhere',
@@ -1072,6 +1072,7 @@ const catalog = {
     // The project row's tooltip says what the row's own name cannot: a clone in flight,
     // or a Review count waiting.
     'app.sidebar.cloningTitle': 'Cloning repository… ({progress}%)',
+    'app.sidebar.cloningNoPercentTitle': 'Cloning repository...',
     // A clone that stopped keeps its row until the person dismisses it, and the row says so.
     'app.sidebar.cloneFailedTitle': 'Clone failed: {message}',
     'app.sidebar.reviewTitle': {

@@ -165,7 +165,9 @@ names what is missing instead.
   records the fetched URL in the person's `.git/config` and as the store's `origin`, which is why neither is
   trusted by provenance: both are read again and screened again the next time anything dials them. A submodule
   that will not fetch is reported and skipped, so an unreachable upstream never costs a person the project; the
-  task that needs it names it.
+  task that needs it names it. Each outcome is one sentence from `submoduleReporter`, read once by
+  `types.RedactLine` there before it reaches a browser or the log — git quotes the address it reached back into
+  its own words. Test: `TestSubmoduleReporterRedactsTheAddressItQuotes`.
 - **The same verb answers one click.** `POST /api/projects/{projectID}/submodules/init` is `InitSubmodules`
   over the project's own checkout — the person asking for the state they were told to go and get. It is a
   click, which is what makes the fetch the person's own (`docs/api-contract.md → Submodules`).
