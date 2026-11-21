@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"context"
 	"errors"
 	"os"
 	"path/filepath"
@@ -14,8 +13,8 @@ import (
 )
 
 // These fixtures drive a real git with a real local remote, because what these tests ask is whether a turn
-// reached for it. The fetch itself is stood in for: these tests are about which switches let it run and what
-// the task is told when it cannot, and the git package's own tests prove a fetch lands the copy.
+// reached for it. The one fetch they let happen is the person's own, run directly the way the card's button
+// runs it through the API.
 
 // unpopulatedSubmoduleProject is a checkout whose commit records a submodule at vendor/lib and never fetched
 // it — the state a project added before its submodule was stays in.
@@ -55,132 +54,71 @@ func submoduleSetup(t *testing.T, project string) *taskExecSetup {
 	}
 }
 
-// TestPrepareSubmodulesRefusesWithoutTheProjectsConsent: neither isolation nor a withheld consent lets a turn
-// reach the network, and the task is stopped naming the address it would have used.
-func TestPrepareSubmodulesRefusesWithoutTheProjectsConsent(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		isolated bool
-		auto     bool
-	}{
-		{"network isolated", true, true},
-		{"isolated and unwilling", true, false},
-		{"no consent given", false, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+// pullTheSubmoduleByHand is the card's button: git's own verb over the project's checkout, which is what the
+// API route runs. The `-c` is there because git refuses `file:` for a submodule operation by default.
+func pullTheSubmoduleByHand(t *testing.T, project string) {
+	t.Helper()
+	testgit.Git(t, project, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--", "vendor/lib")
+}
+
+// TestPrepareSubmodulesStopsNamingTheMissingCopyAndItsURL: a submodule that appeared after the project was
+// added ends the task with the path, the address the repository records and MIKE's reason, and reaches nothing
+// while doing it — the approval is the person's click, and neither of the project's switches is what refuses
+// this.
+func TestPrepareSubmodulesStopsNamingTheMissingCopyAndItsURL(t *testing.T) {
+	for _, isolated := range []bool{false, true} {
+		t.Run(map[bool]string{true: "isolated", false: "not isolated"}[isolated], func(t *testing.T) {
 			project, upstream := unpopulatedSubmoduleProject(t)
 			setup := submoduleSetup(t, project)
-			setup.project.SandboxNetworkIsolation = tc.isolated
-			setup.project.AutoFetchSubmodules = tc.auto
+			setup.project.SandboxNetworkIsolation = isolated
 
-			asked := 0
-			te := newTestExecutorWith(t, Deps{})
-			te.submoduleFetcher = func(context.Context, string, []string, git.SubmoduleFetch, func(string)) ([]string, error) {
-				asked++
-				return nil, nil
-			}
-
+			te := newBareTestExecutor(t)
 			err := te.prepareSubmodules(setup)
 			var needInit *git.SubmodulesUninitialized
 			if !errors.As(err, &needInit) {
 				t.Fatalf("prepareSubmodules = %v, want *git.SubmodulesUninitialized", err)
 			}
-			if asked != 0 {
-				t.Errorf("a turn that reaches the network was asked for despite the project's switches")
-			}
 			if len(needInit.Submodules) != 1 || needInit.Submodules[0].Path != "vendor/lib" {
 				t.Fatalf("the notice lists %v, want vendor/lib", needInit.Submodules)
 			}
 			if !strings.Contains(err.Error(), upstream) {
-				t.Errorf("the notice should name the address MIKE would contact (%s), got %v", upstream, err)
+				t.Errorf("the notice should name the address the repository records (%s), got %v", upstream, err)
 			}
-			if _, err := os.Stat(filepath.Join(project, "vendor", "lib", "lib.txt")); err == nil {
-				t.Error("the submodule was fetched into the person's checkout without consent")
+			if needInit.Submodules[0].Note == "" {
+				t.Error("the row carries no reason for the person to read")
+			}
+			if _, statErr := os.Stat(filepath.Join(project, "vendor", "lib", "lib.txt")); statErr == nil {
+				t.Error("the submodule was fetched into the person's checkout without a click")
 			}
 		})
 	}
 }
 
-// TestPrepareSubmodulesAsksForExactlyTheMissingCopy: with both switches open the turn asks for the paths that
-// are missing, and a fetch that brought nothing back still ends at the notice rather than starting on an empty
-// directory.
-func TestPrepareSubmodulesAsksForExactlyTheMissingCopy(t *testing.T) {
+// TestPrepareSubmodulesStartsOnceThePersonPulledTheCopy: the click that runs git for the project is the end of
+// the matter — nothing else about the task's own commit asks for another decision.
+func TestPrepareSubmodulesStartsOnceThePersonPulledTheCopy(t *testing.T) {
 	project, _ := unpopulatedSubmoduleProject(t)
 	setup := submoduleSetup(t, project)
-	setup.project.AutoFetchSubmodules = true
+	te := newBareTestExecutor(t)
 
-	var asked []string
-	te := newTestExecutorWith(t, Deps{})
-	te.submoduleFetcher = func(_ context.Context, _ string, paths []string, _ git.SubmoduleFetch, onStatus func(string)) ([]string, error) {
-		asked = paths
-		if onStatus != nil {
-			onStatus("fetching vendor/lib")
-		}
-		return nil, nil
+	if err := te.prepareSubmodules(setup); err == nil {
+		t.Fatal("prepareSubmodules passed with the submodule never fetched")
 	}
-
-	err := te.prepareSubmodules(setup)
-	var needInit *git.SubmodulesUninitialized
-	if !errors.As(err, &needInit) {
-		t.Fatalf("prepareSubmodules = %v, want the notice for a fetch that brought nothing", err)
-	}
-	if strings.Join(asked, ",") != "vendor/lib" {
-		t.Errorf("the fetch was asked for %v, want exactly the missing path", asked)
-	}
-}
-
-// TestPrepareSubmodulesStartsOnceTheCopyIsThere: the fetch that lands the working copy is the end of the
-// matter — and the worktree can then be populated with the upstream gone, which is the point of doing it once.
-func TestPrepareSubmodulesStartsOnceTheCopyIsThere(t *testing.T) {
-	project, upstream := unpopulatedSubmoduleProject(t)
-	setup := submoduleSetup(t, project)
-	setup.project.AutoFetchSubmodules = true
-
-	te := newTestExecutorWith(t, Deps{})
-	te.submoduleFetcher = func(_ context.Context, path string, _ []string, _ git.SubmoduleFetch, _ func(string)) ([]string, error) {
-		testgit.Git(t, path, "-c", "protocol.file.allow=always", "submodule", "update", "--init", "--", "vendor/lib")
-		return []string{"vendor/lib"}, nil
-	}
-
+	pullTheSubmoduleByHand(t, project)
 	if err := te.prepareSubmodules(setup); err != nil {
-		t.Fatalf("prepareSubmodules after a fetch that arrived: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(project, "vendor", "lib", "lib.txt")); err != nil {
-		t.Fatalf("the fetch did not land in the person's checkout: %v", err)
-	}
-	if err := os.RemoveAll(upstream); err != nil {
-		t.Fatal(err)
-	}
-	got, err := git.PopulateSubmodules(t.Context(), setup.worktreePath, project, git.PopulateOpts{})
-	if err != nil {
-		t.Fatalf("the task still needs the upstream: %v", err)
-	}
-	if strings.Join(got, ",") != "vendor/lib" {
-		t.Errorf("PopulateSubmodules() = %v, want [vendor/lib]", got)
+		t.Fatalf("prepareSubmodules after the person pulled the copy: %v", err)
 	}
 }
 
-// TestAllowStoreFetch: a stale submodule pointer is answered with a fetch into the person's store under the
-// same two switches as the task's own fetch, so a project that granted neither leaves a turn with no way to
-// reach the network at all.
+// TestAllowStoreFetch: keeping an already-fetched submodule's store current is what that copy is for, so the
+// stale-pointer fetch needs no consent of its own — but isolation refuses it, because it dials the store's
+// remote from the server process.
 func TestAllowStoreFetch(t *testing.T) {
-	for _, tc := range []struct {
-		name     string
-		isolated bool
-		auto     bool
-		want     bool
-	}{
-		{"both switches open", false, true, true},
-		{"network isolated", true, true, false},
-		{"isolated and consenting", true, true, false},
-		{"no consent given", false, false, false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			p := &types.Project{SandboxNetworkIsolation: tc.isolated, AutoFetchSubmodules: tc.auto}
-			if got := allowStoreFetch(p); got != tc.want {
-				t.Errorf("allowStoreFetch = %v, want %v", got, tc.want)
-			}
-		})
+	if allowStoreFetch(&types.Project{SandboxNetworkIsolation: true}) {
+		t.Error("an isolated project was allowed a fetch out of a task")
+	}
+	if !allowStoreFetch(&types.Project{}) {
+		t.Error("a project with no isolation was refused the stale-pointer fetch")
 	}
 }
 

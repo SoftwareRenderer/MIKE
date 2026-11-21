@@ -4,7 +4,7 @@
   "longsent": 0
  },
  "_global": {
-  "longsent": 76
+  "longsent": 72
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -15,6 +15,14 @@
   "longsent": 0
  },
  "docs/adr/0002-image-builds-run-in-a-sandbox-container-over-a-commit-subtree.md": {
+  "history": 0,
+  "longsent": 0
+ },
+ "docs/adr/0003-a-task-fetches-a-submodule-only-under-the-projects-two-switches.md": {
+  "history": 0,
+  "longsent": 0
+ },
+ "docs/adr/0004-a-task-fetches-no-submodule-the-persons-click-does.md": {
   "history": 0,
   "longsent": 0
  },
@@ -52,7 +60,7 @@
  },
  "docs/confinement.md": {
   "history": 0,
-  "longsent": 9
+  "longsent": 7
  },
  "docs/context-window.md": {
   "history": 0,
@@ -76,7 +84,7 @@
  },
  "docs/extension-lifecycle.md": {
   "history": 0,
-  "longsent": 9
+  "longsent": 7
  },
  "docs/extension-tools.md": {
   "history": 0,
@@ -152,7 +160,7 @@
  },
  "docs/sandbox-runtime.md": {
   "history": 0,
-  "longsent": 6
+  "longsent": 5
  },
  "docs/sessions.md": {
   "history": 0,
@@ -187,10 +195,6 @@
   "longsent": 1
  },
  "docs/ui-extensions.md": {
-  "history": 0,
-  "longsent": 0
- },
- "docs/adr/0003-a-task-fetches-a-submodule-only-under-the-projects-two-switches.md": {
   "history": 0,
   "longsent": 0
  }

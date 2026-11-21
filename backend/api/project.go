@@ -340,18 +340,12 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 	if req.SandboxNetworkIsolation != nil {
 		networkIsolation = *req.SandboxNetworkIsolation
 	}
-	// Unset means no consent, which is what a create request that says nothing means too.
-	autoFetch := false
-	if req.AutoFetchSubmodules != nil {
-		autoFetch = *req.AutoFetchSubmodules
-	}
 	p := &types.Project{
 		ID:                      projectID,
 		Name:                    name,
 		Path:                    req.Path,
 		SandboxEnabled:          req.SandboxEnabled,
 		SandboxNetworkIsolation: networkIsolation,
-		AutoFetchSubmodules:     autoFetch,
 		SandboxImage:            req.SandboxImage,
 		SandboxDockerfilePath:   req.SandboxDockerfilePath,
 		SandboxBuildContext:     contextRoot,
@@ -777,7 +771,6 @@ func (h *ProjectHandler) handleUpdateProject(w http.ResponseWriter, r *http.Requ
 	// Modifying sandbox settings during execution would kill bridge processes
 	// mid-tool-call, causing "broken pipe" errors.
 	hasSandboxChange := req.SandboxEnabled != nil || req.SandboxNetworkIsolation != nil ||
-		req.AutoFetchSubmodules != nil ||
 		req.SandboxImage != nil || req.SandboxDockerfilePath != nil || req.SandboxBuildContext != nil ||
 		req.SandboxMemoryLimit != nil || req.SandboxForwardPorts != nil ||
 		req.SandboxMounts != nil || req.SandboxEnvs != nil ||
@@ -858,11 +851,6 @@ func (h *ProjectHandler) applySandboxFields(id string, req types.UpdateProjectRe
 	if req.SandboxNetworkIsolation != nil {
 		if updateErr := h.store.UpdateProjectSandboxNetworkIsolation(id, *req.SandboxNetworkIsolation); updateErr != nil {
 			return errs.Operation("update sandbox network isolation setting", updateErr)
-		}
-	}
-	if req.AutoFetchSubmodules != nil {
-		if updateErr := h.store.UpdateProjectAutoFetchSubmodules(id, *req.AutoFetchSubmodules); updateErr != nil {
-			return errs.Operation("update submodule fetch consent", updateErr)
 		}
 	}
 	if req.SandboxImage != nil {

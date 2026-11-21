@@ -69,9 +69,6 @@ export interface Project {
     origin_branch?: string;
     sandbox_enabled?: boolean;
     sandbox_network_isolation?: boolean;
-    /** Whether a turn may fetch a submodule this project's repositories name. See
-     *  `SandboxDraft.autoFetchSubmodules`. */
-    auto_fetch_submodules?: boolean;
     sandbox_image?: string;
     sandbox_dockerfile_path?: string;
     /** The committed subtree a Dockerfile build sends as its build context, relative to the repository root. Empty means the directory holding the Dockerfile. */
@@ -101,7 +98,6 @@ export interface ProjectUpdates {
     name?: string;
     sandbox_enabled?: boolean;
     sandbox_network_isolation?: boolean;
-    auto_fetch_submodules?: boolean;
     sandbox_image?: string;
     sandbox_dockerfile_path?: string;
     sandbox_build_context?: string;

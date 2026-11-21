@@ -78,11 +78,6 @@
 
             <SandboxSettingLists mounts={draft.mounts} envs={draft.envs} capabilities={draft.capabilities} bounded />
         {/if}
-
-        <div class="sandbox-row">
-            <span class="sandbox-label">{t('sandbox.autoFetchSubmodules')}</span>
-            <span class="sandbox-value">{draft.autoFetchSubmodules && !draft.networkIsolation ? t('sandbox.enabled') : t('sandbox.disabled')}</span>
-        </div>
     </div>
 </div>
 
