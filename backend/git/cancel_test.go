@@ -107,7 +107,7 @@ func TestCloneContextHonoursAnAlreadyCancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	out, err := CloneContext(ctx, seedSourceRepo(t), filepath.Join(t.TempDir(), "dst"), nil)
+	out, err := CloneContext(ctx, seedSourceRepo(t), filepath.Join(t.TempDir(), "dst"), nil, nil)
 	if err == nil {
 		t.Fatalf("CloneContext ran a clone under an already-cancelled context (out=%q)", out)
 	}

@@ -115,6 +115,13 @@ Tests: `backend/httputil/json_defaults_test.go`, `backend/httputil/json_response
   (`streamCommitPreview` in `api/tasks.ts`). Four streams read through it: clone progress, a sandbox image
   build, an extension install, a commit-message preview. `grep -rn getReader frontend/src` re-counts them.
   Test: `api/__tests__/event-stream.unit.ts`.
+- The **clone stream** (`POST /api/projects/clone`) writes one JSON object per `data:` frame, typed by
+  `type`: `progress` carries `percent`, `status` carries `message`, `done` carries `project`, `error`
+  carries `message` and a bounded `detail`. A `status` message is the server's own sentence or the phase
+  `git clone --progress` names, and only the phases in `clonePhases` (`backend/git/clone.go`) are forwarded
+  — the whitelist is what keeps a repository's text out of a browser. A frame whose payload is none of
+  these is dropped by the reader, which is also what the reader does with a build log line. Tests:
+  `backend/api/project_test.go` for the writer, `api/__tests__/project-clone.unit.ts` for the reader.
 - Use optimistic UI for user messages (add immediately, skip the echo).
 - Model/provider changes ride a `user_message` with optional `model_name`/`llama_server_url`.
 
@@ -1107,7 +1114,7 @@ absolute worktree path, and logs nothing.
 - One seam decides whether upstream text reaches the browser. Words from a remote **stay** for clone,
   checkout, pull and push: they are the diagnosis of a repository the person owns. Nothing else tells
   them the branch does not exist, or that the remote rejected a non-fast-forward. They are bounded by
-  `subproc.Summarize` at `subproc.AnswerMax`, and the full run is mirrored to the log at `Warn`. A
+  `subproc.Summarize` at `subproc.AnswerMax`, and the full run is mirrored to the log at `Warn`. A failed clone carries `subproc.Tail` of that output as its error frame's `detail` besides the message, every line read by `types.RedactLine` first, because git quotes back the address the person typed. A
   sandbox `exec` failure and a database fault **do not stay**: each answers MIKE's own sentence and puts
   its cause in the log, since both describe this server and the caller can act on neither. A sandbox
   image build refusal is neither case, because its Dockerfile is the caller's own file, so its text

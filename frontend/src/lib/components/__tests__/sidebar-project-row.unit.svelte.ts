@@ -136,3 +136,35 @@ describe('the project list’s order', () => {
         expect(projects.map((p) => p.name)).toEqual(['Zebra', 'alpha', 'Bravo', 'Apple']);
     });
 });
+
+/**
+ * A clone that stopped keeps its row: the bar stops where it got to, in the failure colour, the title
+ * says why, the row is still not a link, and the remove button comes back — dropping it is the exit.
+ */
+describe('a project row whose clone stopped', () => {
+    const failed = () => makeProject('clone-pending-1', 'repo', {
+        cloning: true,
+        cloneProgress: 60,
+        cloneFailure: { message: 'git clone failed', detail: 'fatal: no such repository' },
+    });
+
+    it('names the failure, keeps its bar stopped, and offers the way out', () => {
+        const { container } = renderSidebar({ projects: [failed()] });
+
+        const row = container.querySelector('.project-item') as HTMLAnchorElement;
+        expect(row.getAttribute('href')).toBeNull();
+        expect(row.getAttribute('aria-busy')).toBeNull();
+        expect(row.getAttribute('title')).toContain('Clone failed');
+        expect(container.querySelector('.clone-progress.failed .clone-progress-bar')).not.toBeNull();
+        expect((container.querySelector('.clone-progress') as HTMLElement).getAttribute('aria-valuenow')).toBe('60');
+        expect(container.querySelector('.project-remove-btn')).not.toBeNull();
+    });
+
+    it('offers nothing to remove while the clone still runs', () => {
+        const running = makeProject('clone-pending-2', 'repo', { cloning: true, cloneProgress: 20 });
+        const { container } = renderSidebar({ projects: [running] });
+
+        expect((container.querySelector('.project-item') as HTMLElement).getAttribute('aria-busy')).toBe('true');
+        expect(container.querySelector('.project-remove-btn')).toBeNull();
+    });
+});

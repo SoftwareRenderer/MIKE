@@ -2,6 +2,7 @@ package types
 
 import (
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -17,6 +18,17 @@ func URLHost(rawURL string) string {
 
 // redactedCredential stands where an address's password was.
 const redactedCredential = "(redacted)"
+
+// addressInTextRe matches an address quoted inside other text, which is how a subprocess writes the
+// remote it failed to reach.
+var addressInTextRe = regexp.MustCompile(`[A-Za-z][A-Za-z0-9+.-]*://[^'"()\s,]+`)
+
+// RedactLine is RedactURL for a line that quotes an address rather than being one. Handed the whole
+// line, RedactURL reads the leading word as the scheme, finds no userinfo in what is left, and returns
+// the line with its credential intact.
+func RedactLine(line string) string {
+	return addressInTextRe.ReplaceAllStringFunc(line, RedactURL)
+}
 
 // RedactURL is an address without the password it may carry, for the log lines and messages that quote
 // an address back: a pasted remote address carries its secret in it, and the written line must not.

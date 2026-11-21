@@ -1,4 +1,4 @@
-import type { Board, Project, ProjectCounts, ProjectStats, ProjectUpdates } from '../types';
+import type { Board, CloneFailureInfo, Project, ProjectCounts, ProjectStats, ProjectUpdates } from '../types';
 import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from './helpers';
 import {
     getOfflineStatus,
@@ -104,7 +104,21 @@ type CloneEvent =
     | { type: 'status'; message: string }
     | { type: 'progress'; percent: number }
     | { type: 'done'; project: Project }
-    | { type: 'error'; message: string };
+    | { type: 'error'; message: string; detail: string };
+
+/** One report from a clone in flight: the percentage it reached, or the line the server just said. */
+type CloneUpdate = { percent?: number; status?: string };
+
+/** A clone that stopped: `detail` is git's own output kept as lines, which a flattened sentence loses. */
+export class CloneFailure extends Error implements CloneFailureInfo {
+    readonly detail: string;
+
+    constructor(message: string, detail: string) {
+        super(message);
+        this.name = 'CloneFailure';
+        this.detail = detail;
+    }
+}
 
 /**
  * Parse a single SSE `data:` frame payload from the clone endpoint. Returns null for a frame that
@@ -122,7 +136,7 @@ function parseCloneEvent(data: string): CloneEvent | null {
             case 'done':
                 return { type: 'done', project: obj.project as Project };
             case 'error':
-                return { type: 'error', message: String(obj.message ?? t('api.cloneFailed')) };
+                return { type: 'error', message: String(obj.message ?? t('api.cloneFailed')), detail: String(obj.detail ?? '') };
             default:
                 return null;
         }
@@ -131,14 +145,14 @@ function parseCloneEvent(data: string): CloneEvent | null {
     }
 }
 
-/** Clone a git repository into a new project, streaming live clone progress
- * (0-100) via onProgress while online. Offline, the action is queued and
- * replayed through the synchronous create endpoint on reconnect. */
+/** Clone a git repository into a new project, streaming the percentage and the server's own lines via
+ * onUpdate while online. Offline, the action is queued and replayed through the synchronous create
+ * endpoint on reconnect. */
 export async function cloneProject(
     targetDir: string,
     gitUrl: string,
     sandboxEnabled: boolean,
-    onProgress?: (percent: number) => void,
+    onUpdate?: (update: CloneUpdate) => void,
 ): Promise<Project> {
     if (getOfflineStatus()) {
         refuseQueuedGitCredentials(gitUrl);
@@ -147,14 +161,14 @@ export async function cloneProject(
             created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
         } as Project);
     }
-    return cloneProjectRaw(targetDir, gitUrl, sandboxEnabled, onProgress);
+    return cloneProjectRaw(targetDir, gitUrl, sandboxEnabled, onUpdate);
 }
 
 async function cloneProjectRaw(
     targetDir: string,
     gitUrl: string,
     sandboxEnabled: boolean,
-    onProgress?: (percent: number) => void,
+    onUpdate?: (update: CloneUpdate) => void,
 ): Promise<Project> {
     const headers = await csrfHeaders({ 'Content-Type': 'application/json' });
 
@@ -179,21 +193,23 @@ async function cloneProjectRaw(
     }
 
     let project: Project | null = null;
-    let errorMessage: string | null = null;
+    let failure: CloneFailureInfo | null = null;
 
     for await (const frame of readEventStream(res)) {
         const event = parseCloneEvent(frame.data);
         if (!event) continue;
         if (event.type === 'progress') {
-            onProgress?.(event.percent);
+            onUpdate?.({ percent: event.percent });
+        } else if (event.type === 'status') {
+            if (event.message) onUpdate?.({ status: event.message });
         } else if (event.type === 'done') {
             project = event.project;
         } else if (event.type === 'error') {
-            errorMessage = event.message;
+            failure = { message: event.message, detail: event.detail };
         }
     }
 
-    if (errorMessage) throw new Error(errorMessage);
+    if (failure) throw new CloneFailure(failure.message, failure.detail);
     if (!project) throw new Error(t('api.cloneCompletedWithoutResult'));
     return project;
 }

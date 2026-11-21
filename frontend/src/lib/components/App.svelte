@@ -3,6 +3,7 @@
     import { onMount, onDestroy, tick, untrack } from 'svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard, applyResolvedTasksToBoard } from '$lib/stores';
     import { errorText } from '$lib/utils/error-text';
+    import { projectAddPending } from '$lib/utils/board-pending';
     import { t } from '$lib/i18n';
     import Spinner from './Spinner.svelte';
     import EmptyState from './EmptyState.svelte';
@@ -12,7 +13,7 @@
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
     import { taskEventStore } from '$lib/stores/task-events.svelte';
-    import { getProjects, getCachedProjects, getCachedConfig, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, adoptQueue, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { getProjects, getCachedProjects, CloneFailure, getCachedConfig, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, adoptQueue, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
     import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
     import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
@@ -234,6 +235,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     useKeyboardShortcuts({
         isEnabled: boardShortcutsEnabled,
         onCreateTask: () => {
+            // The button is not offered for a project the server has never seen, and neither is the key.
+            if (projectAddPending(appStore.selectedProject)) return;
             uiStore.creatingChildOf = null;
             uiStore.showCreateTask = true;
         },
@@ -244,6 +247,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     useBoardArrowNav({ isEnabled: boardShortcutsEnabled });
 
     let hasProviders = $derived(!!appStore.config?.providers?.length);
+    /** What the backlog column's add slot holds: the bar of an add in flight, or nothing. */
+    const boardPending = $derived(projectAddPending(appStore.selectedProject));
     let pageTitle = $derived(computePageTitle());
     let hasReview = $derived.by(() => {
         const project = appStore.selectedProject;
@@ -1063,9 +1068,14 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         clearTaskDetail();
         void selectProject(placeholder, true, { board: true });
         try {
-            const proj = await cloneProject(targetDir, gitUrl, sandboxEnabled, (percent) => {
-                appStore.projects = appStore.projects.map(x =>
-                    x.id === placeholderId && x.cloneProgress !== percent ? { ...x, cloneProgress: percent } : x);
+            const proj = await cloneProject(targetDir, gitUrl, sandboxEnabled, (update) => {
+                appStore.projects = appStore.projects.map(x => {
+                    if (x.id !== placeholderId) return x;
+                    if (update.percent !== undefined) {
+                        return x.cloneProgress === update.percent ? x : { ...x, cloneProgress: update.percent };
+                    }
+                    return x.cloneStatus === update.status ? x : { ...x, cloneStatus: update.status };
+                });
             });
             const list = appStore.projects;
             const stillOnScreen = appStore.selectedProject?.id === placeholderId;
@@ -1080,20 +1090,25 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 await selectProject(proj, false, { board: true });
             }
         } catch (e) {
-            const stillOnScreen = appStore.selectedProject?.id === placeholderId;
-            appStore.projects = appStore.projects.filter(p => p.id !== placeholderId);
-            addProjectError = String(e);
-            showFileBrowserVal = true;
-            if (stillOnScreen) {
-                // The failed row was on screen, under an address naming a project that does not exist.
-                const next = appStore.projects[0];
-                if (next) {
-                    void selectProject(next, false, { board: true });
-                } else {
-                    clearProjectScreen();
-                    urlRouter.write({ project: '', view: null, file: null }, true, false);
-                }
-            }
+            // The row keeps the screen and holds what the clone said: nothing here recovers the add,
+            // and the message is the one thing the person can act on.
+            appStore.projects = appStore.projects.map(p => p.id === placeholderId
+                ? { ...p, cloneFailure: { message: errorText(e, t('api.cloneFailed')), detail: e instanceof CloneFailure ? e.detail : '' } }
+                : p);
+        }
+    }
+
+    /** Drops a row the server never had; the screen it held goes to a survivor or the empty state. */
+    function discardPendingProject(p: Project) {
+        const wasOnScreen = appStore.selectedProject?.id === p.id;
+        appStore.projects = appStore.projects.filter(x => x.id !== p.id);
+        if (!wasOnScreen) return;
+        const next = appStore.projects[0];
+        if (next) {
+            void selectProject(next, false, { board: true });
+        } else {
+            clearProjectScreen();
+            urlRouter.write({ project: '', view: null, file: null }, true, false);
         }
     }
 
@@ -1150,6 +1165,11 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     }
 
     async function removeProject(p: Project) {
+        // A row the server never had holds nothing to delete: it is this browser's own placeholder.
+        if (p.cloning) {
+            discardPendingProject(p);
+            return;
+        }
         const confirmed = await dialogStore.showConfirm({
             title: t('app.project.removeTitle'),
             message: t('app.project.removeMessage', { name: p.name }),
@@ -1375,6 +1395,8 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         projectId={appStore.selectedProject.id}
                         scrollToColumn={scrollToColumn}
                         {boardFocus}
+                        pending={boardPending}
+                        onDismissPending={() => appStore.selectedProject && discardPendingProject(appStore.selectedProject)}
                         onAddTask={() => { uiStore.creatingChildOf = null; uiStore.showCreateTask = true; }}
                         onCreateChildTask={(parentId: string) => { uiStore.creatingChildOf = parentId; uiStore.showCreateTask = true; }}
                         onRefreshBoard={() => refreshBoard()}

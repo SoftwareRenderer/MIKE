@@ -240,6 +240,10 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   marker naming what was dropped. `toolresult.Truncate` runs *after* the whole output is in memory, and
   `find /` would have cost the server the run. A capture writer always reports the full byte count: a
   short one makes `io.Copy` stop and lose the rest silently.
+- A failure quoted to a browser is bounded as lines, not as one sentence. `subproc.Tail` keeps the last
+  `AnswerTailLines` lines within `AnswerTailMax` bytes: it is what a failed clone hands the board to read.
+  `subproc.Summarize` stays the shape for a message that is one line. `pkg/subproc/subproc_test.go` is what
+  fails when either stops bounding its input.
 - **What a tool hands the model is capped again, whichever way it ended.** `maxToolResultBytes` bounds a
   `bash` result *before* its failure reason is prefixed: a command that exits non-zero emits the same bytes
   as one that succeeds. A `read_file` window is bounded after its `offset`/`limit` cut. The capture limit

@@ -39,8 +39,27 @@ answers), so `board` is the caller's decision, not a rule inside `selectProject`
 browser's own, so for a project whose `cloning` is set `selectProject` asks the server nothing: no board,
 no cached mirror, no project subscription, no `last_project` setting. When the clone answers, the real
 project is selected with `push = false` — an address the server never served is a dead entry under the
-back button. A clone that fails while its row holds the screen takes the screen with it: the row goes and
-a surviving project replaces it, or the empty state does.
+back button.
+
+**While a project is being added, its add-task slot belongs to the add.** `projectAddPending`
+(`src/lib/utils/board-pending.ts`) is the one reading that says so: `null` for a row the server has, and
+for a `cloning` row the bar's percentage, the line the stream last said, and — when the add stopped — what
+git said. The backlog column renders that box in place of its `+ Create Task` button and in place of the
+header's icon-only add; `Board` hands no `onAddTask` to any column; and the create-task shortcut returns
+without opening the modal. A task created against `clone-pending-…` would name a project the server has
+never seen. The sidebar keeps its own slim bar for the same row.
+
+**A clone that fails keeps the screen.** The row stays selected, its bar stops where it was, and the box
+holds the message with git's lines under it. Nothing there recovers the add: the person who typed the
+address is the only one who can act on what git said. The box offers one action, Dismiss. It drops the row
+(`discardPendingProject` in `App.svelte`), and a surviving project or the empty state takes the screen. The row is still not a link: it has no address to open. A click
+on it re-selects it, which is how the message comes back after a look at another project. Its remove button
+drops it too, and asks the server nothing. The add dialog is
+not reopened over the message and the bottom toast is not used for this path: one place holds the reason.
+
+Tests: `frontend/src/lib/utils/__tests__/board-pending.unit.ts` (what the reading answers) and
+`frontend/src/lib/components/__tests__/column-pending-add.unit.svelte.ts` (that the slot changes hands and
+comes back).
 
 The add writes push, so Back returns to the project open at the click, on the screen it was showing.
 
