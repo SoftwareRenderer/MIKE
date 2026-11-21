@@ -9,6 +9,7 @@
     import { gc, editorRecordRoots } from '$lib/storage';
     import { mergeQueuedUpdate, ancestorInProgress, willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
+    import type { BoardPending } from '$lib/utils/board-pending';
     import { createBulkTaskActions } from '$lib/utils/bulk-task-actions';
     import { columnInViewport, type Span } from '$lib/utils/review-notify';
     import { useMultiSelectActions } from '$lib/composables/use-multi-select-actions.svelte';
@@ -21,7 +22,7 @@
         uiInjector.refreshSlot(INJECTION_POINTS.PROJECT_BOARD, { component: 'Board', projectId });
     });
 
-    let { tasks, projectId, onAddTask, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn, boardFocus }: { tasks: Task[]; projectId: string; onAddTask?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null; boardFocus?: { projectId: string; column: string } | null } = $props();
+    let { tasks, projectId, onAddTask, pending, onDismissPending, onCreateChildTask, onRefreshBoard, onSelectTask, scrollToColumn, boardFocus }: { tasks: Task[]; projectId: string; onAddTask?: () => void; pending?: BoardPending | null; onDismissPending?: () => void; onCreateChildTask?: (parentId: string) => void; onRefreshBoard?: () => void; onSelectTask?: (task: Task) => void; scrollToColumn?: string | null; boardFocus?: { projectId: string; column: string } | null } = $props();
 
     /**
      * A column is two things at once: `id` is **data** (compared, persisted, sent to the
@@ -284,6 +285,8 @@
                 return !ancestorInProgress(tasks, task.id);
             }}
             onAddTask={col.id === 'backlog' ? onAddTask : undefined}
+            pending={col.id === 'backlog' ? pending : null}
+            onDismissPending={onDismissPending}
             onCreateChildTask={onCreateChildTask}
             onClearAll={col.id === 'done' ? async () => { await handleClearDone(); onRefreshBoard?.(); } : undefined}
             onSelect={handleSelectTask}

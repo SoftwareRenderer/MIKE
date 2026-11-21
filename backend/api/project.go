@@ -399,6 +399,8 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 
 	out, err := git.CloneContext(r.Context(), req.GitURL, targetPath, func(percent int) {
 		sendEvent(map[string]any{"type": string(types.SSETypeProgress), "percent": percent})
+	}, func(phase string) {
+		sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": types.RedactURL(phase + "...")})
 	})
 	if err != nil {
 		// Drop the partial clone so a retry can start clean.
@@ -410,7 +412,9 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		logging.For(logging.Git).Warnf("clone %s into %s failed: %s", types.RedactURL(req.GitURL), targetPath, strings.TrimSpace(out))
-		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": "git clone failed: " + subproc.Summarize([]byte(out), subproc.AnswerMax)})
+		// Git's own words stay with the failure: whoever typed the address is the only one who can
+		// act on them.
+		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": "git clone failed", "detail": cloneFailureDetail(out)})
 		return
 	}
 
@@ -426,6 +430,16 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 	} else {
 		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": msg})
 	}
+}
+
+// cloneFailureDetail is the end of what a failed clone said: bounded lines for a browser, each read for
+// a credential typed into the address.
+func cloneFailureDetail(out string) string {
+	lines := strings.Split(out, "\n")
+	for i, line := range lines {
+		lines[i] = types.RedactLine(line)
+	}
+	return subproc.Tail([]byte(strings.Join(lines, "\n")), subproc.AnswerTailLines, subproc.AnswerTailMax)
 }
 
 // HandleStats returns aggregated token usage stats for a project.

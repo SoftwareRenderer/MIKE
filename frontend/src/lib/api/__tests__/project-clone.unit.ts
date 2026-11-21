@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Project } from '$lib/types';
 
-import { cloneProject } from '../projects';
+import { cloneProject, CloneFailure } from '../projects';
 import { streamBody } from './fake-stream-body';
 
 /**
@@ -35,8 +35,18 @@ function stubCloneResponse(...chunks: (string | Error)[]) {
     return calls;
 }
 
-const clone = (onProgress?: (percent: number) => void) =>
-    cloneProject('/root/sse-clones', 'file:///root/sse-src', true, onProgress);
+/** What the reader hands a caller: a percentage, or a line. */
+type CloneUpdate = { percent?: number; status?: string };
+
+/** Drive one clone through the reader, reporting whatever it says. */
+const clone = (onUpdate?: (update: CloneUpdate) => void) =>
+    cloneProject('/root/sse-clones', 'file:///root/sse-src', true, onUpdate);
+
+/** The percentages alone: a line is not a percentage. */
+const percentCollector = () => {
+    const percents: number[] = [];
+    return { percents, onUpdate: (u: CloneUpdate) => { if (u.percent !== undefined) percents.push(u.percent); } };
+};
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
@@ -55,25 +65,39 @@ describe('cloneProject reads the server frame stream', () => {
         const cut = stream.indexOf('{"percent":50');
         stubCloneResponse(stream.slice(0, cut), stream.slice(cut, stream.length - 2), stream.slice(stream.length - 2));
 
-        const percents: number[] = [];
-        await expect(clone(p => percents.push(p))).resolves.toEqual(DONE_PROJECT);
+        const { percents, onUpdate } = percentCollector();
+        await expect(clone(onUpdate)).resolves.toEqual(DONE_PROJECT);
         expect(percents).toEqual([3, 50, 100]);
     });
 
     it('reports a progress frame that names no percent as 0, so the bar never reads NaN', async () => {
         stubCloneResponse('data: {"type":"progress"}\n\n', `${doneFrame}\n\n`);
 
-        const percents: number[] = [];
-        await clone(p => percents.push(p));
+        const { percents, onUpdate } = percentCollector();
+        await clone(onUpdate);
         expect(percents).toEqual([0]);
     });
 
-    it('takes a status line as neither progress nor failure', async () => {
-        stubCloneResponse('data: {"message":"Cloning into /root/sse-clones/sse-src...","type":"status"}\n\n', `${doneFrame}\n\n`);
+    it('reports a status line as a line, never as a percentage or a failure', async () => {
+        stubCloneResponse(
+            'data: {"message":"Cloning into /root/sse-clones/sse-src...","type":"status"}\n\n',
+            'data: {"message":"Receiving objects...","type":"status"}\n\n',
+            'data: {"percent":10,"type":"progress"}\n\n',
+            `${doneFrame}\n\n`,
+        );
 
-        const percents: number[] = [];
-        await expect(clone(p => percents.push(p))).resolves.toEqual(DONE_PROJECT);
-        expect(percents).toEqual([]);
+        const said: (string | number)[] = [];
+        await expect(clone(u => said.push(u.status ?? u.percent ?? ''))).resolves.toEqual(DONE_PROJECT);
+        expect(said).toEqual(['Cloning into /root/sse-clones/sse-src...', 'Receiving objects...', 10]);
+    });
+
+    it("carries git's own lines on the failure, for the board to show", async () => {
+        stubCloneResponse('data: {"detail":"fatal: no such repository\\nfatal: could not read","message":"git clone failed","type":"error"}\n\n');
+
+        const failure = await clone().catch((e) => e);
+        expect(failure).toBeInstanceOf(CloneFailure);
+        expect((failure as CloneFailure).message).toBe('git clone failed');
+        expect((failure as CloneFailure).detail).toBe('fatal: no such repository\nfatal: could not read');
     });
 
     it('reports the server error frame as a failure', async () => {

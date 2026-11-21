@@ -166,3 +166,50 @@ func TestSummarizeBoundsSubprocessOutput(t *testing.T) {
 		t.Errorf("Summarize cut through a rune: %q", got)
 	}
 }
+
+// The tail of a failed clone is read as a block under the progress bar, so the bound keeps lines and
+// keeps the end: the line that explains the failure is at the bottom.
+func TestTailKeepsTheLastLinesOfASubprocessOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		out                string
+		maxLines, maxBytes int
+		want               string
+	}{
+		{"shorter than both bounds", "one\ntwo\nthree\n", 20, 2048, "one\ntwo\nthree"},
+		{"more lines than the cap", "1\n2\n3\n4\n5\n", 2, 2048, "4\n5"},
+		{
+			"collapse of a progress line rewrites in place",
+			"Receiving objects:  10% (1/10)\rReceiving objects: 100% (10/10)\rfatal: repository not found\n",
+			20, 2048, "Receiving objects:  10% (1/10)\nReceiving objects: 100% (10/10)\nfatal: repository not found",
+		},
+		{"blank segments are no lines", "\n\n  \na\n\r\nb\n \n", 20, 2048, "a\nb"},
+		{"a byte cut keeps the end and says so", "aaaa\nbbbb\ncccc\n", 20, 5, "…\ncccc"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := Tail([]byte(tc.out), tc.maxLines, tc.maxBytes); got != tc.want {
+				t.Errorf("Tail() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	if got := Tail(nil, AnswerTailLines, AnswerTailMax); got != "" {
+		t.Errorf("Tail(nil) = %q, want nothing", got)
+	}
+	// The byte cut must not split a rune: git prints paths and author names.
+	tail := Tail([]byte(strings.Repeat("ä", 100)), AnswerTailLines, 11)
+	if !utf8.ValidString(tail) {
+		t.Errorf("Tail cut through a rune: %q", tail)
+	}
+	if len(tail) > 11+len("…") {
+		t.Errorf("Tail did not bound its bytes: %d", len(tail))
+	}
+	// Both bounds hold at once, however the output is shaped.
+	wide := strings.Repeat("x", 500) + "\n" + strings.Repeat("y", 500)
+	if got := Tail([]byte(wide), 20, 100); len(got) > 100+len("…") {
+		t.Errorf("Tail overran its byte bound: %d bytes", len(got))
+	}
+	if got := strings.Count(Tail([]byte(strings.Repeat("l\n", 200)), 3, AnswerTailMax), "\n"); got != 2 {
+		t.Errorf("Tail kept %d separators, want the last 3 lines", got)
+	}
+}

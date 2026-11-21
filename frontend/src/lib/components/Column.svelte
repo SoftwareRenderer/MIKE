@@ -9,10 +9,12 @@
     import { storageStatus } from '$lib/services/storage-usage.svelte';
     import { isStoragePressured, storageTasksSentence, storageUsageSentence } from '$lib/utils/storage-usage';
     import { t } from '$lib/i18n';
+    import type { BoardPending } from '$lib/utils/board-pending';
+    import BoardPendingAdd from './BoardPendingAdd.svelte';
     import Icon from './Icon.svelte';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
 
-    let { columnId, label, color, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
+    let { columnId, label, color, tasks, childrenMap, expandedTasks, onToggleExpanded, onDrop, onAddTask, pending, onDismissPending, projectId, onClearAll, onCreateChildTask, onSelect, canDrop, onRefreshBoard, multiSelect }: {
         columnId: string;
         /** Visible column label; also the word in this column's accessible name. */
         label: string;
@@ -23,6 +25,9 @@
         onToggleExpanded: (taskId: string) => void;
         onDrop: (taskId: string) => void;
         onAddTask?: () => void;
+        /** The backlog column's add slot belongs to this instead of to {@link onAddTask} while set. */
+        pending?: BoardPending | null;
+        onDismissPending?: () => void;
         projectId?: string;
         onClearAll?: () => void;
         onCreateChildTask?: (parentId: string) => void;
@@ -157,7 +162,7 @@
             {:else}
                 <span class="count">{taskCount}</span>
             {/if}
-            {#if columnId === 'backlog' && onAddTask && !addBtnVisible}
+            {#if columnId === 'backlog' && onAddTask && !addBtnVisible && !pending}
                 <button class="add-btn" onclick={() => onAddTask()} type="button" aria-label={t('board.column.newTaskAria')} title={t('board.column.newTaskAria')}>
                     <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
                 </button>
@@ -170,7 +175,9 @@
         </div>
     </div>
     <div class="card-list" bind:this={cardListEl} onscroll={handleScroll}>
-        {#if onAddTask}
+        {#if pending}
+            <BoardPendingAdd {pending} onDismiss={onDismissPending} />
+        {:else if onAddTask}
             <button class="add-task-btn" onclick={onAddTask} title={createTaskShortcutLabel ? t('board.column.addTaskTitle', { shortcut: createTaskShortcutLabel }) : t('board.column.newTaskAria')}>{t('board.column.addTask')}{#if createTaskShortcutLabel && !hintsHidden}<kbd class="key-hint">{createTaskShortcutLabel}</kbd>{/if}</button>
         {/if}
         {#each tasks as task (task.id)}

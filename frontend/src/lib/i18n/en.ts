@@ -1070,6 +1070,8 @@ const catalog = {
     // The project row's tooltip says what the row's own name cannot: a clone in flight,
     // or a Review count waiting.
     'app.sidebar.cloningTitle': 'Cloning repository… ({progress}%)',
+    // A clone that stopped keeps its row until the person dismisses it, and the row says so.
+    'app.sidebar.cloneFailedTitle': 'Clone failed: {message}',
     'app.sidebar.reviewTitle': {
         one: '{name} - {count} task available for review',
         other: '{name} - {count} tasks available for review',
@@ -1846,6 +1848,11 @@ const catalog = {
     // The backlog's icon-only add control; the task view's section headers use the same words.
     'board.column.newTaskAria': 'Create a new task',
     'board.column.addTaskTitle': 'Create a new task ({shortcut})',
+    // The backlog's add slot belongs to the project being added until the server has a row for it:
+    // a bar, the line the server last said, and — when it stopped — what git said.
+    'board.pending.adding': 'Adding project…',
+    'board.pending.progressAria': 'Project add progress',
+    'board.pending.dismiss': 'Dismiss',
     'board.column.clearAllAria': { one: 'Clear all {count} done task', other: 'Clear all {count} done tasks' },
     'board.column.storageUsed': '{used} of {total} used ({percent})',
     'board.column.storageLow': 'Storage: {used} of {total} used ({percent})',

@@ -54,7 +54,7 @@
         // role="button" promises Space activates; a native anchor only does that for Enter.
         if (e.key === ' ') {
             e.preventDefault();
-            if (!p.cloning) onSelectProject(p);
+            if (!p.cloning || p.cloneFailure) onSelectProject(p);
             return;
         }
         if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -101,16 +101,21 @@
 
     /** An unmodified click navigates in-app; a modifier click is the browser's (new tab/window). */
     function handleProjectClick(e: MouseEvent, p: Project) {
-        // A cloning row renders no href, so there is nothing to open either way.
-        if (p.cloning) return;
+        // A cloning row renders no href, so there is nothing to open; a stopped clone is clickable,
+        // which is how its message comes back.
+        if (p.cloning && !p.cloneFailure) return;
         if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         onSelectProject(p);
     }
 
-    /** What the row's own name cannot say: a clone in flight, or a Review count waiting. */
+    /** What the row's own name cannot say: a clone in flight or stopped, or a Review count waiting. */
     function projectTitle(p: Project): string {
-        if (p.cloning) return t('app.sidebar.cloningTitle', { progress: p.cloneProgress ?? 0 });
+        if (p.cloning) {
+            return p.cloneFailure
+                ? t('app.sidebar.cloneFailedTitle', { message: p.cloneFailure.message })
+                : t('app.sidebar.cloningTitle', { progress: p.cloneProgress ?? 0 });
+        }
         const review = projectCounts[p.id]?.review ?? 0;
         if (review > 0) return t('app.sidebar.reviewTitle', { name: p.name, count: review });
         return p.sandbox_enabled
@@ -143,7 +148,7 @@
                         tabindex="0"
                         onkeydown={(e) => handleProjectItemKeydown(e, i, p)}
                         onclick={(e) => handleProjectClick(e, p)}
-                        aria-busy={p.cloning ? 'true' : undefined}
+                        aria-busy={p.cloning && !p.cloneFailure ? 'true' : undefined}
                         title={projectTitle(p)}
                     >
                         {#if isMobile || !collapsed}
@@ -158,12 +163,12 @@
                             {/if}
                         {/if}
                         <span class="project-name">{p.name}</span>
-                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} class:cloning={p.cloning}>
+                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} class:cloning={p.cloning && !p.cloneFailure}>
                             {getProjectAbbr(p.name)}
                         </span>
                         {#if p.cloning && (isMobile || !collapsed)}
                             <!-- Determinate clone progress (streamed from the server) -->
-                            <span class="clone-progress" role="progressbar" aria-label={t('app.sidebar.cloneProgressAria')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.cloneProgress ?? 0}>
+                            <span class="clone-progress" class:failed={!!p.cloneFailure} role="progressbar" aria-label={t('app.sidebar.cloneProgressAria')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.cloneProgress ?? 0}>
                                 <span class="clone-progress-bar" style={`width: ${p.cloneProgress ?? 0}%`}></span>
                             </span>
                         {:else if (isMobile || !collapsed) && hasActiveStats(p.id)}
@@ -185,7 +190,7 @@
                         {/if}
                     </a>
                 </div>
-                {#if (isMobile || !collapsed) && !p.cloning}
+                {#if (isMobile || !collapsed) && (!p.cloning || p.cloneFailure)}
                 <button
                     class="project-remove-btn"
                     onclick={(e) => { e.stopPropagation(); onRemoveProject(p); }}
@@ -376,6 +381,10 @@
         border-radius: inherit;
         background: var(--color-accent);
         transition: width var(--dur-md) ease;
+    }
+    /* Stopped, not finished: the bar keeps the percentage it reached. */
+    .clone-progress.failed .clone-progress-bar {
+        background: var(--color-status-red);
     }
     /* Collapsed sidebar has no room for the bar — pulse the abbreviation instead */
     .project-abbr.cloning {

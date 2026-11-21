@@ -47,6 +47,7 @@ export {
     resetProjectStats,
     createProject,
     cloneProject,
+    CloneFailure,
     updateProject,
     deleteProject,
     getBoard,
