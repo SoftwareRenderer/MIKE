@@ -78,10 +78,10 @@ test.describe('Reconnecting banner and tab wake-up', () => {
         await expect(page.locator('.card').first()).toBeVisible({ timeout: 15000 });
         await page.waitForFunction(() => (window as any).__streamSockets.length > 0, null, { timeout: 15000 });
 
+        // Hold the outage down first: a socket back inside the grace period shows no banner at all.
+        await page.evaluate(() => { (window as any).__blockStream = true; });
         await dropStream(page);
         await expect(page.locator(BANNER)).toBeVisible({ timeout: 15000 });
-        // Hold it down: the app would otherwise reconnect before the sampling loop finishes.
-        await page.evaluate(() => { (window as any).__blockStream = true; });
 
         // The countdown and the data age change every second, so only the transition is announced:
         // one sentence, no ticking digits.

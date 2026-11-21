@@ -27,6 +27,25 @@ Since a reconnection is a new connection, the server doesn't know what the clien
   client that declared it holds no rows (`NoRows`) is owed the buffer whole, trim and all.
   `go test ./backend/stream/ -run TestDurabilityTrim` fails when a row-writing frame is missing from the table.
 
+## The Reconnecting Banner Waits a Grace Period
+
+A dropped app stream gets `RECONNECT_BANNER_DELAY_MS` before anyone is told about it. The tab that comes back
+closes its socket and opens another, and that round trip often answers from inside the wait.
+
+- **What waits**: `reconnectBanner.visible` is what the shell paints — the bar in
+  `frontend/src/lib/components/App.svelte`, the content offset that holds the board below it, and the
+  sentence in the live region. Each outage arms the wait again; a reconnect cancels it.
+- **What does not wait**: `connectionStore.connected` rises and falls with the socket itself. The offline
+  queue, the file-save retry and the screen that refetches on the way back read that flag, so a write the
+  socket cannot carry is held whether or not a bar was ever drawn.
+- **Ready when it appears**: the countdown and the "Data from {age}" line start at the drop, so the bar
+  opens holding numbers that already moved.
+- **The sentence follows the bar**: the live region says "Connected again" for a wait the reader saw begin.
+  An outage the wait swallowed leaves it empty in both directions.
+
+`make test-frontend` runs `reconnect-banner.unit.svelte.ts`, which is red when the bar rises on the drop
+itself, or when the flag rather than the wait drives the paint.
+
 ## View Reconciliation (The Tab that Comes Back)
 
 The app reconciles state when a tab regains focus, wakes from sleep, or is restored from cache.
@@ -196,6 +215,7 @@ The server does not time out slow clients. Instead:
 `make test-frontend` runs the unit files below; `make test-e2e SPECS=ws-stale-reconnect` runs the specs.
 
 - **E2E Tests**: `ws-stale-reconnect.spec.ts` (the banner, the wake-up refresh, and the board and chat holding what the server wrote while the window was away), `away-and-back.spec.ts`, `away-window-chat.spec.ts`, `return-transcript-order.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `offline-send-queue.spec.ts`, `editor-external-change.spec.ts`, `chat-draft-persistence.spec.ts` and `chat-draft-attachments-stay-deleted.spec.ts`.
-- **Unit Tests**: `connection-restored.unit.svelte.ts`, `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`, and for the chat draft `chat-draft.unit.ts`.
+- **Unit Tests**: `connection-restored.unit.svelte.ts`, `reconnect-banner.unit.svelte.ts`,
+  `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`, and for the chat draft `chat-draft.unit.ts`.
 - **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`,
   `handler_message_window_test.go` (whose revalidation table covers the sync digest too).

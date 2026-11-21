@@ -1,8 +1,9 @@
 /**
- * The reconnect banner's clocks and its one sentence per transition. What is under test is the timing the
- * browser owns — a countdown that follows the scheduled attempt, an age line that keeps moving while the
- * socket is down and stops when it is not, timers that do not outlive the page — plus the rule that a
- * reconnect re-reads only once the first load has finished (docs/reconnection.md → *The behaviour, in full*).
+ * The reconnect banner's clocks, the grace a dropped socket gets before the bar appears, and its one
+ * sentence per transition. What is under test is the timing the browser owns — a countdown that follows the
+ * scheduled attempt, an age line that keeps moving while the socket is down and stops when it is not,
+ * timers that do not outlive the page — plus the rule that a reconnect re-reads only once the first load
+ * has finished (docs/reconnection.md → *The behaviour, in full*).
  *
  * `connectionStore` and the English catalog are the real ones: the flag this banner publishes is the same
  * object `TaskChat` reads, and the copy is the catalog's, not a fake. Only `/api`'s offline flag is faked,
@@ -10,6 +11,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import type { AppStream } from '$lib/api';
+import { RECONNECT_BANNER_DELAY_MS } from '$lib/constants';
 
 const api = vi.hoisted(() => ({ setOfflineStatus: vi.fn() }));
 
@@ -78,9 +80,69 @@ describe('the connection edge', () => {
         expect(reconnectBanner.notice).toBe('');
 
         reconnectBanner.onConnected(false);
+        vi.advanceTimersByTime(RECONNECT_BANNER_DELAY_MS);
         expect(reconnectBanner.notice).toBe('Reconnecting ...');
         reconnectBanner.onConnected(true);
         expect(reconnectBanner.notice).toBe('Connected again');
+    });
+});
+
+describe('the grace period', () => {
+    it('waits before the bar appears', () => {
+        appUnderTest();
+        reconnectBanner.onConnected(true);
+        reconnectBanner.onConnected(false);
+        expect(reconnectBanner.visible).toBe(false);
+
+        vi.advanceTimersByTime(RECONNECT_BANNER_DELAY_MS - 1);
+        expect(reconnectBanner.visible).toBe(false);
+
+        vi.advanceTimersByTime(1);
+        expect(reconnectBanner.visible).toBe(true);
+    });
+
+    it('says nothing about a socket that came back inside the grace', () => {
+        // The tab's return reopens the socket while the bar is still being withheld.
+        appUnderTest();
+        reconnectBanner.onConnected(true);
+        reconnectBanner.onConnected(false);
+        vi.advanceTimersByTime(RECONNECT_BANNER_DELAY_MS - 1);
+        reconnectBanner.onConnected(true);
+        expect(reconnectBanner.notice).toBe('');
+
+        vi.advanceTimersByTime(RECONNECT_BANNER_DELAY_MS * 4);
+        expect(reconnectBanner.visible).toBe(false);
+        expect(reconnectBanner.notice).toBe('');
+    });
+
+    it('gives every outage its own wait', () => {
+        appUnderTest();
+        reconnectBanner.onConnected(true);
+        reconnectBanner.onConnected(false);
+        vi.advanceTimersByTime(RECONNECT_BANNER_DELAY_MS);
+        expect(reconnectBanner.visible).toBe(true);
+
+        reconnectBanner.onConnected(true);
+        expect(reconnectBanner.visible).toBe(false);
+
+        reconnectBanner.onConnected(false);
+        expect(reconnectBanner.visible).toBe(false);
+        vi.advanceTimersByTime(RECONNECT_BANNER_DELAY_MS);
+        expect(reconnectBanner.visible).toBe(true);
+    });
+
+    it('has the numbers ready by the time the bar appears', () => {
+        // The countdown and the age line start at the drop, so the bar opens holding them.
+        appUnderTest();
+        reconnectBanner.lastSyncedAt = Date.now() - 60_000;
+        reconnectBanner.onConnected(true);
+        reconnectBanner.onConnected(false);
+        reconnectBanner.handlers.onReconnectScheduled(Date.now() + 5000);
+
+        vi.advanceTimersByTime(RECONNECT_BANNER_DELAY_MS);
+        expect(reconnectBanner.visible).toBe(true);
+        expect(reconnectBanner.status).toBe('Reconnecting in 4s ...');
+        expect(reconnectBanner.staleTimeText).not.toBe('');
     });
 });
 
@@ -179,7 +241,7 @@ describe('the buttons', () => {
 });
 
 describe('destroy', () => {
-    it('leaves neither clock running', () => {
+    it('leaves no timer running', () => {
         appUnderTest();
         reconnectBanner.lastSyncedAt = Date.now() - 60_000;
         reconnectBanner.handlers.onReconnectScheduled(Date.now() + 5000);
@@ -190,5 +252,6 @@ describe('destroy', () => {
         vi.advanceTimersByTime(120_000);
         expect(reconnectBanner.countdownSeconds).toBe(frozen.countdown);
         expect(reconnectBanner.staleTimeText).toBe(frozen.age);
+        expect(reconnectBanner.visible).toBe(false);
     });
 });

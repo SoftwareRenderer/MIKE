@@ -1236,7 +1236,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
 {:else}
 <!-- Not a live region: the countdown and the age change every second. The region under it
      announces the transitions. -->
-{#if !connectionStore.connected}
+{#if reconnectBanner.visible}
     <div class="reconnecting-banner">
         <Spinner size={12} decorative />
         {reconnectBanner.status}
@@ -1257,7 +1257,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         {/if}
     </div>
 {/if}
-<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={!connectionStore.connected} class:cache-visible={sessionBoot.servingFromCache}>
+<div class="app" class:collapsed class:task-detail={uiStore.showCardDetail && !!appStore.selectedTask} class:ws-disconnected={reconnectBanner.visible} class:cache-visible={sessionBoot.servingFromCache}>
     <!-- Skip navigation link -->
     <a href="#main-content" class="skip-link">{t('app.skipToMain')}</a>
 

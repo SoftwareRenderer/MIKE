@@ -470,6 +470,9 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
 The client distinguishes a cancellation from a lost connection and treats neither as a deadline: an abort
 never marks the app offline, and nothing in the product puts a deadline on a wait for this server.
 
+- **The reconnecting banner waits a grace period before it is painted** — a socket that comes back inside it
+  is neither drawn nor announced, and the connection flag still reports the outage to everything else.
+  `docs/reconnection.md → The Reconnecting Banner Waits a Grace Period`.
 - **A write queues while offline, and so does a write that got no answer** — `writeOrQueue` decides that at
   the api layer. A request carrying a plaintext secret is refused rather than queued, because the queue is
   persisted.
