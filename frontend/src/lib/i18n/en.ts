@@ -397,7 +397,7 @@ const catalog = {
     'settings.preferences.autoMaximizeChatDesc': 'Maximize the chat panel while the chat input has focus',
     'settings.preferences.autoMaximizeCodeViewer': 'Auto maximize code viewer',
     'settings.preferences.collapseReasoning': 'Collapse reasoning text',
-    'settings.preferences.collapseReasoningDesc': 'Do not show the model reasoning as it is written. A thinking turn shows a spinner and its token rate instead, and the finished reasoning opens with Show reasoning.',
+    'settings.preferences.collapseReasoningDesc': 'Show a spinner instead of streaming reasoning text, which uses less bandwidth. Reasoning text will still be available.',
     'settings.preferences.autoMaximizeCodeViewerDesc': 'When clicking on a line of code in the diff panel, maximize the view if the column is narrow',
     'settings.preferences.notifyOnReview': 'Notify when a task enters Review',
     'settings.preferences.notifyOnReviewDesc': 'Send a browser notification when a task starts waiting for you while you are looking elsewhere',
