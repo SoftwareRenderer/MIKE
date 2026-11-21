@@ -9,7 +9,7 @@
     import type { GitBatchResult } from '$lib/api';
     import { fetchTaskSync } from '$lib/services/task-sync';
     import { resyncPlan, type HeldRow } from '$lib/utils/task-sync';
-    import { diffBaseMoved, diffHeadRef } from '$lib/utils/diff-base';
+    import { diffBaseMoved, diffHeadRef, hasAnythingToShow, hasCommittedChanges, hasWorkingChanges } from '$lib/utils/diff-base';
     import { enrichRowsWithInlineSegments } from '$lib/utils/diff-parser';
     import { shouldAutoFullscreenDiffEditor } from '$lib/utils/diff-editor-layout';
     import { chatBlurState, chatCollapseState, chatFocusState, chatManualToggleState, chatSendState, type ChatAutoMaximizeRules, type ChatMaximizeState } from '$lib/utils/chat-auto-maximize';
@@ -129,11 +129,11 @@
     // Derived arrays for DiffViewer (sorted, split by staged status)
     // For done tasks, all diff files are shown as "Merged" (no staging/unstaged concept).
     let isDoneTask = $derived(task.status === 'done');
-    let stagedFiles = $derived(isDoneTask ? [] : Object.values(diffCache.state.files).filter(f => f.staged && !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary)));
-    let unstagedFiles = $derived(isDoneTask ? [] : Object.values(diffCache.state.files).filter(f => !f.staged && !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary)));
+    let stagedFiles = $derived(isDoneTask ? [] : Object.values(diffCache.state.files).filter(f => f.staged && !diffCache.state.untracked[f.path] && hasWorkingChanges(f)));
+    let unstagedFiles = $derived(isDoneTask ? [] : Object.values(diffCache.state.files).filter(f => !f.staged && !diffCache.state.untracked[f.path] && hasWorkingChanges(f)));
     let committedFiles = $derived(isDoneTask
-        ? Object.values(diffCache.state.files).filter(f => !diffCache.state.untracked[f.path] && (f.rows?.length > 0 || f.isBinary))
-        : Object.values(diffCache.state.files).filter(f => f.committedRows && f.committedRows.length > 0));
+        ? Object.values(diffCache.state.files).filter(f => !diffCache.state.untracked[f.path] && hasAnythingToShow(f))
+        : Object.values(diffCache.state.files).filter(f => hasCommittedChanges(f)));
     // Authoritative staged-changes count from DiffCache (source of truth).
     // Passed to TaskChat so the ReviewBar button stays in sync with the diff panel
     // when the user stages/unstages files.
@@ -968,6 +968,7 @@
                     removed: 0,
                     truncated: !!data.truncated,
                     origAdded: data.origAdded,
+                    hasWorking: true,
                 });
             } else if (data.isBinary || data.fileSize) {
                 diffCache.patchFile(path, {
@@ -977,6 +978,7 @@
                     fileSize: data.fileSize,
                     isBinary: data.isBinary,
                     truncated: false,
+                    hasWorking: true,
                 });
             }
             diffCache.setUntrackedMeta(path, { ...(diffCache.state.untracked[path] || {}), loading: false, truncated: !!data?.truncated, fileSize: data.fileSize ?? meta?.fileSize });

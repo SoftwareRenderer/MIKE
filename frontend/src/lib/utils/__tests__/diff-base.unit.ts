@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { diffBaseMoved, diffHeadRef } from '../diff-base';
+import { diffBaseMoved, diffHeadRef, hasAnythingToShow, hasCommittedChanges, hasWorkingChanges } from '../diff-base';
 import type { Task } from '$lib/types';
+import type { DiffFile, DiffRow } from '$lib/types/diff';
 
 // Which side of the diff the panel drew, and when that stopped being the task's answer.
 
@@ -39,5 +40,61 @@ describe('diffBaseMoved', () => {
 
     it('says the base moved when the task came back for another turn', () => {
         expect(diffBaseMoved('abc123', task({ status: 'in_progress', branch_tip: 'abc123' }))).toBe(true);
+    });
+});
+
+const file = (over: Partial<DiffFile>): DiffFile => ({ path: 'docs/logo.png', rows: [], added: 0, removed: 0, ...over });
+const row = (variant: 'added' | 'removed'): DiffRow => ({ lineNumber: 1, variant, text: 'x' });
+
+describe('hasWorkingChanges', () => {
+    it('keeps a picture the branch committed out of the working sections', () => {
+        expect(hasWorkingChanges(file({ isBinary: true, fileSize: 4096, hasCommitted: true }))).toBe(false);
+    });
+
+    it('lists a picture the tree changed, though it has no rows to show', () => {
+        expect(hasWorkingChanges(file({ isBinary: true, fileSize: 4096, hasWorking: true }))).toBe(true);
+    });
+
+    it('lists a picture changed on the branch and again in the tree', () => {
+        expect(hasWorkingChanges(file({ isBinary: true, hasWorking: true, hasCommitted: true }))).toBe(true);
+    });
+
+    it('lists an oversized text file, which git strips of rows the same way', () => {
+        expect(hasWorkingChanges(file({ fileSize: 2 << 20, hasWorking: true }))).toBe(true);
+    });
+
+    it('places a text file by its rows, flags or no flags', () => {
+        expect(hasWorkingChanges(file({ rows: [row('added')] }))).toBe(true);
+        expect(hasWorkingChanges(file({ rows: [], committedRows: [row('added')] }))).toBe(false);
+    });
+});
+
+describe('hasCommittedChanges', () => {
+    it('lists the picture the branch committed, which has no committed rows to list', () => {
+        expect(hasCommittedChanges(file({ isBinary: true, fileSize: 4096, hasCommitted: true }))).toBe(true);
+    });
+
+    it('keeps a picture only the tree changed out of the committed section', () => {
+        expect(hasCommittedChanges(file({ isBinary: true, fileSize: 4096, hasWorking: true }))).toBe(false);
+    });
+
+    it('lists a text file by the committed half of its rows', () => {
+        expect(hasCommittedChanges(file({ rows: [row('added')], committedRows: [row('added')] }))).toBe(true);
+        expect(hasCommittedChanges(file({ rows: [row('added')] }))).toBe(false);
+    });
+});
+
+describe('hasAnythingToShow', () => {
+    it('drops a change with nothing to draw, which would render as an empty file', () => {
+        expect(hasAnythingToShow(file({}))).toBe(false);
+    });
+
+    it('keeps a file whose only news is its size, the oversized text file included', () => {
+        expect(hasAnythingToShow(file({ fileSize: 2 << 20 }))).toBe(true);
+    });
+
+    it('keeps a file by its badge when it appeared or went away', () => {
+        expect(hasAnythingToShow(file({ isNewFile: true }))).toBe(true);
+        expect(hasAnythingToShow(file({ isDeleted: true }))).toBe(true);
     });
 });

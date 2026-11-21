@@ -1,6 +1,7 @@
 import type { GitLogResponse, TaskCommit } from '../types';
 import type { ApiDiffRow, DiffFile, DiffFileResponse, DiffManifest } from '../types/diff';
 import { enrichRowsWithInlineSegments } from '../utils/diff-parser';
+import { hasAnythingToShow } from '../utils/diff-base';
 import { API_BASE, apiFetch, apiError } from './helpers';
 import { setBoardCache, getBoardCache, diffCacheKey, doneDiffCacheKey } from '../storage';
 import { markCached, isDisconnectedError } from './cache';
@@ -41,14 +42,15 @@ export interface ParsedDiffFile {
     truncated?: boolean;
     origAdded?: number;
     origRemoved?: number;
+    hasWorking?: boolean;
+    hasCommitted?: boolean;
 }
 
 /**
  * Turn server-parsed entries into the DiffFile list the diff components bind to.
  *
  * Two steps that used to be inside parseUnifiedDiff and stay a VIEW concern:
- *  - the display filter (a file with no rows, no size, and no add/delete has nothing to show — e.g. a
- *    mode-only change), and
+ *  - the display filter (`hasAnythingToShow` in utils/diff-base), and
  *  - word-level inline segments, which need the `diff` package and pair removed/added rows by eye.
  * Parsing is the server's; presenting stays here.
  */
@@ -68,8 +70,10 @@ export function toDiffFiles(parsed: ParsedDiffFile[]): DiffFile[] {
             truncated: f.truncated,
             origAdded: f.origAdded,
             origRemoved: f.origRemoved,
+            hasWorking: f.hasWorking,
+            hasCommitted: f.hasCommitted,
         }))
-        .filter(f => f.rows.length > 0 || f.fileSize || f.isDeleted || f.isNewFile)
+        .filter(f => hasAnythingToShow(f))
         .map(f => ({ ...f, rows: enrichRowsWithInlineSegments(f.rows as unknown as ApiDiffRow[]) as unknown as DiffFile['rows'] }));
 }
 

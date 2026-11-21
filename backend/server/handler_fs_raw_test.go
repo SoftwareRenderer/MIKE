@@ -373,6 +373,36 @@ func TestFSRawRefReadsATaskWhoseWorktreeIsGone(t *testing.T) {
 	}
 }
 
+// TestFSRawRefReadsTheTasksOwnHEAD: HEAD belongs to a worktree, and the diff panel asks for a committed
+// picture by that name. Answered from the checkout it is "no such file".
+func TestFSRawRefReadsTheTasksOwnHEAD(t *testing.T) {
+	s := testServer(t)
+	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"README.md": []byte("hello\n")})
+	taskID := createTestTask(t, s, id, "add a logo")
+	wtPath, _, err := s.executor.WorktreeMgr().CreateWorktree(id, taskID, "task/"+taskID, "HEAD")
+	if err != nil {
+		t.Fatalf("create worktree: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "logo.png"), rawPNG, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testgit.Git(t, wtPath, "add", "--", "logo.png")
+	testgit.Git(t, wtPath, "commit", "-m", "add a logo")
+
+	rr := rawImageGet(t, s, rawQuery(id, "logo.png", "HEAD", taskID))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("HEAD of the task's branch: status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if !bytes.Equal(rr.Body.Bytes(), rawPNG) {
+		t.Errorf("body = %d bytes, want the picture the task committed", rr.Body.Len())
+	}
+
+	// The same ref with no task still means the checkout, which holds no such picture.
+	if got := rawImageGet(t, s, rawQuery(id, "logo.png", "HEAD", "")).Code; got != http.StatusNotFound {
+		t.Errorf("HEAD of the checkout: status = %d, want 404", got)
+	}
+}
+
 // TestFSRawRefusesAnOversizedImageBeforeReadingIt: the cap runs on the stat, so a refusal costs one stat
 // and not the file. The sparse file is 32MB of hole, so what the request allocates is the only thing
 // that tells the two orders apart.

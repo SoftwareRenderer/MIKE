@@ -84,13 +84,40 @@ func (s *Server) handleFSRaw(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "invalid ref: "+err.Error())
 		return
 	}
-	if err := s.requireTaskOwnership(project, r.URL.Query().Get("task")); err != nil {
+	taskID := r.URL.Query().Get("task")
+	if err := s.requireTaskOwnership(project, taskID); err != nil {
 		Fail(w, err, "get task", "task not found in project")
 		return
 	}
 	// Worktrees of a project share its object database, so a committed object is read from the project
 	// checkout — one whose worktree was deleted still answers.
-	s.serveCommittedImage(w, r, project.Path, ref, filepath.ToSlash(rel), contentType)
+	var tree string
+	if taskID != "" {
+		if root, rootErr := s.executor.WorktreeMgr().WorktreePath(taskID); rootErr == nil {
+			tree = root
+		}
+	}
+	s.serveCommittedImage(w, r, project.Path, refWhere(r.Context(), tree, ref), filepath.ToSlash(rel), contentType)
+}
+
+// refWhere answers ref as the object the named tree means by it. HEAD belongs to a worktree, so a request
+// naming a task resolves it there: the checkout's HEAD is another commit, and the object under it is a
+// different file or none. An empty tree, or a ref the tree will not name, keeps the ref as it came.
+func refWhere(ctx context.Context, tree, ref string) string {
+	if tree == "" {
+		return ref
+	}
+	out, err := gitInDir(ctx, tree)("rev-parse", "--verify", "--end-of-options", ref)
+	if err != nil {
+		logging.For(logging.HTTP).Debugf("ref %q not resolved in %s: %v", ref, tree, err)
+		return ref
+	}
+	object := strings.TrimSpace(out)
+	if err := types.ValidateCommitHash(object); err != nil {
+		logging.For(logging.HTTP).Debugf("ref %q named %q in %s, which is no object id", ref, object, tree)
+		return ref
+	}
+	return object
 }
 
 // repoRelativePath converts a relative project path to a filesystem path, refusing

@@ -859,19 +859,21 @@ func stripUntrackedLines(d *git.TaskDiff) *git.TaskDiff {
 
 // diffManifestFile is a single file entry in the diff manifest.
 type diffManifestFile struct {
-	Hash        string `json:"hash"`
-	Type        string `json:"type"` // "tracked" or "untracked"
-	Added       int    `json:"added,omitzero"`
-	Removed     int    `json:"removed,omitzero"`
-	Truncated   bool   `json:"truncated,omitzero"`
-	OrigAdded   int    `json:"origAdded,omitzero"`
-	OrigRemoved int    `json:"origRemoved,omitzero"`
-	LineCount   int    `json:"line_count,omitzero"` // for untracked files
-	FileSize    int64  `json:"file_size,omitzero"`  // for binary/large files
-	IsBinary    bool   `json:"is_binary,omitzero"`  // true for binary files
-	IsNew       bool   `json:"isNew,omitzero"`      // true when file is newly created
-	IsDeleted   bool   `json:"isDeleted,omitzero"`  // true when file is deleted
-	Staged      bool   `json:"staged,omitzero"`     // true if file is staged in the index
+	Hash         string `json:"hash"`
+	Type         string `json:"type"` // "tracked" or "untracked"
+	Added        int    `json:"added,omitzero"`
+	Removed      int    `json:"removed,omitzero"`
+	Truncated    bool   `json:"truncated,omitzero"`
+	OrigAdded    int    `json:"origAdded,omitzero"`
+	OrigRemoved  int    `json:"origRemoved,omitzero"`
+	LineCount    int    `json:"line_count,omitzero"`   // for untracked files
+	FileSize     int64  `json:"file_size,omitzero"`    // for binary/large files
+	IsBinary     bool   `json:"is_binary,omitzero"`    // true for binary files
+	IsNew        bool   `json:"isNew,omitzero"`        // true when file is newly created
+	IsDeleted    bool   `json:"isDeleted,omitzero"`    // true when file is deleted
+	Staged       bool   `json:"staged,omitzero"`       // true if file is staged in the index
+	HasWorking   bool   `json:"hasWorking,omitzero"`   // true when the working tree changes the file
+	HasCommitted bool   `json:"hasCommitted,omitzero"` // true when the branch changes the file since the base
 }
 
 // diffManifest is per-file metadata without diff content.
@@ -934,6 +936,8 @@ func buildDiffManifest(d *git.TaskDiff, stagedPaths map[string]struct{}, baseRef
 			entry.FileSize = *f.FileSize
 		}
 		entry.IsBinary = f.IsBinary
+		entry.HasWorking = f.HasWorking
+		entry.HasCommitted = f.HasCommitted
 		manifest.Files[path] = entry
 	}
 	for _, u := range d.Untracked {
@@ -982,6 +986,12 @@ func trackedFileResponse(f *git.TrackedDiffFile) map[string]any {
 	}
 	if f.FileSize != nil {
 		resp["fileSize"] = *f.FileSize
+	}
+	if f.HasWorking {
+		resp["hasWorking"] = true
+	}
+	if f.HasCommitted {
+		resp["hasCommitted"] = true
 	}
 	return resp
 }

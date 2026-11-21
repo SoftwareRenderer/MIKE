@@ -688,6 +688,19 @@ A file no browser can read as text still answers `isBinary` and `file_size` with
 `backend/api/git_diff_file_text_test.go`, `backend/git/diff_text_test.go`,
 `backend/fsutil/text_test.go`.
 
+**A file says which half it changed in.** A text file's rows say that; a binary or oversized file has none,
+so `git.TrackedDiffFile.HasWorking` and `HasCommitted` say it, and the manifest and `/diff/file` carry both
+names. `GetTaskDiff` sets the working half for every entry the working-tree comparison produced, and the
+committed half when `baseRef..HEAD` named the path. The merge copies `IsNew`, `IsDeleted` and `OrigPath` too:
+a file with no rows has nothing else to say what happened to it. A file annotation records the `a/` path for
+every file it annotates, moved or not, so `renamedFrom` decides whether the file actually moved. A file's
+hash folds the blob git named in the patch's `index` line, so replacing a picture with one of the same size
+is a change someone is told about. `$lib/utils/diff-base.ts` owns the two questions on this side
+(`hasWorkingChanges`, `hasCommittedChanges`), and `toDiffFiles` shares its display filter. Tests:
+`backend/git/diff_committed_half_test.go`,
+`backend/api/git_diff_committed_image_test.go`, `backend/server/handler_fs_raw_test.go`,
+`frontend/src/lib/utils/__tests__/diff-base.unit.ts`.
+
 **A binary row's notice does not wait for a size.** A file git called binary in a comparison with no
 annotations arrives as one marker row and no `file_size`. `DiffViewer.svelte` renders the notice from
 `isBinary` alone and drops git's line: the row would print the notice as prose under a size the server
@@ -819,12 +832,15 @@ is the whole permission:
   one, and it keeps the handler's `Content-Length`. `TestGetImageResponseIsPassedThrough` and
   `TestFSRawImageIsNotBufferedOrRecompressed` hold the two halves.
 - `ref` reads the committed object instead of the file on disk, with `types.ValidateGitRef` and
-  `--end-of-options` like every other client-supplied ref. It runs in **`project.Path`**, not the task's
-  worktree: worktrees of a project share its object database, so a done task whose worktree commit-and-done
-  deleted still answers — which is when the merged diff panel asks. A ref is any rev that database
-  resolves — a branch, a commit, a bare object id — so this half is jailed to the **project**, and is not
-  limited to commits reachable from whatever `?task=` says; `?task=` is still bound to `?project=` before
-  the read, so another project's task gets nothing.
+  `--end-of-options` like every other client-supplied ref. The **read** runs in **`project.Path`**, not the
+  task's worktree: worktrees of a project share its object database, so a done task whose worktree
+  commit-and-done deleted still answers — which is when the merged diff panel asks. The **resolution** runs
+  in the worktree `?task=` names, because `HEAD` belongs to a worktree and the checkout's `HEAD` is a
+  different commit. `refWhere` (`backend/server/handler_fs_raw.go`) pins the ref to an object id there
+  first, and keeps the ref as written when no tree will name it, so a branch or a bare object id still gets
+  the checkout's answer. A ref is any rev that database resolves — a branch, a commit, a bare object id —
+  so this half is jailed to the **project**, and is not limited to commits reachable from whatever `?task=`
+  says; `?task=` is still bound to `?project=` before the read, so another project's task gets nothing.
 - Its own size cap (`maxRawFileBytes`, the upload cap) is checked before any byte is read — on the stat
   for a working tree, on `git cat-file -s` for a `ref` — and again by the bound on the read that follows:
   `io.CopyN` on the file, `io.LimitReader` plus a process kill on the object.
@@ -854,7 +870,8 @@ disk.
 - **The member answer is the `/api/fs/read` answer** (`fsReadResponse`), so a member and a file are shown
   in the same words by the same editor.
 - `ref` reads the committed object the way `/api/fs/raw` does: same validation, same `project.Path` object
-  database. The panel that offers the button shows a side that may not be in the worktree at all.
+  database, same `refWhere` resolution in the worktree `?task=` names. The panel that offers the button
+  shows a side that may not be in the worktree at all.
 - **The refusals are the whole vocabulary.** 415 is `not a readable archive` or `not a text file`, 404 is
   `no such file in the archive`, and 413 is a member over `maxFSReadBytes` or a committed archive over
   `archiveCommitBufferBytes`. 504 means the walk ran out of `archiveWalkBudget` before it could say

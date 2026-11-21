@@ -107,6 +107,8 @@ interface DiffManifestEntry {
     isDeleted?: boolean;
     /** True while the path is staged in the index. */
     staged?: boolean;
+    hasWorking?: boolean;
+    hasCommitted?: boolean;
 }
 
 /**
@@ -131,6 +133,8 @@ export interface DiffFileResponse {
     fileSize?: number;
     isNew?: boolean;
     isDeleted?: boolean;
+    hasWorking?: boolean;
+    hasCommitted?: boolean;
 }
 
 /** A parsed file group from a unified diff. */
@@ -163,4 +167,8 @@ export interface DiffFile {
     isDeleted?: boolean;
     /** True if this file is newly added (git diff shows --- /dev/null). */
     isNewFile?: boolean;
+    /** True when the working tree changes this file. */
+    hasWorking?: boolean;
+    /** True when the branch changed this file since the base. */
+    hasCommitted?: boolean;
 }

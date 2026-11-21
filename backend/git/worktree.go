@@ -589,6 +589,9 @@ type DiffRow struct {
 }
 
 // TrackedDiffFile holds the parsed diff for a single tracked file.
+//
+// HasWorking and HasCommitted say which comparison the change is in — the working tree against HEAD, or
+// HEAD against the base. A text file's rows say that by themselves; these two are for files that have none.
 type TrackedDiffFile struct {
 	Path          string    `json:"path"`
 	OrigPath      string    `json:"origPath,omitempty"`      // original path for renames (a/ path when different from b/)
@@ -603,6 +606,10 @@ type TrackedDiffFile struct {
 	Truncated     bool      `json:"truncated,omitzero"`
 	OrigAdded     int       `json:"origAdded,omitzero"`
 	OrigRemoved   int       `json:"origRemoved,omitzero"`
+	HasWorking    bool      `json:"hasWorking,omitzero"`   // true when the working tree changes this file
+	HasCommitted  bool      `json:"hasCommitted,omitzero"` // true when the branch changes this file since the base
+	// BlobHash is the blob git names as the new side in the patch's index line. ComputeFileHash hashes it.
+	BlobHash string `json:"-"`
 }
 
 // TaskDiff carries two shapes: Tracked is a per-file map, for incremental updates, and Diff is the
@@ -657,6 +664,14 @@ type FileChangeStats struct {
 // ComputeFileHash computes a SHA-256 hash for a tracked diff file based on its rows.
 func ComputeFileHash(f *TrackedDiffFile) string {
 	var sb strings.Builder
+	// Without the blob, replacing a picture with one of the same size changes no hash and nothing refetches
+	// the new bytes.
+	if f.IsBinary || f.FileSize != nil {
+		fmt.Fprintf(&sb, "blob:%s\n", f.BlobHash)
+		if f.FileSize != nil {
+			fmt.Fprintf(&sb, "size:%d\n", *f.FileSize)
+		}
+	}
 	for _, row := range f.Rows {
 		fmt.Fprintf(&sb, "%s:%s\n", row.Variant, row.Text)
 	}

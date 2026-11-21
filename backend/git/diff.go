@@ -184,6 +184,11 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 	if tracked == nil {
 		tracked = make(map[string]*TrackedDiffFile)
 	}
+	if headRef == "" {
+		for _, tf := range tracked {
+			tf.HasWorking = true
+		}
+	}
 	// The committed half belongs to the working-tree comparison, where HEAD is one of the two trees. A ref
 	// comparison already names both trees, so merging HEAD in lists work done after the head ref.
 	var committedDiff string
@@ -196,18 +201,24 @@ func (wm *WorktreeManager) GetTaskDiff(taskID, baseRef, headRef string, skipTrun
 			for path, cf := range committedFiles {
 				if tf, ok := tracked[path]; ok {
 					tf.CommittedRows = cf.Rows
+					tf.HasCommitted = true
 				} else {
 					tracked[path] = &TrackedDiffFile{
 						Path:          path,
+						OrigPath:      cf.OrigPath,
 						Rows:          nil,
 						CommittedRows: cf.Rows,
 						Added:         cf.Added,
 						Removed:       cf.Removed,
 						FileSize:      cf.FileSize,
 						IsBinary:      cf.IsBinary,
+						IsNew:         cf.IsNew,
+						IsDeleted:     cf.IsDeleted,
 						Truncated:     cf.Truncated,
 						OrigAdded:     cf.OrigAdded,
 						OrigRemoved:   cf.OrigRemoved,
+						BlobHash:      cf.BlobHash,
+						HasCommitted:  true,
 					}
 				}
 			}
@@ -270,7 +281,7 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 
 	for _, line := range lines {
 		if strings.HasPrefix(line, "diff --git ") {
-			_, bPath := extractDiffPaths(line)
+			aPath, bPath := extractDiffPaths(line)
 			// If the file already exists (e.g. from a previous diff segment),
 			// merge the new hunks into the existing entry instead of overwriting.
 			if existing, ok := files[bPath]; ok {
@@ -278,6 +289,9 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 			} else {
 				current = &TrackedDiffFile{Path: bPath, Rows: nil}
 				files[bPath] = current
+			}
+			if o := renamedFrom(aPath, bPath); o != "" {
+				current.OrigPath = o
 			}
 			inHunk = false
 			oldLine = 0
@@ -329,7 +343,14 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 			inHunk = false
 			continue
 		}
-		if strings.HasPrefix(line, "index ") || strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") {
+			continue
+		}
+		// The first index line wins: a merge diff carries one per parent.
+		if strings.HasPrefix(line, "index ") {
+			if current != nil && current.BlobHash == "" {
+				current.BlobHash = extractBlobHash(line)
+			}
 			continue
 		}
 		// Check for binary/large file annotation
@@ -343,10 +364,6 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 				if size, err := strconv.ParseInt(strings.TrimSpace(sizeStr), 10, 64); err == nil {
 					current.FileSize = &size
 					current.IsBinary = isBinary
-					// Enrich with annotation metadata (origPath for renames)
-					if ann := annotations[current.Path]; ann != nil && ann.origPath != "" {
-						current.OrigPath = ann.origPath
-					}
 				}
 			}
 			inHunk = false
@@ -431,8 +448,10 @@ func parseUnifiedDiffToFiles(diff string, truncatedFiles []string, origStats map
 		}
 		// Enrich with annotation metadata for renames
 		if f.FileSize != nil {
-			if ann := annotations[path]; ann != nil && ann.origPath != "" {
-				f.OrigPath = ann.origPath
+			if ann := annotations[path]; ann != nil {
+				if o := renamedFrom(ann.origPath, path); o != "" {
+					f.OrigPath = o
+				}
 			}
 		}
 	}
@@ -737,6 +756,15 @@ func (wm *WorktreeManager) TaskDiffFromRepo(repoPath, baseRef, headRef string, s
 	}, nil
 }
 
+// renamedFrom is the name a file moved from, or "" when it did not move. A file annotation holds the a/
+// path whether or not the file moved, so each reader has to ask.
+func renamedFrom(aPath, bPath string) string {
+	if aPath == "" || aPath == bPath {
+		return ""
+	}
+	return aPath
+}
+
 // extractDiffPaths extracts a/ and b/ paths from a "diff --git" header.
 func extractDiffPaths(line string) (aPath, bPath string) {
 	rest := strings.TrimPrefix(line, "diff --git ")
@@ -932,8 +960,8 @@ func annotationsToFiles(annotations map[string]*fileAnnotation) map[string]*Trac
 			FileSize: &ann.size,
 			IsBinary: ann.isBinary,
 		}
-		if ann.origPath != "" {
-			f.OrigPath = ann.origPath
+		if o := renamedFrom(ann.origPath, path); o != "" {
+			f.OrigPath = o
 		}
 		files[path] = f
 	}

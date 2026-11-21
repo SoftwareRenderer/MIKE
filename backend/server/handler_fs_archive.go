@@ -196,8 +196,13 @@ func (s *Server) archiveSource(w http.ResponseWriter, r *http.Request, scope fsS
 		return nil, nil, false
 	}
 	// Worktrees share the project's object database, so the committed object is read from the project
-	// checkout: a task whose worktree was deleted still answers.
-	spec := ref + ":" + filepath.ToSlash(rel)
+	// checkout: a task whose worktree was deleted still answers. Only a worktree has a ref of its own to
+	// resolve; the checkout resolves its own during the read.
+	tree := ""
+	if scope.worktreePath != scope.project.Path {
+		tree = scope.worktreePath
+	}
+	spec := refWhere(ctx, tree, ref) + ":" + filepath.ToSlash(rel)
 	repo := scope.project.Path
 	if size, ok := gitBlobSize(gitInDir(ctx, repo), spec); ok && size > archiveCommitBufferBytes {
 		JSONError(w, http.StatusRequestEntityTooLarge, archiveCommitTooLargeMessage)
