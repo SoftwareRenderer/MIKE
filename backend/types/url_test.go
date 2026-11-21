@@ -50,3 +50,45 @@ func TestRedactURLRemovesOnlyThePassword(t *testing.T) {
 		}
 	}
 }
+
+// The line a subprocess writes is not a URL: parsed as one, its credential sits in plain sight as a
+// path.
+func TestRedactLineHidesAnAddressQuotedInsideText(t *testing.T) {
+	for _, tc := range []struct {
+		name, line, want, reject string
+	}{
+		{
+			name:   "git's own failure line",
+			line:   "fatal: unable to access 'https://someone:sekret@github.com/someone/x/': Authentication failed",
+			want:   "github.com/someone/x",
+			reject: "sekret",
+		},
+		{
+			name: "a line with no address",
+			line: "Cloning into '/tmp/w/x'...",
+		},
+		{
+			name:   "a bare address on its own line",
+			line:   "https://someone:sekret@github.com/someone/x",
+			want:   "github.com/someone/x",
+			reject: "sekret",
+		},
+		{
+			name: "an email is not an address to redact",
+			line: "author@example.com wrote this",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RedactLine(tc.line)
+			if tc.want != "" && !strings.Contains(got, tc.want) {
+				t.Errorf("RedactLine(%q) = %q, want it to say %q", tc.line, got, tc.want)
+			}
+			if tc.reject != "" && strings.Contains(got, tc.reject) {
+				t.Errorf("RedactLine(%q) = %q, still holding %q", tc.line, got, tc.reject)
+			}
+			if tc.want == "" && got != tc.line {
+				t.Errorf("RedactLine(%q) = %q, want it left alone", tc.line, got)
+			}
+		})
+	}
+}

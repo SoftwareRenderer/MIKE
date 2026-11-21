@@ -103,11 +103,14 @@ func TestCloneAnswersWatchedAndUnwatchedCallers(t *testing.T) {
 			}
 
 			var events []int
+			var phases []string
 			progress := func(pct int) { events = append(events, pct) }
+			phase := func(name string) { phases = append(phases, name) }
 			if !tc.watched {
 				progress = nil
+				phase = nil
 			}
-			out, err := CloneContext(context.Background(), tc.src(t), dst, progress)
+			out, err := CloneContext(context.Background(), tc.src(t), dst, progress, phase)
 			if err != nil {
 				t.Fatalf("clone: %v (output: %s)", err, out)
 			}
@@ -130,6 +133,17 @@ func TestCloneAnswersWatchedAndUnwatchedCallers(t *testing.T) {
 			}
 			if events[len(events)-1] != 100 {
 				t.Fatalf("final progress = %d, want 100 (events: %v)", events[len(events)-1], events)
+			}
+			if len(phases) == 0 {
+				t.Fatalf("no phase named during the clone (output: %q)", out)
+			}
+			for i, name := range phases {
+				if !slices.Contains(clonePhases, name) {
+					t.Fatalf("a phase outside the whitelist reached the caller: %q (%v)", name, phases)
+				}
+				if i > 0 && phases[i-1] == name {
+					t.Fatalf("phase %q reported twice in a row (events: %v)", name, phases)
+				}
 			}
 		})
 	}
@@ -217,7 +231,7 @@ func TestClone_Error(t *testing.T) {
 	tmp := t.TempDir()
 	missing := filepath.Join(tmp, "does-not-exist")
 
-	out, err := CloneContext(context.Background(), missing, filepath.Join(tmp, "dst"), nil)
+	out, err := CloneContext(context.Background(), missing, filepath.Join(tmp, "dst"), nil, nil)
 	if err == nil {
 		t.Fatal("expected error cloning a missing source")
 	}
@@ -301,6 +315,29 @@ func TestValidateCloneURL_AllowlistMatchesCloneEnv(t *testing.T) {
 	for _, helper := range []string{"ext", "fd", "python", "rc", "internal"} {
 		if err := ValidateCloneURL(helper + "::payload"); err == nil {
 			t.Errorf("helper transport %q accepted", helper)
+		}
+	}
+}
+
+// A line of git's stderr becomes a phase only on the shapes git itself writes: the whitelist matches at
+// the start of the segment, so a repository's own text cannot name one.
+func TestClonePhaseNameWhitelistsGitsOwnProgressLines(t *testing.T) {
+	for _, tc := range []struct {
+		segment string
+		want    string
+	}{
+		{"Receiving objects:  42% (123/456)", "Receiving objects"},
+		{"Enumerating objects: 23, done.", "Enumerating objects"},
+		{"Resolving deltas: 100% (5/5), done.", "Resolving deltas"},
+		{"fatal: repository 'https://example.com/x.git' not found", ""},
+		{"Username for 'https://example.com': ", ""},
+		{"Receiving objects", ""},
+		{"Receiving objects: ", ""},
+		{"Receiving objects: abc", ""},
+		{"warning: templates not found in /usr/share/git-core/templates", ""},
+	} {
+		if got := clonePhaseName(tc.segment); got != tc.want {
+			t.Errorf("clonePhaseName(%q) = %q, want %q", tc.segment, got, tc.want)
 		}
 	}
 }

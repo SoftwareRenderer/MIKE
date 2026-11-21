@@ -14,6 +14,7 @@
  */
 import type { AppStream } from '$lib/api';
 import { setOfflineStatus } from '$lib/api';
+import { RECONNECT_BANNER_DELAY_MS } from '$lib/constants';
 import { t } from '$lib/i18n';
 import { connectionStore } from '$lib/stores/connection.svelte';
 import { dataAgeText } from '$lib/utils/format-time';
@@ -44,10 +45,12 @@ class ReconnectBanner {
     /** Whether the first load has finished: the first connect has nothing to catch up on. */
     initialLoadComplete = $state(false);
 
-    private hadConnection = $state(false);
-    private everDropped = $state(false);
+    /** Whether this outage outlived the grace. It survives the reconnect: the sentence saying the wait is
+     *  over is owed only for a wait the reader saw begin. */
+    private outageShown = $state(false);
     private countdownTimer: ReturnType<typeof setInterval> | null = null;
     private staleTimer: ReturnType<typeof setInterval> | null = null;
+    private showTimer: ReturnType<typeof setTimeout> | null = null;
     private actions: BannerActions = NOTHING_TO_DO;
 
     /** Hand the banner the stream it reconnects and the re-read a reconnect owes. */
@@ -68,6 +71,12 @@ class ReconnectBanner {
         },
     };
 
+    /** What the shell paints on. Whether the socket is up is `connectionStore`'s answer, which this never
+     *  delays. */
+    get visible(): boolean {
+        return this.outageShown && !connectionStore.connected;
+    }
+
     /** The whole line, not a number handed to the markup: word order and the unit are the translator's. */
     get status(): string {
         return this.countdownSeconds > 0
@@ -77,10 +86,8 @@ class ReconnectBanner {
 
     /** One sentence per transition, announced. The countdown and the age line are not in it. */
     get notice(): string {
-        if (!connectionStore.connected) {
-            return this.everDropped ? t('app.reconnect.status') : '';
-        }
-        return this.everDropped && this.hadConnection ? t('app.reconnect.back') : '';
+        if (!this.outageShown) return '';
+        return connectionStore.connected ? t('app.reconnect.back') : t('app.reconnect.status');
     }
 
     /** The stream's connection edge: the only writer of `connectionStore`. */
@@ -88,7 +95,7 @@ class ReconnectBanner {
         connectionStore.set(connected);
         setOfflineStatus(!connected);
         if (connected) {
-            this.hadConnection = true;
+            this.stopShow();
             this.stopCountdown();
             this.stopStaleTick();
             this.nextReconnectAt = 0;
@@ -98,7 +105,8 @@ class ReconnectBanner {
                 this.actions.refresh();
             }
         } else {
-            this.everDropped = true;
+            this.outageShown = false;
+            this.armShow();
             // The age counts from the last data that landed, not from this socket dropping.
             this.startStaleTick();
         }
@@ -119,23 +127,38 @@ class ReconnectBanner {
         this.actions.refresh();
     }
 
-    /** Both clocks stop with the page that started them. */
+    /** Every timer stops with the page that started them. */
     destroy(): void {
         this.stopCountdown();
         this.stopStaleTick();
+        this.stopShow();
     }
 
     /** Forget everything. For tests, which boot the banner more than once per module instance. */
     reset(): void {
         this.destroy();
-        this.hadConnection = false;
-        this.everDropped = false;
+        this.outageShown = false;
         this.nextReconnectAt = 0;
         this.countdownSeconds = 0;
         this.staleTimeText = '';
         this.lastSyncedAt = null;
         this.initialLoadComplete = false;
         this.actions = NOTHING_TO_DO;
+    }
+
+    private armShow(): void {
+        this.stopShow();
+        this.showTimer = setTimeout(() => {
+            this.showTimer = null;
+            this.outageShown = true;
+        }, RECONNECT_BANNER_DELAY_MS);
+    }
+
+    private stopShow(): void {
+        if (this.showTimer) {
+            clearTimeout(this.showTimer);
+            this.showTimer = null;
+        }
     }
 
     private startCountdown(): void {

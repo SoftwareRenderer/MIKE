@@ -17,6 +17,36 @@ import (
 // gives that increases monotonically — other phases report no percent.
 var cloneProgressRe = regexp.MustCompile(`Receiving objects:\s+(\d{1,3})%`)
 
+// clonePhases are the phases `git clone --progress` names. Only these reach the browser as what the
+// clone is doing: everything else git writes to stderr — its error text, a repository's text inside
+// it — stays out.
+var clonePhases = []string{
+	"Enumerating objects",
+	"Counting objects",
+	"Compressing objects",
+	"Receiving objects",
+	"Resolving deltas",
+	"Checking out files",
+}
+
+// clonePhaseName names the phase a progress segment reports being in, and answers "" for any other
+// line. A count must follow the colon, which is the shape git writes: "Receiving objects:  42%
+// (123/456)" and "Enumerating objects: 23, done." both carry one, an error line carries none.
+func clonePhaseName(segment string) string {
+	for _, phase := range clonePhases {
+		rest, ok := strings.CutPrefix(segment, phase+":")
+		if !ok {
+			continue
+		}
+		rest = strings.TrimLeft(rest, " ")
+		if rest == "" || rest[0] < '0' || rest[0] > '9' {
+			continue
+		}
+		return phase
+	}
+	return ""
+}
+
 // CloneAllowedProtocols is the transport allowlist for every clone: the URL
 // schemes git may use. Helper transports (ext:, fd:, python:) are absent on purpose.
 var CloneAllowedProtocols = []string{"http", "https", "git", "ssh", "file"}
@@ -141,8 +171,9 @@ func submoduleEnv(widen []string) []string {
 	return envWithPinned(submodulePinned, append([]string{"GIT_ALLOW_PROTOCOL=" + strings.Join(submoduleProtocols, ":")}, widen...)...)
 }
 
-// CloneContext clones under ctx on the allowed transports, reporting the percentage whenever it increases.
-func CloneContext(ctx context.Context, src, dst string, onProgress func(percent int)) (string, error) {
+// CloneContext clones under ctx on the allowed transports, reporting the percentage whenever it
+// increases and the phase whenever it changes. Either report may be nil.
+func CloneContext(ctx context.Context, src, dst string, onProgress func(percent int), onPhase func(phase string)) (string, error) {
 	// `git clone` is silent on stdout — stderr carries both progress and
 	// errors, so discarding stdout is safe.
 	cmd := CommandContext(ctx, "", CloneArgs(src, dst)...)
@@ -159,16 +190,27 @@ func CloneContext(ctx context.Context, src, dst string, onProgress func(percent 
 
 	var out bytes.Buffer
 	last := -1
+	lastPhase := ""
 	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		_, _ = out.WriteString(line + "\n")
+		// Git rewrites the progress line in place with carriage returns, so a
+		// single scanned "line" (newline-terminated) can contain many updates.
+		if onPhase != nil {
+			for _, segment := range strings.Split(line, "\r") {
+				phase := clonePhaseName(segment)
+				if phase == "" || phase == lastPhase {
+					continue
+				}
+				lastPhase = phase
+				onPhase(phase)
+			}
+		}
 		if onProgress == nil {
 			continue
 		}
-		// Git rewrites the progress line in place with carriage returns, so a
-		// single scanned "line" (newline-terminated) can contain many updates.
 		for _, m := range cloneProgressRe.FindAllStringSubmatch(line, -1) {
 			pct, convErr := strconv.Atoi(m[1])
 			if convErr != nil || pct <= last {

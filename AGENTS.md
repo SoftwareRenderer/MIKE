@@ -185,7 +185,9 @@ make test-podman-state                                   # the image entrypoint'
   "highlighted" store. `docs/navigation.md`.
 - **Project rows and task cards are real links**; never fake the context menu. `docs/link-rows.md`.
 - **Adding a project navigates to its board**, and a clone's row is on screen while the clone runs — a
-  placeholder address is never a Back entry. `docs/link-rows.md → A project the app just made`.
+  placeholder address is never a Back entry. While that row holds the screen, the backlog column's
+  add-task slot holds the add's bar and nothing may create a task; a clone that fails keeps the screen
+  with git's output until it is dismissed. `docs/link-rows.md → A project the app just made`.
 - **Shortcuts and UI preferences ride the shared Settings Save/Cancel flow**, and `PUT /api/config` replaces
   the whole `keyboard_shortcuts` object, so always send every binding. `docs/adding-a-preference.md`.
 - **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
@@ -470,6 +472,9 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
 The client distinguishes a cancellation from a lost connection and treats neither as a deadline: an abort
 never marks the app offline, and nothing in the product puts a deadline on a wait for this server.
 
+- **The reconnecting banner waits a grace period before it is painted** — a socket that comes back inside it
+  is neither drawn nor announced, and the connection flag still reports the outage to everything else.
+  `docs/reconnection.md → The Reconnecting Banner Waits a Grace Period`.
 - **A write queues while offline, and so does a write that got no answer** — `writeOrQueue` decides that at
   the api layer. A request carrying a plaintext secret is refused rather than queued, because the queue is
   persisted.

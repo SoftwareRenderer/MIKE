@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -20,6 +21,7 @@ import (
 	"mike/backend/store"
 	"mike/backend/testutil/teststore"
 	"mike/backend/types"
+	"mike/pkg/subproc"
 
 	"mike/backend/sandbox"
 )
@@ -173,6 +175,7 @@ func TestHandleCloneStreamsProgress(t *testing.T) {
 
 	sawProgress := false
 	var lastPct int
+	var statuses []string
 	for i, ev := range events {
 		switch ev["type"] {
 		case "progress":
@@ -188,7 +191,11 @@ func TestHandleCloneStreamsProgress(t *testing.T) {
 				t.Fatalf("progress not strictly increasing at event %d: %v", i, events)
 			}
 			lastPct = int(pct)
-		case "status", "done":
+		case "status":
+			if m, ok := ev["message"].(string); ok {
+				statuses = append(statuses, m)
+			}
+		case "done":
 		case "error":
 			t.Fatalf("unexpected error event: %v", ev)
 		default:
@@ -197,6 +204,11 @@ func TestHandleCloneStreamsProgress(t *testing.T) {
 	}
 	if !sawProgress {
 		t.Fatal("no progress events")
+	}
+	// A percentage says how far, never what for: the phase line the percentage came from has to
+	// reach the reader as its own frame, or the board can only show a bar with no words.
+	if !slices.Contains(statuses, "Receiving objects...") {
+		t.Errorf("no status frame named the phase the clone was in (statuses: %v)", statuses)
 	}
 	if lastPct != 100 {
 		t.Fatalf("final progress = %d, want 100", lastPct)
@@ -222,6 +234,71 @@ func TestHandleCloneStreamsProgress(t *testing.T) {
 	// The project must be persisted.
 	if _, err := h.store.GetProject(proj["id"].(string)); err != nil {
 		t.Fatalf("project not persisted: %v", err)
+	}
+}
+
+// A clone git itself refuses has to be readable, so the error frame carries git's own lines kept apart.
+func TestHandleCloneFailureAnswersWithGitsOwnLines(t *testing.T) {
+	h, _ := testProjectHandlerGranted(t)
+	tmp := t.TempDir()
+	workspace := filepath.Join(tmp, "workspace")
+	if err := os.MkdirAll(workspace, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	body, _ := json.Marshal(types.CreateProjectRequest{Path: workspace, GitURL: "file://" + filepath.Join(tmp, "no-such-repo")})
+	req := httptest.NewRequest(http.MethodPost, "/api/projects/clone", strings.NewReader(string(body)))
+	rr := httptest.NewRecorder()
+	h.HandleClone(rr, req)
+
+	events := readSSEEvents(t, rr.Body)
+	last := events[len(events)-1]
+	if last["type"] != "error" {
+		t.Fatalf("last event = %v, want an error", last)
+	}
+	detail, _ := last["detail"].(string)
+	if !strings.Contains(detail, "does not appear to be a git repository") {
+		t.Errorf("detail = %q, want git's own reason", detail)
+	}
+	if !strings.Contains(detail, "\n") {
+		t.Errorf("detail = %q, want git's lines kept apart", detail)
+	}
+	projects, err := h.store.ListProjects()
+	if err != nil {
+		t.Fatalf("list projects: %v", err)
+	}
+	for _, p := range projects {
+		if strings.HasPrefix(p.Path, workspace) {
+			t.Errorf("a failed clone stored a project row for %s", p.Path)
+		}
+	}
+}
+
+// The detail is subprocess bytes into a browser: a typed credential is not echoed back, and a verbose
+// failure is bounded.
+func TestCloneFailureDetailRedactsAndBoundsGitsOutput(t *testing.T) {
+	out := "Cloning into '/tmp/w/x'...\n" +
+		"fatal: unable to access 'https://someone:sekret@github.com/someone/x/': Authentication failed\n" +
+		"some noise\n" +
+		"fatal: repository 'https://github.com/someone/x/' not found\n"
+	detail := cloneFailureDetail(out)
+	if strings.Contains(detail, "sekret") {
+		t.Errorf("the credential in the address was echoed back: %q", detail)
+	}
+	if !strings.Contains(detail, "github.com/someone/x") {
+		t.Errorf("the address itself did not survive: %q", detail)
+	}
+	if !strings.HasSuffix(detail, "not found") {
+		t.Errorf("the line that explains the failure did not survive: %q", detail)
+	}
+
+	long := strings.Repeat("remote: Counting objects endlessly\n", 4000)
+	if got := cloneFailureDetail(long); len(got) > subproc.AnswerTailMax+len("…") {
+		t.Errorf("detail = %d bytes, want at most %d", len(got), subproc.AnswerTailMax)
+	}
+
+	if got := cloneFailureDetail(""); got != "" {
+		t.Errorf("detail of nothing = %q, want nothing", got)
 	}
 }
 

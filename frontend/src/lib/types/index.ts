@@ -56,16 +56,23 @@ export interface SandboxMemoryStats {
     oom_kills: number;
 }
 
+/** What a stopped clone leaves to read: the sentence, and git's own lines. */
+export interface CloneFailureInfo {
+    message: string;
+    detail: string;
+}
+
 export interface Project {
     id: string;
     name: string;
     path: string;
-    // Client-only flags for the in-flight "clone from git" placeholder row:
-    // `cloning` marks the optimistic sidebar entry (never persisted), and
-    // `cloneProgress` carries the 0-100 clone percentage streamed from the
-    // server while it runs.
+    // Client-only fields for the "clone from git" placeholder row (never persisted): `cloning` marks
+    // the entry the server has never seen, `cloneProgress` carries the streamed 0-100 percentage,
+    // `cloneStatus` the line the server last said, and `cloneFailure` what the add stopped with.
     cloning?: boolean;
     cloneProgress?: number;
+    cloneStatus?: string;
+    cloneFailure?: CloneFailureInfo;
     origin_branch?: string;
     sandbox_enabled?: boolean;
     sandbox_network_isolation?: boolean;

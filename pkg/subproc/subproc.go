@@ -111,6 +111,13 @@ func Watch(what string, after time.Duration, report func(format string, args ...
 // AnswerMax is how much of a subprocess's output a response or a message may carry.
 const AnswerMax = 300
 
+// Tail's bounds: an answer read as a block of text — a failed clone's output under a progress bar —
+// is bounded by lines and bytes rather than by AnswerMax.
+const (
+	AnswerTailLines = 20
+	AnswerTailMax   = 2048
+)
+
 // Summarize is what a subprocess said, bounded for a person to read: one line, at most max characters.
 // The whole of it belongs in the log, and a message wants a smaller bound than a log line does.
 func Summarize(out []byte, max int) string {
@@ -124,4 +131,32 @@ func Summarize(out []byte, max int) string {
 		cut--
 	}
 	return line[:cut] + "…"
+}
+
+// Tail is what a subprocess said at the end of its run, kept as lines: the last maxLines of output,
+// then cut to maxBytes from the front so what survives is the end.
+//
+// `\r` is a separator beside `\n` because a progress-reporting command rewrites its line in place: one
+// newline-delimited line of `git clone --progress` holds every percentage it ever printed.
+func Tail(out []byte, maxLines, maxBytes int) string {
+	var lines []string
+	for _, seg := range strings.Split(string(out), "\n") {
+		for _, part := range strings.Split(seg, "\r") {
+			if text := strings.TrimSpace(part); text != "" {
+				lines = append(lines, text)
+			}
+		}
+	}
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	text := strings.Join(lines, "\n")
+	if len(text) <= maxBytes {
+		return text
+	}
+	cut := len(text) - maxBytes
+	for cut < len(text) && !utf8.RuneStart(text[cut]) {
+		cut++
+	}
+	return "…" + text[cut:]
 }
