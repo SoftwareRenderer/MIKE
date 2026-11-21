@@ -132,6 +132,16 @@
         return /^[a-z0-9]{8}$/.test(id);
     }
 
+    /** The thinking a row may be owed, from one place: which branch draws an entry is about cards and
+     * layout, not about whether it can show reasoning, so the three branches must not decide that alone. */
+    function reasoningProps(entry: ChatEntry) {
+        return {
+            reasoningContent: entry.reasoningContent,
+            hasReasoning: entry.hasReasoning,
+            reasoningPending: entry.reasoningPending,
+        };
+    }
+
     // Which of the waits this line can speak about is the queue a click reorders; the rule is the helper's.
     const prioritizable = $derived(canPrioritize({ queuePosition, lockWait, taskStatus, taskExecutionState }));
 
@@ -515,7 +525,7 @@
                             </div>
                             <div class="divider-line"></div>
                         </div>
-                        <ChatMessage role="assistant" content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} reasoningPending={entry.reasoningPending} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} onEditSummary={entry.id === editableSummaryId ? (newContent) => editSummary(entry.id, newContent) : undefined} />
+                        <ChatMessage role="assistant" content={entry.content} {...reasoningProps(entry)} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} isLastUserMessage={false} isFirstUserMessage={false} taskStatus={taskStatus} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} onEditSummary={entry.id === editableSummaryId ? (newContent) => editSummary(entry.id, newContent) : undefined} />
                     </div>
                 {:else if entry.role === 'advisory'}
                     <div class="advisory-entry">
@@ -554,7 +564,7 @@
                     </div>
                 {:else if entry.role === 'user'}
                     <div class="sticky-user-message" data-entry-idx={entryIdx} data-entry-id={entry.id} data-user-msg-first-line={turnLabel(entry.content)}>
-                        <ChatMessage role={entry.role} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} reasoningPending={entry.reasoningPending} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={meta.isFirstUserMessage} turnInFlight={turnInFlight} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
+                        <ChatMessage role={entry.role} content={entry.content} {...reasoningProps(entry)} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={() => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={meta.isFirstUserMessage} turnInFlight={turnInFlight} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
                     </div>
                 {:else if entry.buildLog}
                     <div class="build-box">
@@ -589,7 +599,7 @@
                     </div>
                 {:else}
                     <div>
-                        <ChatMessage role={entry.role} severity={entry.severity} kind={entry.kind} content={entry.content} reasoningContent={entry.reasoningContent} hasReasoning={entry.hasReasoning} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={entry.role === 'system' ? () => onDismissError(entry.id) : () => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={meta.isFirstUserMessage} turnInFlight={turnInFlight} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
+                        <ChatMessage role={entry.role} severity={entry.severity} kind={entry.kind} content={entry.content} {...reasoningProps(entry)} isStreaming={entry.isStreaming || false} isOptimistic={isOptimisticId(entry.id)} timestamp={entry.createdAt} messageId={entry.id} attachments={entry.attachments} stats={entry.stats} toolCalls={entry.toolCalls || []} onDelete={entry.role === 'system' ? () => onDismissError(entry.id) : () => onMsgDelete(entry)} onFork={onMsgFork} onSend={onMsgSend} isLastUserMessage={meta.isLastUserMessage} isFirstUserMessage={meta.isFirstUserMessage} turnInFlight={turnInFlight} taskStatus={taskStatus} onRegenerate={entryIdx === lastEntryIdx ? () => onRegenerate(entry.id) : undefined} onNavigateTask={onNavigateTask} queued={entry.queued || false} {editDiffOverrides} onToggleEditDiff={handleEditDiffToggle} projectId={projectId} taskId={taskId} reasoningExpandedOverride={reasoningExpandedOverrides[entry.id]} onReasoningToggle={(exp) => handleReasoningToggle(entry.id, exp)} resolvedReasoningOverride={resolvedReasoningOverrides[entry.id]} onReasoningResolved={(content) => handleReasoningResolved(entry.id, content)} />
                     </div>
                 {/if}
                 </div>

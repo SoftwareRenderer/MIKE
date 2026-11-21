@@ -229,6 +229,7 @@ keeps its `chars`: it is the call's full total, and the client counts it into th
 reasoning costs the next call's context. A call that reasoned nothing sends no such frame, because a row named
 over an empty reasoning is a toggle over nothing.
 Tests: `backend/exec/loop_reasoning_test.go`, `stream-handler.unit.ts`,
+`chat-entries-collapsed-reasoning.unit.svelte.ts` (the notice survives whichever branch draws the entry),
 `frontend/tests/e2e/collapsed-reasoning.spec.ts`.
 
 ### A broken failure loop adds no frame shape

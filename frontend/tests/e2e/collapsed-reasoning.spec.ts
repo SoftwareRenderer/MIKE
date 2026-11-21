@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import {
-  apiGetJson, apiPutConfig, clearTasksAfterEach, createTaskViaApi, isolatedProject, messageRows,
+  apiGetJson, apiPutConfig, clearTasksAfterEach, createTaskViaApi, csrfFetch, isolatedProject, messageRows,
   navigateToTask, ownProjectId, sendTurn, waitForChatForm, waitForConfig, waitForSendButton,
   waitForTaskState, notInFlight,
 } from './helpers';
@@ -113,5 +113,42 @@ test.describe('a collapsed reasoning stream', () => {
     // Without the preference the words come as they are written and no count frame is owed.
     expect(frames.some((f) => f.includes(REASONING))).toBe(true);
     expect(frames.some((f) => f.includes('"reasoning_progress"'))).toBe(false);
+  });
+
+  // The mid-stream half: the count is all the browser is given, and the notice is all the reader gets from
+  // it. The fast fixture answers before a screen can be read, so this pins the same chunks at one per 100ms.
+  test('says the call is thinking while its reasoning is still arriving', async ({ page }) => {
+    test.setTimeout(120_000);
+
+    await apiPutConfig(page, { collapse_reasoning: true });
+    await waitForConfig(page, (c) => c.collapse_reasoning === true);
+
+    const taskId = await createTaskViaApi(page, ownProjectId(), `thinking-${Date.now()} llm-fixture:text`);
+    const frames = recordFrames(page);
+    await navigateToTask(page, taskId);
+    await waitForChatForm(page);
+    await waitForTaskState(page, ownProjectId(), taskId, notInFlight, 60_000);
+    await waitForSendButton(page);
+
+    const seen = frames.length;
+    // `sendTurn` waits for the answer, and this test reads the screen before the answer exists.
+    const sent = await csrfFetch(page, `/api/projects/${ownProjectId()}/tasks/${taskId}/send`, {
+      method: 'POST', body: { content: `think about this ${Date.now()} llm-fixture:text_response_reasoning_slow` },
+    });
+    expect(sent.ok).toBe(true);
+
+    await expect
+      .poll(() => frames.slice(seen).filter((f) => f.includes('"reasoning_progress"')).length, { timeout: 30_000 })
+      .toBeGreaterThan(0);
+
+    const notice = page.locator('.reasoning-pending');
+    await expect(notice).toBeVisible();
+    await expect(notice).toContainText('Processing');
+    await expect(notice).toContainText('tok/s');
+    // A toggle over reasoning that has not finished arriving is the same claim made twice.
+    await expect(page.locator('.reasoning-toggle')).toHaveCount(0);
+
+    await waitForTaskState(page, ownProjectId(), taskId, notInFlight, 60_000);
+    expect((await messageRows(page, ownProjectId(), taskId)).some((r) => r.role === 'assistant')).toBe(true);
   });
 });

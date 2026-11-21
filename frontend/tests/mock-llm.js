@@ -159,6 +159,9 @@ const FIXTURES_BY_NAME = {
     tool_call_fail: [toolCallFail, 1],
     tool_call_loop: [toolCallLoop, 1],
     text_response_reasoning: [textResponseReasoning, 1],
+    // A collapsed turn is only observable while its count stream is in flight, and at 1ms the whole turn is
+    // over before a screen can be read. Same chunks, one chunk per 100ms.
+    text_response_reasoning_slow: [textResponseReasoning, 100],
     // Title routing streams the selected fixture's content, so a spec that needs a long title, and so a long
     // branch name, pins this one instead of hoping the keyword route answers something long.
     title_long: [titleLong, 1],
