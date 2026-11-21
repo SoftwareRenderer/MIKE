@@ -68,10 +68,10 @@ export interface Project {
     path: string;
     // Client-only fields for the "clone from git" placeholder row (never persisted): `cloning` marks
     // the entry the server has never seen, `cloneProgress` carries the streamed 0-100 percentage,
-    // `cloneStatus` the line the server last said, and `cloneFailure` what the add stopped with.
+    // `cloneLog` the lines the server said in order, and `cloneFailure` what the add stopped with.
     cloning?: boolean;
     cloneProgress?: number;
-    cloneStatus?: string;
+    cloneLog?: string[];
     cloneFailure?: CloneFailureInfo;
     origin_branch?: string;
     sandbox_enabled?: boolean;

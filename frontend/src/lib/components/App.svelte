@@ -3,7 +3,7 @@
     import { onMount, onDestroy, tick, untrack } from 'svelte';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard, applyResolvedTasksToBoard } from '$lib/stores';
     import { errorText } from '$lib/utils/error-text';
-    import { projectAddPending } from '$lib/utils/board-pending';
+    import { addInProgress } from '$lib/utils/board-pending';
     import { t } from '$lib/i18n';
     import Spinner from './Spinner.svelte';
     import EmptyState from './EmptyState.svelte';
@@ -232,11 +232,13 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     function terminalShortcutEnabled(): boolean {
         return !!appStore.selectedProject && !urlRouter.terminalOnly && !isAnyModalOpen();
     }
+    /** What the backlog column's add slot holds: the bar of an add in flight, or nothing. */
+    const boardPending = $derived(addInProgress(appStore.projects, appStore.selectedProject?.id));
     useKeyboardShortcuts({
         isEnabled: boardShortcutsEnabled,
         onCreateTask: () => {
             // The button is not offered for a project the server has never seen, and neither is the key.
-            if (projectAddPending(appStore.selectedProject)) return;
+            if (boardPending) return;
             uiStore.creatingChildOf = null;
             uiStore.showCreateTask = true;
         },
@@ -247,8 +249,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     useBoardArrowNav({ isEnabled: boardShortcutsEnabled });
 
     let hasProviders = $derived(!!appStore.config?.providers?.length);
-    /** What the backlog column's add slot holds: the bar of an add in flight, or nothing. */
-    const boardPending = $derived(projectAddPending(appStore.selectedProject));
     let pageTitle = $derived(computePageTitle());
     let hasReview = $derived.by(() => {
         const project = appStore.selectedProject;
@@ -1074,7 +1074,10 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                     if (update.percent !== undefined) {
                         return x.cloneProgress === update.percent ? x : { ...x, cloneProgress: update.percent };
                     }
-                    return x.cloneStatus === update.status ? x : { ...x, cloneStatus: update.status };
+                    const line = update.status;
+                    // One line per thing the server said; a repeated line adds nothing to read.
+                    if (line === undefined || x.cloneLog?.includes(line)) return x;
+                    return { ...x, cloneLog: [...(x.cloneLog ?? []), line] };
                 });
             });
             const list = appStore.projects;
@@ -1090,8 +1093,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                 await selectProject(proj, false, { board: true });
             }
         } catch (e) {
-            // The row keeps the screen and holds what the clone said: nothing here recovers the add,
-            // and the message is the one thing the person can act on.
+            // The row keeps the screen and holds what the clone said; nothing here recovers the add.
             appStore.projects = appStore.projects.map(p => p.id === placeholderId
                 ? { ...p, cloneFailure: { message: errorText(e, t('api.cloneFailed')), detail: e instanceof CloneFailure ? e.detail : '' } }
                 : p);

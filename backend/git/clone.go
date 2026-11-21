@@ -12,9 +12,9 @@ import (
 	"strings"
 )
 
-// cloneProgressRe matches the "Receiving objects: 42% (123/456)..." lines that
-// `git clone --progress` writes to stderr. It is the only progress signal a clone
-// gives that increases monotonically — other phases report no percent.
+// cloneProgressRe reads the percentage off `git clone --progress`'s "Receiving objects: 42% (123/456)"
+// line. No other phase's percentage feeds the bar: an earlier phase reaches its own 100% before a byte of
+// the repository has arrived.
 var cloneProgressRe = regexp.MustCompile(`Receiving objects:\s+(\d{1,3})%`)
 
 // clonePhases are the phases `git clone --progress` names. Only these reach the browser as what the
@@ -29,9 +29,9 @@ var clonePhases = []string{
 	"Checking out files",
 }
 
-// clonePhaseName names the phase a progress segment reports being in, and answers "" for any other
-// line. A count must follow the colon, which is the shape git writes: "Receiving objects:  42%
-// (123/456)" and "Enumerating objects: 23, done." both carry one, an error line carries none.
+// clonePhaseName names the phase a progress segment reports being in, and answers "" for any other line.
+// A count must follow the colon, which every phase line git writes carries ("Receiving objects:  42%
+// (123/456)", "Enumerating objects: 23, done.") and no error line does.
 func clonePhaseName(segment string) string {
 	for _, phase := range clonePhases {
 		rest, ok := strings.CutPrefix(segment, phase+":")
@@ -196,8 +196,8 @@ func CloneContext(ctx context.Context, src, dst string, onProgress func(percent 
 	for scanner.Scan() {
 		line := scanner.Text()
 		_, _ = out.WriteString(line + "\n")
-		// Git rewrites the progress line in place with carriage returns, so a
-		// single scanned "line" (newline-terminated) can contain many updates.
+		// Git rewrites the progress line in place with carriage returns, so one scanned line holds
+		// many updates.
 		if onPhase != nil {
 			for _, segment := range strings.Split(line, "\r") {
 				phase := clonePhaseName(segment)

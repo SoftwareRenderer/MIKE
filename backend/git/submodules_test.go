@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mike/pkg/logging"
 )
 
 // These fixtures drive a real git with a real local remote, because what these tests ask is whether a task
@@ -454,6 +456,27 @@ func TestInitSubmodulesImportsDespiteAnUnreachableUpstream(t *testing.T) {
 	wt := taskWorktree(t, project, "task-unreachable")
 	if _, err := PopulateSubmodules(t.Context(), wt, project, PopulateOpts{}); err == nil {
 		t.Error("the task that needs the unfetched submodule must be the thing that stops")
+	}
+}
+
+// TestSubmoduleReporterRedactsTheAddressItQuotes: git writes the remote it failed to reach into its own
+// failure text, and these lines travel to the browser. The address a repository chose may carry a credential.
+func TestSubmoduleReporterRedactsTheAddressItQuotes(t *testing.T) {
+	t.Parallel()
+	logged, restore := logging.TestSink()
+	defer restore()
+
+	var got []string
+	report := submoduleReporter("/repos/project", func(l string) { got = append(got, l) })
+	report("submodule %s was not fetched: %s", "lib/x",
+		`fatal: could not read from remote repository "https://user:sekret@example.test/x.git"`)
+
+	const want = "example.test/x.git"
+	if len(got) != 1 || !strings.Contains(got[0], want) {
+		t.Fatalf("the reader never got the address git failed to reach: %v", got)
+	}
+	if strings.Contains(got[0], "sekret") || strings.Contains(logged.String(), "sekret") {
+		t.Errorf("the credential in the address survived to the reader and the log: %q / %s", got[0], logged.String())
 	}
 }
 

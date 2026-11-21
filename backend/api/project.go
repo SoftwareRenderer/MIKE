@@ -111,10 +111,15 @@ func (h *ProjectHandler) HandleCounts(w http.ResponseWriter, r *http.Request) {
 // importSubmodules fetches the submodules of a repository MIKE has just taken in (git.InitSubmodules), and
 // never fails the import: a submodule whose upstream is unreachable is the log's and the task's to report, not
 // a reason a person cannot use MIKE with this project. onStatus, which may be nil, hears each outcome worth
-// reporting.
+// reporting — including the one line that says none of them could be read, which is otherwise the log's alone.
 func (h *ProjectHandler) importSubmodules(ctx context.Context, path string, onStatus func(string)) {
-	if _, err := git.InitSubmodules(ctx, path, h.submoduleFetch, onStatus); err != nil {
-		logging.For(logging.Git).Warnf("submodules of %s could not be read: %v", path, err)
+	_, err := git.InitSubmodules(ctx, path, h.submoduleFetch, onStatus)
+	if err == nil {
+		return
+	}
+	logging.For(logging.Git).Warnf("submodules of %s could not be read: %v", path, err)
+	if onStatus != nil {
+		onStatus("the project's submodules could not be read: " + subproc.Summarize([]byte(err.Error()), subproc.AnswerMax))
 	}
 }
 
@@ -412,13 +417,10 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		logging.For(logging.Git).Warnf("clone %s into %s failed: %s", types.RedactURL(req.GitURL), targetPath, strings.TrimSpace(out))
-		// Git's own words stay with the failure: whoever typed the address is the only one who can
-		// act on them.
 		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": "git clone failed", "detail": cloneFailureDetail(out)})
 		return
 	}
 
-	// Each submodule outcome the person would want is a status line on the stream the clone used.
 	sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": "Fetching submodules..."})
 	h.importSubmodules(r.Context(), targetPath, func(line string) {
 		sendEvent(map[string]any{"type": string(types.SSETypeStatus), "message": line})

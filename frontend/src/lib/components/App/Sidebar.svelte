@@ -49,12 +49,15 @@
         onAddProject: () => void;
     } = $props();
 
+    /** An add still running: a clone that stopped is a row a person reads and clicks again. */
+    const cloneInFlight = (p: Project) => !!p.cloning && !p.cloneFailure;
+
     /** Arrows on project items: Up/Down select prev/next (click + wrap); Right/Left jump to the first board/done card. */
     function handleProjectItemKeydown(e: KeyboardEvent, idx: number, p: Project) {
         // role="button" promises Space activates; a native anchor only does that for Enter.
         if (e.key === ' ') {
             e.preventDefault();
-            if (!p.cloning || p.cloneFailure) onSelectProject(p);
+            if (!cloneInFlight(p)) onSelectProject(p);
             return;
         }
         if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
@@ -101,9 +104,7 @@
 
     /** An unmodified click navigates in-app; a modifier click is the browser's (new tab/window). */
     function handleProjectClick(e: MouseEvent, p: Project) {
-        // A cloning row renders no href, so there is nothing to open; a stopped clone is clickable,
-        // which is how its message comes back.
-        if (p.cloning && !p.cloneFailure) return;
+        if (cloneInFlight(p)) return;
         if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         onSelectProject(p);
@@ -142,13 +143,13 @@
                 <div class="project-item-content">
                     <a
                         class="project-item"
-                        class:cloning={p.cloning}
+                        class:cloning={cloneInFlight(p)}
                         href={p.cloning ? undefined : projectHref(p)}
                         role="button"
                         tabindex="0"
                         onkeydown={(e) => handleProjectItemKeydown(e, i, p)}
                         onclick={(e) => handleProjectClick(e, p)}
-                        aria-busy={p.cloning && !p.cloneFailure ? 'true' : undefined}
+                        aria-busy={cloneInFlight(p) ? 'true' : undefined}
                         title={projectTitle(p)}
                     >
                         {#if isMobile || !collapsed}
@@ -163,7 +164,7 @@
                             {/if}
                         {/if}
                         <span class="project-name">{p.name}</span>
-                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} class:cloning={p.cloning && !p.cloneFailure}>
+                        <span class="project-abbr" class:project-abbr-no-sandbox={!p.sandbox_enabled} class:cloning={cloneInFlight(p)}>
                             {getProjectAbbr(p.name)}
                         </span>
                         {#if p.cloning && (isMobile || !collapsed)}
@@ -190,7 +191,7 @@
                         {/if}
                     </a>
                 </div>
-                {#if (isMobile || !collapsed) && (!p.cloning || p.cloneFailure)}
+                {#if (isMobile || !collapsed) && !cloneInFlight(p)}
                 <button
                     class="project-remove-btn"
                     onclick={(e) => { e.stopPropagation(); onRemoveProject(p); }}
@@ -366,7 +367,6 @@
     .project-item.cloning {
         cursor: progress;
     }
-    /* Clone progress bar (determinate — width set inline from streamed %) */
     .clone-progress {
         flex: 1;
         min-width: 48px;
@@ -382,7 +382,6 @@
         background: var(--color-accent);
         transition: width var(--dur-md) ease;
     }
-    /* Stopped, not finished: the bar keeps the percentage it reached. */
     .clone-progress.failed .clone-progress-bar {
         background: var(--color-status-red);
     }

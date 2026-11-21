@@ -193,7 +193,7 @@ async function cloneProjectRaw(
     }
 
     let project: Project | null = null;
-    let failure: CloneFailureInfo | null = null;
+    let failure: CloneFailure | null = null;
 
     for await (const frame of readEventStream(res)) {
         const event = parseCloneEvent(frame.data);
@@ -205,11 +205,11 @@ async function cloneProjectRaw(
         } else if (event.type === 'done') {
             project = event.project;
         } else if (event.type === 'error') {
-            failure = { message: event.message, detail: event.detail };
+            failure = new CloneFailure(event.message, event.detail);
         }
     }
 
-    if (failure) throw new CloneFailure(failure.message, failure.detail);
+    if (failure) throw failure;
     if (!project) throw new Error(t('api.cloneCompletedWithoutResult'));
     return project;
 }

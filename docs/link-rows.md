@@ -41,11 +41,13 @@ no cached mirror, no project subscription, no `last_project` setting. When the c
 project is selected with `push = false` — an address the server never served is a dead entry under the
 back button.
 
-**While a project is being added, its add-task slot belongs to the add.** `projectAddPending`
-(`src/lib/utils/board-pending.ts`) is the one reading that says so: `null` for a row the server has, and
-for a `cloning` row the bar's percentage, the line the stream last said, and — when the add stopped — what
-git said. The backlog column renders that box in place of its `+ Create Task` button and in place of the
-header's icon-only add; `Board` hands no `onAddTask` to any column; and the create-task shortcut returns
+**While a project is being added, its add-task slot belongs to the add.** `addInProgress`
+(`src/lib/utils/board-pending.ts`) is the one reading that says so. It answers `null` for a row the server
+has. For a `cloning` row it answers the bar's percentage, the lines the stream said, and — when the add
+stopped — what git said. The newest line is the caption and the earlier ones sit above it, the submodule
+outcomes among them. It reads the row the project list holds, never the selected object, which a clone's own
+updates do not touch. `Column` owns the suppression: with `pending` set it renders the box in place of its
+`+ Create Task` button and in place of the header's icon-only add; the create-task shortcut returns
 without opening the modal. A task created against `clone-pending-…` would name a project the server has
 never seen. The sidebar keeps its own slim bar for the same row.
 
