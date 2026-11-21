@@ -64,6 +64,23 @@ describe('the backlog column while its project is being added', () => {
         expect(bar(container)).not.toBeNull();
         expect(bar(container)?.getAttribute('aria-valuenow')).toBe('42');
         expect(caption(container)?.textContent).toBe('Receiving objects...');
+        expect(container.querySelector('.pending-percent')?.textContent).toBe('42%');
+    });
+
+    it('draws an indeterminate bar where git has no number to show', () => {
+        // git prints its 100% before the deltas, the checkout and the submodules, and prints nothing
+        // at all while the remote is still counting and compressing.
+        const { container } = renderColumn(pendingOf({
+            cloneProgress: 100,
+            cloneLog: ['Receiving objects...', 'Fetching submodules...'],
+        }));
+
+        const track = bar(container) as HTMLElement;
+        expect(track.className).toContain('indeterminate');
+        expect(track.getAttribute('aria-valuenow')).toBeNull();
+        expect(track.getAttribute('aria-valuemax')).toBeNull();
+        expect(container.querySelector('.pending-percent')).toBeNull();
+        expect(caption(container)?.textContent).toBe('Fetching submodules...');
     });
 
     it('lists what the add said before now, in the order it was said', () => {

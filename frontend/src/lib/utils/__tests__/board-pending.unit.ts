@@ -36,7 +36,7 @@ describe('addInProgress', () => {
     });
 
     it('names the wait when the stream has said no line yet', () => {
-        expect(reading()).toEqual({ failed: false, percent: 0, caption: 'Adding project…', history: [], detail: '' });
+        expect(reading()).toEqual({ failed: false, percent: null, caption: 'Adding project…', history: [], detail: '' });
     });
 
     it('puts the newest line in the caption and the rest above it, in the order they were said', () => {
@@ -54,11 +54,27 @@ describe('addInProgress', () => {
         expect(pending?.history).toEqual(lines.slice(12, 19));
     });
 
-    it('keeps a percentage a bar can be drawn at', () => {
+    it('draws the number only while it can still move', () => {
+        expect(reading({ cloneProgress: 1 })?.percent).toBe(1);
         expect(reading({ cloneProgress: 42 })?.percent).toBe(42);
-        expect(reading({ cloneProgress: 140 })?.percent).toBe(100);
-        expect(reading({ cloneProgress: -5 })?.percent).toBe(0);
-        expect(reading({ cloneProgress: NaN })?.percent).toBe(0);
+        expect(reading({ cloneProgress: 99 })?.percent).toBe(99);
+    });
+
+    it("draws no number where git's count measures nothing", () => {
+        // 0 is the remote still counting and compressing; 100 is printed before the deltas, the
+        // checkout and the submodules. A value out of range clamps into one of those two.
+        expect(reading({ cloneProgress: 0 })?.percent).toBeNull();
+        expect(reading({ cloneProgress: 100 })?.percent).toBeNull();
+        expect(reading({ cloneProgress: 140 })?.percent).toBeNull();
+        expect(reading({ cloneProgress: -5 })?.percent).toBeNull();
+        expect(reading({ cloneProgress: NaN })?.percent).toBeNull();
+        expect(reading({})?.percent).toBeNull();
+    });
+
+    it('keeps the number a stopped add reached, even at the ends of the range', () => {
+        const stopped = { message: 'git clone failed', detail: '' };
+        expect(reading({ cloneProgress: 0, cloneFailure: stopped })?.percent).toBe(0);
+        expect(reading({ cloneProgress: 100, cloneFailure: stopped })?.percent).toBe(100);
     });
 
     it('follows the row, not the object the selection is holding', () => {

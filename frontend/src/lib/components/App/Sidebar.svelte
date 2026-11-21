@@ -9,6 +9,7 @@
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { boardEdgeCard } from '$lib/composables/use-board-arrow-nav';
     import { projectBoardHref } from '$lib/utils/app-link';
+    import { cloneBarPercent } from '$lib/utils/board-pending';
     import { useStandaloneDisplay } from '$lib/composables/use-standalone-display.svelte';
     import discardIcon from '$lib/assets/icons/discard.svg?raw';
     // UI extension injection point — re-render when extensions change
@@ -113,9 +114,9 @@
     /** What the row's own name cannot say: a clone in flight or stopped, or a Review count waiting. */
     function projectTitle(p: Project): string {
         if (p.cloning) {
-            return p.cloneFailure
-                ? t('app.sidebar.cloneFailedTitle', { message: p.cloneFailure.message })
-                : t('app.sidebar.cloningTitle', { progress: p.cloneProgress ?? 0 });
+            if (p.cloneFailure) return t('app.sidebar.cloneFailedTitle', { message: p.cloneFailure.message });
+            const shown = cloneBarPercent(p);
+            return shown === null ? t('app.sidebar.cloningNoPercentTitle') : t('app.sidebar.cloningTitle', { progress: shown });
         }
         const review = projectCounts[p.id]?.review ?? 0;
         if (review > 0) return t('app.sidebar.reviewTitle', { name: p.name, count: review });
@@ -169,8 +170,10 @@
                         </span>
                         {#if p.cloning && (isMobile || !collapsed)}
                             <!-- Determinate clone progress (streamed from the server) -->
-                            <span class="clone-progress" class:failed={!!p.cloneFailure} role="progressbar" aria-label={t('app.sidebar.cloneProgressAria')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={p.cloneProgress ?? 0}>
-                                <span class="clone-progress-bar" style={`width: ${p.cloneProgress ?? 0}%`}></span>
+                            {@const shown = cloneBarPercent(p)}
+                            <span class="clone-progress" class:failed={!!p.cloneFailure} class:indeterminate={shown === null} role="progressbar" aria-label={t('app.sidebar.cloneProgressAria')}
+                                  aria-valuemin={shown !== null ? 0 : undefined} aria-valuemax={shown !== null ? 100 : undefined} aria-valuenow={shown ?? undefined}>
+                                <span class="clone-progress-bar" style={shown !== null ? `width: ${shown}%` : undefined}></span>
                             </span>
                         {:else if (isMobile || !collapsed) && hasActiveStats(p.id)}
                             <!-- Backlog is intentionally not shown; a badge appears only when its count is > 0 -->
@@ -381,6 +384,15 @@
         border-radius: inherit;
         background: var(--color-accent);
         transition: width var(--dur-md) ease;
+    }
+    .clone-progress.indeterminate .clone-progress-bar {
+        width: 33%;
+        transition: none;
+        animation: clone-track-sweep 1.2s ease-in-out infinite;
+    }
+    @keyframes clone-track-sweep {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(400%); }
     }
     .clone-progress.failed .clone-progress-bar {
         background: var(--color-status-red);

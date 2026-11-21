@@ -160,6 +160,18 @@ describe('a project row whose clone stopped', () => {
         expect(container.querySelector('.project-remove-btn')).not.toBeNull();
     });
 
+    it('says the clone runs without a percentage git has not measured', () => {
+        // A row at 0% is a remote still counting objects; a row at 100% is deltas, checkout and
+        // submodules still to come. Neither is a distance the person can read off a bar.
+        const { container } = renderSidebar({ projects: [makeProject('clone-pending-3', 'repo', { cloning: true, cloneProgress: 0 })] });
+
+        const row = container.querySelector('.project-item') as HTMLElement;
+        expect(row.getAttribute('title')).toBe('Cloning repository…');
+        const track = container.querySelector('.clone-progress') as HTMLElement;
+        expect(track.className).toContain('indeterminate');
+        expect(track.getAttribute('aria-valuenow')).toBeNull();
+    });
+
     it('offers nothing to remove while the clone still runs', () => {
         const running = makeProject('clone-pending-2', 'repo', { cloning: true, cloneProgress: 20 });
         const { container } = renderSidebar({ projects: [running] });

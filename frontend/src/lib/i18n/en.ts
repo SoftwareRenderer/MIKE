@@ -1072,6 +1072,7 @@ const catalog = {
     // The project row's tooltip says what the row's own name cannot: a clone in flight,
     // or a Review count waiting.
     'app.sidebar.cloningTitle': 'Cloning repository… ({progress}%)',
+    'app.sidebar.cloningNoPercentTitle': 'Cloning repository...',
     // A clone that stopped keeps its row until the person dismisses it, and the row says so.
     'app.sidebar.cloneFailedTitle': 'Clone failed: {message}',
     'app.sidebar.reviewTitle': {

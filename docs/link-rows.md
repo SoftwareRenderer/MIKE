@@ -46,10 +46,13 @@ back button.
 has. For a `cloning` row it answers the bar's percentage, the lines the stream said, and — when the add
 stopped — what git said. The newest line is the caption and the earlier ones sit above it, the submodule
 outcomes among them. It reads the row the project list holds, never the selected object, which a clone's own
-updates do not touch. `Column` owns the suppression: with `pending` set it renders the box in place of its
-`+ Create Task` button and in place of the header's icon-only add; the create-task shortcut returns
-without opening the modal. A task created against `clone-pending-…` would name a project the server has
-never seen. The sidebar keeps its own slim bar for the same row.
+updates do not touch. `cloneBarPercent` decides when that number means anything: `git clone --progress`
+counts objects received and prints its 100% before the deltas, the checkout and the submodules, so 0 and 100
+draw an indeterminate bar instead. A stopped add keeps the number it reached. `Column` owns the suppression:
+with `pending` set it renders the box in place of its `+ Create Task` button and in place of the header's
+icon-only add; the create-task shortcut returns without opening the modal. A task created against
+`clone-pending-…` would name a project the server has never seen. The sidebar's slim bar reads the same
+`cloneBarPercent`, so one clone is never drawn two ways.
 
 **A clone that fails keeps the screen.** The row stays selected, its bar stops where it was, and the box
 holds the message with git's lines under it. Nothing there recovers the add: the person who typed the

@@ -4,14 +4,19 @@
 
     /** The backlog column's add-task slot while its project has no row on the server. */
     let { pending, onDismiss }: { pending: BoardPending; onDismiss?: () => void } = $props();
+
+    const measuring = $derived(pending.percent !== null);
 </script>
 
 <div class="pending-add" class:failed={pending.failed}>
     <div class="pending-bar-row">
-        <span class="pending-bar" role="progressbar" aria-label={t('board.pending.progressAria')} aria-valuemin={0} aria-valuemax={100} aria-valuenow={pending.percent}>
-            <span class="pending-bar-fill" style={`width: ${pending.percent}%`}></span>
+        <span class="pending-bar" class:indeterminate={!measuring} role="progressbar" aria-label={t('board.pending.progressAria')}
+              aria-valuemin={measuring ? 0 : undefined} aria-valuemax={measuring ? 100 : undefined} aria-valuenow={pending.percent ?? undefined}>
+            <span class="pending-bar-fill" style={measuring ? `width: ${pending.percent}%` : undefined}></span>
         </span>
-        <span class="pending-percent">{pending.percent}%</span>
+        {#if measuring}
+            <span class="pending-percent">{pending.percent}%</span>
+        {/if}
     </div>
     {#if pending.history.length}
         <ul class="pending-history">
@@ -59,6 +64,16 @@
         border-radius: inherit;
         background: var(--color-accent);
         transition: width var(--dur-md) ease;
+    }
+    /* Nothing to measure: the bar says the add is running, not how far it has come. */
+    .pending-bar.indeterminate .pending-bar-fill {
+        width: 33%;
+        transition: none;
+        animation: pending-sweep 1.2s ease-in-out infinite;
+    }
+    @keyframes pending-sweep {
+        from { transform: translateX(-100%); }
+        to { transform: translateX(400%); }
     }
     .pending-add.failed .pending-bar-fill {
         background: var(--color-status-red);
