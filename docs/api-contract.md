@@ -668,8 +668,11 @@ Tests: `backend/stream/diff_stats_producers_test.go`.
 **An absent committed half stays absent.** `DiffCache.committedHalf` leaves `committedRows` out when the
 response carries none, and the committed section of `DiffViewer.svelte` tests `committedRows?.length` rather
 than truthiness. An empty array is a truthy "there is a committed half", which is what makes that section
-paint "Empty file" over the rows the file holds. Tests:
-`frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`.
+paint "Empty file" over the rows the file holds — and every absent slice arrives as one, because
+`encoding/json/v2` answers `nil` as `[]`. So every reader of these arrays asks for length, never for
+truthiness. Tests:
+`frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`,
+`frontend/src/lib/services/__tests__/diff-cache.unit.ts`.
 
 **The half a section draws is the half it counts.** A file carries two comparisons at once — `Rows` against
 HEAD and `CommittedRows` against the baseline — and `Added`/`Removed` are counted from the worktree half
@@ -677,7 +680,10 @@ alone. `DiffViewer.mergedHalf` prices the "Merged from Subtasks" section by coun
 so work merged in from a subtask says how many lines it changed even though it took no part in the worktree
 comparison. The committed patch is never truncated, so counting it is git's own count. `/diff/file` answers a
 file with no worktree half with `rows: []`, so an empty array there is the absence of that half, not a half of
-its own. Tests: `frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`.
+its own. The panel picks which half a file's answer is by length, not truthiness, for the same reason; that is
+how a binary file keeps its size and `isBinary`. Tests:
+`frontend/src/lib/components/__tests__/diff-merged-committed-half.unit.svelte.ts`,
+`frontend/src/lib/services/__tests__/diff-cache.unit.ts`.
 
 **Text a person only reads is repaired, not refused.** `fsutil.ToText` turns every run of bytes that was
 not decodable into one `U+FFFD`. It is applied where file or patch bytes become a JSON string — an

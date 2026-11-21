@@ -379,7 +379,7 @@
                 headRef: checkpointDiffHash,
                 baseRef: checkpointDiffBaseRef || undefined,
             });
-            const rows = data.rows ? enrichRowsWithInlineSegments(data.rows) : [];
+            const rows = data.rows?.length ? enrichRowsWithInlineSegments(data.rows) : [];
             checkpointDiffFiles = checkpointDiffFiles.map(f => f.path === path ? {
                 ...f,
                 rows,
@@ -961,7 +961,7 @@
         diffCache.setUntrackedMeta(path, { ...(diffCache.state.untracked[path] || {}), loading: true });
         try {
             const data = await getDiffFile(task.project_id, task.id, path, { full: !!isTruncated });
-            if (data.lines) {
+            if (data.lines?.length) {
                 diffCache.patchFile(path, {
                     rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })),
                     added: data.lines.length,

@@ -667,7 +667,7 @@
         entry.loading = true;
         try {
             const data = await getProjectDiffFile(projectId, path);
-            if (data.lines) {
+            if (data.lines?.length) {
                 entry.file = {
                     path,
                     rows: data.lines.map((line, i) => ({ lineNumber: i + 1, variant: 'added' as const, text: line })),

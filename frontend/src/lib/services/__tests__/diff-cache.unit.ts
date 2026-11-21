@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { DiffCache } from '$lib/services/diff-cache.svelte';
+import { hasCommittedChanges, hasWorkingChanges } from '$lib/utils/diff-base';
 import type { GitBatchResult, TaskDiff } from '$lib/api';
 import type { DiffRow } from '$lib/types/diff';
 import { ConnectionFailure, RequestAborted } from '$lib/api/helpers';
@@ -595,5 +596,57 @@ describe('DiffCache', () => {
         await cache.reconcileDeletion({ op: 'delete', path: 'gone.txt' });
         expect(getTaskDiff).toHaveBeenCalledTimes(1);
         expect(cache.state.files).toEqual({});
+    });
+
+    // A picture has no rows, so its size and its "View image" button are read from the answer's names.
+    // encoding/json/v2 answers a nil slice as [], so an empty `rows` is the absence of that half — read as a
+    // half of its own it replaces the entry with one carrying neither flag nor size, and the row says
+    // "Empty file" over the picture.
+    describe('a file with no rows', () => {
+        it('keeps the size and the binary flag the per-file answer names', async () => {
+            const cache = new DiffCache(makeApis({
+                getTaskDiff: vi.fn(async () => ({
+                    files: { 'docs/logo.png': { hash: 'h1', type: 'tracked' as const, is_binary: true, file_size: 67, isNew: true, hasWorking: true, staged: true } },
+                })),
+                getDiffFile: vi.fn(async () => ({ rows: [], truncated: false, isBinary: true, fileSize: 67, hasWorking: true })),
+            }), () => 'proj-1', () => 'task-1');
+            await cache.loadDiff(() => {});
+
+            const file = cache.state.files['docs/logo.png'];
+            expect(file.isBinary).toBe(true);
+            expect(file.fileSize).toBe(67);
+            expect(hasWorkingChanges(file)).toBe(true);
+        });
+
+        it('places a picture the branch committed in the committed half alone', async () => {
+            const cache = new DiffCache(makeApis({
+                getTaskDiff: vi.fn(async () => ({
+                    files: { 'docs/logo.png': { hash: 'h1', type: 'tracked' as const, is_binary: true, file_size: 67, isNew: true, hasCommitted: true } },
+                })),
+                getDiffFile: vi.fn(async () => ({ rows: [], truncated: false, isBinary: true, fileSize: 67, isNew: true, hasCommitted: true })),
+            }), () => 'proj-1', () => 'task-1');
+            await cache.loadDiff(() => {});
+
+            const file = cache.state.files['docs/logo.png'];
+            expect(hasCommittedChanges(file)).toBe(true);
+            expect(hasWorkingChanges(file)).toBe(false);
+        });
+
+        it('leaves an empty committed half absent', async () => {
+            const cache = new DiffCache(makeApis({
+                getTaskDiff: vi.fn(async () => ({
+                    files: { 'notes.txt': { hash: 'h2', type: 'tracked' as const, added: 1, removed: 0, hasWorking: true } },
+                })),
+                getDiffFile: vi.fn(async () => ({
+                    rows: [{ lineNumber: 1, variant: 'added' as const, text: 'one' }],
+                    committedRows: [],
+                    truncated: false,
+                    hasWorking: true,
+                })),
+            }), () => 'proj-1', () => 'task-1');
+            await cache.loadDiff(() => {});
+
+            expect(cache.state.files['notes.txt'].committedRows).toBeUndefined();
+        });
     });
 });
