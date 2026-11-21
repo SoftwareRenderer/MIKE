@@ -16,6 +16,7 @@
         sortOldestFirst = $bindable(false),
         autoMaximizeChat = $bindable(true),
         autoMaximizeCodeViewer = $bindable(true),
+        collapseReasoning = $bindable(false),
         notifyOnReview = $bindable(false),
         onDirty,
     }: {
@@ -30,6 +31,7 @@
         sortOldestFirst?: boolean;
         autoMaximizeChat?: boolean;
         autoMaximizeCodeViewer?: boolean;
+        collapseReasoning?: boolean;
         notifyOnReview?: boolean;
         onDirty?: () => void;
     } = $props();
@@ -234,6 +236,15 @@
         </div>
         <div class="shortcut-controls">
             <ToggleSwitch bind:checked={autoMaximizeCodeViewer} ariaLabel={t('settings.preferences.autoMaximizeCodeViewer')} ariaDescribedby="auto-maximize-code-viewer-desc" onChange={() => onDirty?.()} />
+        </div>
+    </div>
+    <div class="shortcut-row">
+        <div class="shortcut-info">
+            <span class="shortcut-name">{t('settings.preferences.collapseReasoning')}</span>
+            <span id="collapse-reasoning-desc" class="shortcut-desc">{t('settings.preferences.collapseReasoningDesc')}</span>
+        </div>
+        <div class="shortcut-controls">
+            <ToggleSwitch bind:checked={collapseReasoning} ariaLabel={t('settings.preferences.collapseReasoning')} ariaDescribedby="collapse-reasoning-desc" onChange={() => onDirty?.()} />
         </div>
     </div>
     <div class="shortcut-row">

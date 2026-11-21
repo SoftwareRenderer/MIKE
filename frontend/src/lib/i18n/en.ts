@@ -396,6 +396,8 @@ const catalog = {
     'settings.preferences.autoMaximizeChat': 'Auto maximize chat visibility on mobile',
     'settings.preferences.autoMaximizeChatDesc': 'Maximize the chat panel while the chat input has focus',
     'settings.preferences.autoMaximizeCodeViewer': 'Auto maximize code viewer',
+    'settings.preferences.collapseReasoning': 'Collapse reasoning text',
+    'settings.preferences.collapseReasoningDesc': 'Do not show the model reasoning as it is written. A thinking turn shows a spinner and its token rate instead, and the finished reasoning opens with Show reasoning.',
     'settings.preferences.autoMaximizeCodeViewerDesc': 'When clicking on a line of code in the diff panel, maximize the view if the column is narrow',
     'settings.preferences.notifyOnReview': 'Notify when a task enters Review',
     'settings.preferences.notifyOnReviewDesc': 'Send a browser notification when a task starts waiting for you while you are looking elsewhere',
@@ -1643,6 +1645,10 @@ const catalog = {
     'chat.reasoning.hide': 'Hide reasoning',
     'chat.reasoning.show': 'Show reasoning',
     'chat.reasoning.loading': 'Loading reasoning...',
+    // The collapsed preference's stand-in for the text that is being written but not sent. The rate beside
+    // it is `X tok/s`, the unit the chat's stats line already prints, so only the number is localized.
+    'chat.reasoning.processing': 'Processing',
+    'chat.reasoning.rate': '{rate} tok/s',
 
     // ── Chat/CheckpointDivider.svelte ──
     'chat.checkpoint.label': 'Checkpoint',

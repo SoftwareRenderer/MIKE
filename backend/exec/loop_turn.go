@@ -33,6 +33,7 @@ func (te *TaskExecutor) finalizeToolTurn(setup *taskExecSetup, lc *loopContext, 
 		Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: assistantCreatedAt,
 	}); err == nil {
 		te.rowsDurable(setup.projectID, setup.task.ID)
+		te.announceHeldReasoning(setup.projectID, setup.task.ID, assistantMsgID, lc.reasoningContent.String(), assistantText, len(lc.pendingToolCalls) > 0, lc.collapsedReasoning)
 	}
 
 	// What cancelling this kills, and what it must never reach, is in toolCallContext.
@@ -522,6 +523,7 @@ func (te *TaskExecutor) finalizeTextTurn(setup *taskExecSetup, lc *loopContext, 
 		PromptMs: promptMs, PredictedMs: predictedMs,
 		Duration: duration, CreatedAt: time.Now().UTC(),
 	})
+	te.announceHeldReasoning(setup.projectID, setup.task.ID, assistantMsgID, lc.reasoningContent.String(), assistantText, false, lc.collapsedReasoning)
 	lc.assistantContent.Reset()
 	lc.reasoningContent.Reset()
 
@@ -621,14 +623,16 @@ func (te *TaskExecutor) finalizeReasoningTurn(setup *taskExecSetup, lc *loopCont
 	// Persist the reasoning-only assistant message
 	promptTokens, predictedTokens, cacheTokens, promptMs, predictedMs := computeStats(lc.usage)
 	logStatsSpeed(setup.task.ID, activeModel, promptTokens-cacheTokens, predictedTokens, promptMs, predictedMs)
+	assistantMsgID := uuid.New().String()
 	te.store.CreateTaskMessage(&types.TaskMessage{
-		ID: uuid.New().String(), TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
+		ID: assistantMsgID, TaskID: setup.task.ID, ThreadID: setup.task.CurrentThreadID, Role: "assistant",
 		Content: "", ReasoningContent: reasoningText,
 		ModelName: activeModel, ProviderName: lc.providerName,
 		PromptTokens: promptTokens, PredictedTokens: predictedTokens, CacheTokens: cacheTokens,
 		PromptMs: promptMs, PredictedMs: predictedMs,
 		Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: time.Now().UTC(),
 	})
+	te.announceHeldReasoning(setup.projectID, setup.task.ID, assistantMsgID, reasoningText, "", false, lc.collapsedReasoning)
 
 	// Append reasoning to conversation history so the LLM sees its own thinking.
 	// Put in ReasoningContent so toAPIMessage sends it as reasoning_content.

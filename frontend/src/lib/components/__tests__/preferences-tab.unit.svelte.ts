@@ -51,6 +51,7 @@ interface ToggleRow {
 const TOGGLES: ToggleRow[] = [
     { toggle: 'button[aria-label="Hide shortcut hints"]', prop: 'hideHints', storedUnset: false, whenUnset: false },
     { toggle: 'button[aria-label="Hide model badge"]', prop: 'hideModelBadge', storedUnset: false, whenUnset: false, section: 'UI' },
+    { toggle: 'button[aria-label="Collapse reasoning text"]', prop: 'collapseReasoning', storedUnset: false, whenUnset: false, section: 'UI' },
     { toggle: 'button[aria-label="Auto maximize chat visibility on mobile"]', prop: 'autoMaximizeChat', storedUnset: undefined, whenUnset: true },
     { toggle: 'button[aria-label="Auto maximize code viewer"]', prop: 'autoMaximizeCodeViewer', storedUnset: undefined, whenUnset: true },
     { toggle: 'button[aria-label="Notify when a task enters Review"]', prop: 'notifyOnReview', storedUnset: undefined, whenUnset: false, section: 'UI', asksPermission: true },

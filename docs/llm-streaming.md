@@ -53,6 +53,27 @@ Sampling parameters (e.g., `temperature`, `top_p`, `seed`) are sourced exclusive
 - **Application**: Overrides are applied in `newLlamaClient` and are used for all calls associated with that model, including utility calls (summaries, commit labels).
 - **Validation**: `validateModelSampling` ensures values are within bounds before they are saved to the configuration.
 
+## Collapsed Reasoning
+
+`collapse_reasoning` (Settings → Preferences) is a bandwidth decision, because reasoning is usually the bulk
+of a turn's output. It is read once per run into `loopContext.collapsedReasoning`
+(`backend/exec/loop.go`) and once per agent run, so a turn never changes its own wire midway. The frame it
+sends is contracted in `docs/api-contract.md → A collapsed turn's reasoning rides as a count, never as text`.
+
+- **Suppressed at the buffer, not at the socket.** A collapsed `streamFlusher` (`backend/exec/loop.go`) never
+  buffers the text: `appendReasoning` counts characters and `flush` announces the total once per tick, and
+  only while it grew. `agentReasoningFeed` (`backend/exec/loop_agent.go`) does the same for an adapter that
+  reports its thinking a word at a time, floored at `agentReasoningProgressInterval`.
+- **A retry restarts the count.** `reset()` clears it with the buffers, because the retried call reasons from
+  nothing and a client following a rate that doubled would report tokens the provider never sent.
+- **The rule lives in `types.ShouldHideReasoning`** (`backend/types/reasoning.go`), shared with the message
+  window's redaction pass. Reasoning that is the call's whole answer is still owed to the reader: `sendHeldReasoning`
+  says it once, after the final flush, and only for a call the provider finished — an errored call's rows are
+  never written, so nothing is owed its reasoning. `announceHeldReasoning` names the stored row for the
+  reasoning the rule hides, and the agent path asks the same pair of the `PersistEntry` rows it is writing.
+- **Nothing here touches what the model sees.** The conversation history keeps the full reasoning either way;
+  only the wire is thinner.
+
 ## Tests
 
 - `backend/llama/client_test.go`: Ceiling enforcement and silence handling.
@@ -62,6 +83,8 @@ Sampling parameters (e.g., `temperature`, `top_p`, `seed`) are sourced exclusive
 - `backend/config/sampling_test.go`: Sampler bounds and save validation.
 - `backend/llama/client_sampling_test.go`: Sampler key transmission and nil handling.
 - `backend/exec/sampling_override_test.go`: Application of overrides to non-task turns.
+- `backend/exec/loop_reasoning_test.go` & `backend/types/reasoning_test.go`: what a collapsed turn sends, what
+  it never sends, and the rule that decides the held text.
 - `backend/httputil/client_test.go`: Stream client timeout and transport isolation.
 
 ## Verification

@@ -66,6 +66,7 @@ interface Preference {
 
 const PREFERENCES: Preference[] = [
     { key: 'auto_maximize_chat_mobile', tab: 'Preferences', toggle: 'button[aria-label="Auto maximize chat visibility on mobile"]', whenOmitted: true },
+    { key: 'collapse_reasoning', tab: 'Preferences', toggle: 'button[aria-label="Collapse reasoning text"]', whenOmitted: false },
     { key: 'sort_oldest_first', tab: 'Preferences', toggle: 'button[aria-label="Oldest Task on top"]', whenOmitted: false },
     { key: 'run_siblings_parallel', tab: 'Task', toggle: 'button[aria-label="Run subtasks in parallel"]', whenOmitted: false },
     { key: 'reclaim_idle_sandbox', tab: 'Task', toggle: 'button[aria-label="Release a waiting task sandbox container"]', whenOmitted: false },

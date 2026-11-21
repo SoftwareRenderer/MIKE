@@ -77,6 +77,7 @@
     let sortOldestFirst = $state(false);
     let autoMaximizeChat = $state(true);
     let autoMaximizeCodeViewer = $state(true);
+    let collapseReasoning = $state(false);
     let notifyOnReview = $state(false);
     // The open project's answer to the "Assisted-by" commit trailer; absent means off.
     let commitAssistedBy = $state(false);
@@ -236,6 +237,7 @@
             updateCheckEnabled = config.update_check_enabled ?? null;
             sortOldestFirst = config.sort_oldest_first === true;
             autoMaximizeChat = config.auto_maximize_chat_mobile !== false;
+            collapseReasoning = config.collapse_reasoning === true;
             notifyOnReview = uiStore.notifyOnReview;
             autoMaximizeCodeViewer = uiStore.autoMaximizeCodeViewer;
             commitAssistedBy = appStore.selectedProject?.commit_assisted_by === true;
@@ -725,6 +727,7 @@
                 hide_model_badge: hideModelBadge,
                 sort_oldest_first: sortOldestFirst,
                 auto_maximize_chat_mobile: autoMaximizeChat,
+                collapse_reasoning: collapseReasoning,
                 keyboard_shortcuts: { create_task: keyboardCreateTask, create_task_submit: keyboardCreateTaskSubmit, open_terminal: keyboardOpenTerminal, start_task: keyboardStartTask, toggle_fullscreen: keyboardToggleFullscreen, multi_select_click: keyboardMultiSelectClick, hide_hints: keyboardHideHints },
                 // The whole registry every save: a server missing from this body is a deleted one. Under
                 // the operator's lock nothing is sent, so nothing is claimed.
@@ -1020,7 +1023,7 @@
 
         <!-- Preferences Tab -->
         {#if activeTab === 'preferences'}
-            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:toggleFullscreenKey={keyboardToggleFullscreen} bind:multiSelectClickKey={keyboardMultiSelectClick} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} bind:sortOldestFirst={sortOldestFirst} bind:autoMaximizeChat={autoMaximizeChat} bind:autoMaximizeCodeViewer={autoMaximizeCodeViewer} bind:notifyOnReview={notifyOnReview} onDirty={markDirty} />
+            <PreferencesTab bind:createTaskKey={keyboardCreateTask} bind:createTaskSubmitKey={keyboardCreateTaskSubmit} bind:openTerminalKey={keyboardOpenTerminal} bind:startTaskKey={keyboardStartTask} bind:toggleFullscreenKey={keyboardToggleFullscreen} bind:multiSelectClickKey={keyboardMultiSelectClick} bind:hideHints={keyboardHideHints} bind:hideModelBadge={hideModelBadge} bind:sortOldestFirst={sortOldestFirst} bind:autoMaximizeChat={autoMaximizeChat} bind:autoMaximizeCodeViewer={autoMaximizeCodeViewer} bind:collapseReasoning={collapseReasoning} bind:notifyOnReview={notifyOnReview} onDirty={markDirty} />
         {/if}
 
         <!-- Extensions Tab -->

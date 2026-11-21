@@ -25,6 +25,8 @@
         content: string;
         reasoningContent?: string;
         hasReasoning?: boolean;
+        /** The reasoning of a collapsed turn, counted and not sent: it buys a rate, not text. */
+        reasoningPending?: { chars: number; startedAt: number };
         isStreaming?: boolean;
         isOptimistic?: boolean;
         timestamp?: string;
@@ -55,7 +57,7 @@
         onReasoningResolved?: (content: string) => void;
     }
 
-    let { role, severity = '', kind = '', content, reasoningContent, hasReasoning = false, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, onEditSummary, isLastUserMessage = false, isFirstUserMessage = false, turnInFlight = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
+    let { role, severity = '', kind = '', content, reasoningContent, hasReasoning = false, reasoningPending, isStreaming = false, isOptimistic = false, timestamp, messageId, attachments, stats, toolCalls = [], onDelete, onFork, onSend, onRegenerate, onEditSummary, isLastUserMessage = false, isFirstUserMessage = false, turnInFlight = false, taskStatus = 'backlog', onNavigateTask, queued = false, editDiffOverrides = {}, onToggleEditDiff = () => {}, projectId = '', taskId: msgTaskId = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
 
     // Edit state
     let isEditing = $state(false);
@@ -258,6 +260,7 @@
             <ReasoningBlock
                 reasoningContent={reasoningContent}
                 {hasReasoning}
+                {reasoningPending}
                 {messageId}
                 {projectId}
                 taskId={msgTaskId}
@@ -298,6 +301,7 @@
     <ReasoningBlock
         reasoningContent={reasoningContent}
         {hasReasoning}
+        {reasoningPending}
         {messageId}
         {projectId}
         taskId={msgTaskId}

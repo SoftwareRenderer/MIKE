@@ -506,7 +506,7 @@ func TestPersistAgentTurnEntries_SandboxField(t *testing.T) {
 	// Persist with sandbox=true
 	e.persistAgentTurnEntries(projectID, taskID, threadID, []pkgagent.PersistEntry{
 		{Role: "tool_call", ToolCallsJSON: testPayload},
-	}, time.Now(), true)
+	}, time.Now(), true, false)
 
 	msgs, err := e.store.GetTaskMessages(taskID, threadID)
 	if err != nil {
@@ -538,7 +538,7 @@ func TestPersistAgentTurnEntries_SandboxField(t *testing.T) {
 	// Now persist with sandbox=false
 	e.persistAgentTurnEntries(projectID, taskID, threadID, []pkgagent.PersistEntry{
 		{Role: "tool_call", ToolCallsJSON: pkgagentPersistEntry("bash", `{"command":"ls"}`)},
-	}, time.Now(), false)
+	}, time.Now(), false, false)
 
 	msgs2, err := e.store.GetTaskMessages(taskID, threadID)
 	if err != nil {

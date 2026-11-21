@@ -283,6 +283,11 @@ var (
 		get: func(c *types.Config) *bool { return c.AutoMaximizeChatMobile },
 		set: func(c *types.Config, v *bool) { c.AutoMaximizeChatMobile = v },
 	}
+	prefCollapseReasoning = flagPref{
+		key: "collapse_reasoning",
+		get: func(c *types.Config) *bool { return c.CollapseReasoning },
+		set: func(c *types.Config, v *bool) { c.CollapseReasoning = v },
+	}
 	prefReclaimIdleSandbox = flagPref{
 		key: "reclaim_idle_sandbox",
 		get: func(c *types.Config) *bool { return c.ReclaimIdleSandbox },
@@ -308,7 +313,7 @@ var (
 		prefDefaultAutoCommit, prefDefaultAutoMerge, prefDefaultSubtasksAutoMerge,
 		prefDefaultOperatingMode, prefDefaultMaxFailedTurns, prefDefaultAutoSummarizeThreshold,
 		prefHideModelBadge, prefUpdateCheckEnabled, prefRunSiblingsParallel, prefSortOldestFirst,
-		prefAutoMaximizeChatMobile, prefReclaimIdleSandbox, prefLoopBreaker, prefShortcuts,
+		prefAutoMaximizeChatMobile, prefCollapseReasoning, prefReclaimIdleSandbox, prefLoopBreaker, prefShortcuts,
 	}
 
 	// configRowKeys are the rows a full config read wants, in one query. Derived from the table, so the

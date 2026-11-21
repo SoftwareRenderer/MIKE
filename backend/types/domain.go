@@ -120,6 +120,9 @@ type Config struct {
 	// AutoMaximizeChatMobile maximizes the task chat while its input holds focus on
 	// the mobile layout. Nil = on (default).
 	AutoMaximizeChatMobile *bool `json:"auto_maximize_chat_mobile,omitzero"`
+	// CollapseReasoning keeps a turn's reasoning text off the wire while it streams; the chat shows its rate
+	// instead. Nil = off. docs/llm-streaming.md.
+	CollapseReasoning *bool `json:"collapse_reasoning,omitzero"`
 	// ReclaimIdleSandbox lets the memory supervisor release the container of a task idle past the
 	// reclaim grace. Nil = off. docs/sandbox-runtime.md.
 	ReclaimIdleSandbox *bool `json:"reclaim_idle_sandbox,omitzero"`

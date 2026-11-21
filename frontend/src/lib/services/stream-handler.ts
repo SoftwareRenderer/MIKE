@@ -4,6 +4,7 @@ import type { ChatEntry, ToolCallInfo } from '$lib/types';
 import { StreamState } from './stream-state.svelte';
 import { resolveLiveToolCall, type LiveToolCall } from '$lib/utils/tool-call-lookup';
 import { errorFromEvent, isRepeatError, type ErrorEventData } from '$lib/utils/chat-entries';
+import { estimatedTokens } from '$lib/utils/reasoning-rate';
 import { t } from '$lib/i18n';
 
 /** Update context usage from accumulated token counts. */
@@ -35,6 +36,35 @@ function moveCheckpointKey(s: typeof StreamState.prototype.state, from: string, 
     if (to && !hashes.has(to)) hashes.set(to, hash);
     s.checkpointCommitHashes = hashes;
     s.checkpointHashesVersion++;
+}
+
+/**
+ * Give a streaming entry the id of the row it streamed. `complete` names the run's last row; the count
+ * frame that closes a collapsed call names that call's, which is what makes every earlier call of a
+ * multi-call run openable. A duplicate the read already drew is redundant, so it goes with its checkpoint
+ * key.
+ */
+function adoptRowId(s: typeof StreamState.prototype.state, entry: ChatEntry, rowId: string) {
+    const from = entry.id;
+    if (from === rowId) return;
+    if (s.entries.some(e => e.id === rowId)) {
+        s.entries = s.entries.filter(e => e.id !== from);
+        moveCheckpointKey(s, from, null);
+    } else {
+        entry.id = rowId;
+        // The frame naming a row is written where the row was written, so this call is over and the next
+        // one opens its own entry.
+        entry.isStreaming = false;
+        if (s.currentAssistantId === from) s.currentAssistantId = null;
+        moveCheckpointKey(s, from, rowId);
+    }
+}
+
+/** The entry a frame naming this run's assistant row belongs to: the streaming one, or the one closed a
+ * moment ago. */
+function unnamedStreamingEntry(s: typeof StreamState.prototype.state): ChatEntry | undefined {
+    const id = [s.currentAssistantId, s.lastClosedAssistantId].find(Boolean);
+    return id ? s.entries.find(e => e.id === id) : undefined;
 }
 
 /**
@@ -84,7 +114,10 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
     }
 
     function ensureAssistantEntry(): ChatEntry {
-        return stream.ensureAssistantEntry(genId);
+        const entry = stream.ensureAssistantEntry(genId);
+        // Read it back through the array's proxy: the first frame of a call is handed the raw object, and
+        // a write there changes an entry nobody renders.
+        return s.entries.find((e) => e.id === entry.id) ?? entry;
     }
 
     // Max lines kept in a build/pull progress box — bounds memory for long builds.
@@ -120,7 +153,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
                 const data = event.data as { text: string };
-                s.streamTokenCount += Math.ceil(data.text.length / 4);
+                s.streamTokenCount += estimatedTokens(data.text.length);
                 updateContextUsed(s);
                 const entry = ensureAssistantEntry();
                 if (!s.currentAssistantId) s.currentAssistantId = entry.id;
@@ -134,11 +167,41 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
                 const data = event.data as { text: string };
-                s.streamTokenCount += Math.ceil(data.text.length / 4);
+                s.streamTokenCount += estimatedTokens(data.text.length);
                 updateContextUsed(s);
                 const entry = ensureAssistantEntry();
                 entry.reasoningContent = (entry.reasoningContent || '') + data.text;
                 entry.hasReasoning = true;
+                scheduleScroll();
+                break;
+            }
+            case 'reasoning_progress': {
+                // A collapsed turn's reasoning: the server counted it and never sent it. `chars` is
+                // cumulative for the call being answered, and a replayed state frame announces the newest
+                // total, never a smaller one.
+                if (suppressEvents) break;
+                stream.clearAwaiting();
+                markStreaming();
+                if (!s.currentAssistantId) s.streamTokenCount = 0;
+                const data = event.data as { chars?: number; message_id?: string };
+                const chars = Math.max(0, data.chars || 0);
+                const entry = ensureAssistantEntry();
+                const prev = entry.reasoningPending?.chars ?? 0;
+                const total = Math.max(prev, chars);
+                entry.hasReasoning = true;
+                if (total > prev) {
+                    // The estimate prices what the text would have cost the window.
+                    s.streamTokenCount += Math.max(0, estimatedTokens(total) - estimatedTokens(prev));
+                    updateContextUsed(s);
+                }
+                if (data.message_id) {
+                    // The call is over and its reasoning stored: the count becomes the address "Show
+                    // reasoning" reads, and nothing is left arriving to average into a rate.
+                    entry.reasoningPending = undefined;
+                    adoptRowId(s, entry, data.message_id);
+                } else {
+                    entry.reasoningPending = { chars: total, startedAt: entry.reasoningPending?.startedAt ?? Date.now() };
+                }
                 scheduleScroll();
                 break;
             }
@@ -181,7 +244,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 s.processedToolIds = new Set([...s.processedToolIds, data.tool_id]);
                 s.unresolvedToolIds = new Set([...s.unresolvedToolIds, data.tool_id]);
                 const ci = entry.content.length;
-                const ri = (entry.reasoningContent || '').length;
+                // A collapsed call has only the announced total to count into, and that is how much text
+                // eventually arrives, so a card keeps the offset it was emitted at.
+                const ri = Math.max((entry.reasoningContent || '').length, entry.reasoningPending?.chars ?? 0);
                 const newTc = {
                     toolId: data.tool_id, toolName: data.tool_name, displayName: data.tool_display_name,
                     args: data.args || {}, raw_args: data.raw_args, sandbox: data.sandbox, path: data.path,
@@ -285,6 +350,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 // Echo handling is done in component (lastSentMessage check)
                 if (data.id && s.entries.some(e => e.id === data.id)) break;
                 stream.closeCurrentAssistant();
+                // A new prompt starts the conversation afresh: no earlier turn's entry may be the one this
+                // run's `complete` names.
+                s.lastClosedAssistantId = null;
                 s.entries = [...s.entries, { id: data.id || genId(), role: data.role, severity: data.severity, content: data.content, threadId: data.thread_id, isStreaming: false, createdAt: new Date().toISOString() }];
                 break;
             }
@@ -293,19 +361,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 s.awaitingResponse = false;
                 stream.clearRetry();
                 const data = event.data as { state: string; model_name: string; prompt_tokens: number; predicted_tokens: number; prompt_ms: number; predicted_ms: number; duration: number; assistant_message_id?: string };
-                if (data.assistant_message_id && s.currentAssistantId) {
-                    const entry = s.entries.find(e => e.id === s.currentAssistantId);
-                    if (entry && entry.id !== data.assistant_message_id) {
-                        if (s.entries.some(e => e.id === data.assistant_message_id)) {
-                            const droppedId = s.currentAssistantId;
-                            s.entries = s.entries.filter(e => e.id !== droppedId);
-                            moveCheckpointKey(s, droppedId, null);
-                        } else {
-                            const streamingId = s.currentAssistantId;
-                            entry.id = data.assistant_message_id;
-                            moveCheckpointKey(s, streamingId, data.assistant_message_id);
-                        }
-                    }
+                if (data.assistant_message_id) {
+                    const entry = unnamedStreamingEntry(s);
+                    if (entry) adoptRowId(s, entry, data.assistant_message_id);
                 }
                 stream.closeCurrentAssistant();
                 for (const e of s.entries) {
@@ -365,6 +423,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                         if (!entry || (!entry.content && !entry.reasoningContent)) stream.closeCurrentAssistant();
                     }
                     s.activeToolCalls = new Map();
+                    s.lastClosedAssistantId = null;
                     // An entry that is only an unanswered call belongs to the run this frame ends, so it
                     // goes — and its ids leave `processedToolIds` with it, or that set swallows the call's
                     // next announcement. `docs/reconnection.md`.

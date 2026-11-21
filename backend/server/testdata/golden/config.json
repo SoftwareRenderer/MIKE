@@ -1,4 +1,5 @@
 {
+  "collapse_reasoning": true,
   "database_path": "<TMP>/test.db",
   "default_auto_commit": true,
   "default_auto_merge": null,

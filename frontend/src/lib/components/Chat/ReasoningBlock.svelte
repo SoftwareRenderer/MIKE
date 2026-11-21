@@ -1,6 +1,8 @@
 <script lang="ts">
     import { getTaskMessageFull } from '$lib/api';
     import { t } from '$lib/i18n';
+    import Spinner from '$lib/components/Spinner.svelte';
+    import { formatReasoningRate } from '$lib/utils/reasoning-rate';
 
     interface Props {
         reasoningContent?: string;
@@ -15,23 +17,35 @@
         onReasoningToggle?: (expanded: boolean) => void;
         resolvedReasoningOverride?: string;
         onReasoningResolved?: (content: string) => void;
+        /** How much of this reasoning the server counted and never sent, while it is still arriving. */
+        reasoningPending?: { chars: number; startedAt: number };
     }
 
-    let { reasoningContent, hasReasoning = false, messageId, projectId, taskId, isStreaming = false, toolCallsLength = 0, content = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved }: Props = $props();
+    let { reasoningContent, hasReasoning = false, messageId, projectId, taskId, isStreaming = false, toolCallsLength = 0, content = '', reasoningExpandedOverride, onReasoningToggle, resolvedReasoningOverride, onReasoningResolved, reasoningPending }: Props = $props();
 
     // Resolved reasoning content — fetched on-demand when backend suppresses it
     let reasoningLoading = $state(false);
 
-    /** Effective reasoninging content: resolved (fetched) value, or the prop value. */
+    /** Effective reasoning content: resolved (fetched) value, or the prop value. */
     let effectiveReasoning = $derived(resolvedReasoningOverride ?? reasoningContent);
+
+    /** The row reasoned and nothing was sent — redacted by the read, or held back by the collapse. */
+    let withheld = $derived(!effectiveReasoning || effectiveReasoning === '[HIDDEN]');
 
     /** Whether to show the reasoning toggle. */
     let showReasoningToggle = $derived(hasReasoning || !!reasoningContent);
 
+    /** Thinking that is arriving but not shown: the count says what is happening and how fast. */
+    let pending = $derived(isStreaming && withheld && !!reasoningPending && reasoningPending.chars > 0);
+
+    // Recomputed when a new count lands, the only moment the rate has anything new in it.
+    let pendingRate = $derived(pending ? formatReasoningRate(reasoningPending!.chars, Date.now() - reasoningPending!.startedAt) : '');
+
+    // Withheld text opens on a click, never on its own.
     let reasoningExpanded = $derived(
         reasoningExpandedOverride !== undefined
             ? reasoningExpandedOverride
-            : (effectiveReasoning === '[HIDDEN]' ? false : !effectiveReasoning || (effectiveReasoning.length <= 200 && !content) || (toolCallsLength > 0 && !content) || (isStreaming && !toolCallsLength))
+            : !!effectiveReasoning && effectiveReasoning !== '[HIDDEN]' && ((effectiveReasoning.length <= 200 && !content) || (toolCallsLength > 0 && !content) || (isStreaming && !toolCallsLength))
     );
 
     async function handleReasoningToggle() {
@@ -41,7 +55,7 @@
         if (!nextExpanded) {
             return;
         }
-        if (effectiveReasoning === '[HIDDEN]' && messageId && projectId && taskId && !resolvedReasoningOverride) {
+        if (withheld && messageId && projectId && taskId && !resolvedReasoningOverride) {
             reasoningLoading = true;
             try {
                 const fullMsg = await getTaskMessageFull(projectId, taskId, messageId);
@@ -55,7 +69,12 @@
     }
 </script>
 
-{#if showReasoningToggle}
+{#if pending}
+    <div class="reasoning-pending" role="status">
+        <Spinner size={12} decorative />
+        <span class="reasoning-pending-label">{t('chat.reasoning.processing')} · {pendingRate}</span>
+    </div>
+{:else if showReasoningToggle}
     <div class="reasoning-block" class:expanded={reasoningExpanded}>
         <button class="reasoning-toggle" onclick={handleReasoningToggle} aria-expanded={reasoningExpanded} title={reasoningExpanded ? t('chat.reasoning.hide') : t('chat.reasoning.show')} disabled={reasoningLoading}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -76,6 +95,16 @@
 <style>
     .reasoning-block {
         margin-bottom: 6px;
+    }
+    /* The collapsed turn's stand-in for the text: same corner of the entry, nothing to click. */
+    .reasoning-pending {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 6px;
+        padding: 2px 6px;
+        color: var(--color-text-tertiary);
+        font-size: var(--text-xs);
     }
     .reasoning-toggle {
         display: inline-flex;

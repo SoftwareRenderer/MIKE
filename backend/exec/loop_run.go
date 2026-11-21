@@ -104,17 +104,18 @@ func (te *TaskExecutor) newLoopContext(setup *taskExecSetup) *loopContext {
 
 	// Consolidate all mutable loop state into a single struct.
 	lc := &loopContext{
-		messages:       messages,
-		prevArgLens:    make(map[string]int),
-		detector:       newLoopDetector(),
-		silence:        silence,
-		mc:             mc,
-		client:         client,
-		providerName:   providerName,
-		contextWindow:  contextWindow,
-		sandboxEnabled: setup.sandboxEnabled,
-		reportedPrompt: storedPrompt,
-		tools:          tools,
+		messages:           messages,
+		prevArgLens:        make(map[string]int),
+		detector:           newLoopDetector(),
+		silence:            silence,
+		mc:                 mc,
+		client:             client,
+		providerName:       providerName,
+		contextWindow:      contextWindow,
+		sandboxEnabled:     setup.sandboxEnabled,
+		collapsedReasoning: te.configStore.GetCollapseReasoning(),
+		reportedPrompt:     storedPrompt,
+		tools:              tools,
 	}
 
 	// Carry over the accumulated session cost from prior runs/executors so the badge

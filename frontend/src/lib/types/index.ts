@@ -225,6 +225,11 @@ export interface ChatEntry {
     isError?: boolean;
     reasoningContent?: string;
     hasReasoning?: boolean;
+    /**
+     * What a collapsed turn has instead of `reasoningContent`: how much the call has reasoned and when the
+     * reader started seeing it. The chat renders a rate from it; it is dropped with `isStreaming`.
+     */
+    reasoningPending?: { chars: number; startedAt: number };
     isStreaming?: boolean;
     threadId?: string;
     buildLog?: {
@@ -285,6 +290,8 @@ export interface Config {
     default_max_failed_turns?: number;
     default_auto_summarize_threshold?: number; // percent of context window, 1-100
     hide_model_badge?: boolean; // hide the model badge on task cards
+    // Keep a turn's reasoning off the wire while it streams; the chat shows its rate instead. Default off.
+    collapse_reasoning?: boolean;
     // May MIKE ask the release manifest whether a newer version exists? Absent means never asked - off, and
     // still owed the first-run question, which MIKE_DISABLE_UPDATES outranks.
     update_check_enabled?: boolean;
@@ -549,6 +556,7 @@ export interface LockWait {
 export type StreamEventType =
     | 'token'
     | 'reasoning'
+    | 'reasoning_progress'
     | 'tool_call'
     | 'tool_result'
     | 'tool_progress'

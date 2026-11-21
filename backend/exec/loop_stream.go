@@ -74,7 +74,7 @@ func (te *TaskExecutor) streamTurn(setup *taskExecSetup, lc *loopContext, gateUR
 
 	// streamFlusher batches streaming events to reduce WebSocket write overhead.
 	flusher := newStreamFlusher(setup.projectID, setup.task.ID,
-		te.appStreamMgr.SendTaskEvent, lc.detector)
+		te.appStreamMgr.SendTaskEvent, lc.detector, lc.collapsedReasoning)
 	flushDone := make(chan struct{})
 	go func() {
 		tick := time.NewTicker(streamThrottleInterval)
@@ -238,6 +238,10 @@ func (te *TaskExecutor) streamTurn(setup *taskExecSetup, lc *loopContext, gateUR
 
 		// Flush any remaining buffered events before signalling completion.
 		flusher.flush()
+		// An errored call's rows are never written, so its held reasoning is owed to no one.
+		if streamErr == nil {
+			flusher.sendHeldReasoning(lc.reasoningContent.String(), lc.assistantContent.String(), len(lc.pendingToolCalls) > 0)
+		}
 		close(streamDone)
 	}()
 

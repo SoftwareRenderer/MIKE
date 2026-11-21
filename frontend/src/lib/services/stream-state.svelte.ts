@@ -15,6 +15,11 @@ export class StreamState {
          */
         unresolvedToolIds: new Set<string>(),
         awaitingResponse: false,
+        /**
+         * The last assistant entry the stream closed. A run can close its entry before the `complete` that
+         * names its row lands.
+         */
+        lastClosedAssistantId: null as string | null,
         queuePosition: 0,
         queueEstimatedWait: 0,
         lockWait: null as LockWait | null,
@@ -39,6 +44,9 @@ export class StreamState {
         }
         const id = genId();
         this.state.currentAssistantId = id;
+        // The run's row name belongs to its last call, so an entry closed before this one began is no
+        // longer that entry.
+        this.state.lastClosedAssistantId = null;
         const entry: ChatEntry = { id, role: 'assistant', content: '', isStreaming: true, createdAt: new Date().toISOString() };
         this.state.entries = [...this.state.entries, entry];
         return entry;
@@ -48,7 +56,10 @@ export class StreamState {
     closeCurrentAssistant() {
         if (this.state.currentAssistantId) {
             const entry = this.state.entries.find(e => e.id === this.state.currentAssistantId);
-            if (entry) entry.isStreaming = false;
+            if (entry) {
+                entry.isStreaming = false;
+                this.state.lastClosedAssistantId = entry.id;
+            }
             this.state.currentAssistantId = null;
         }
     }
@@ -97,6 +108,7 @@ export class StreamState {
     dropAbandonedTurn() {
         this.state.entries = this.state.entries.filter(e => !e.isStreaming);
         this.state.currentAssistantId = null;
+        this.state.lastClosedAssistantId = null;
         this.state.activeToolCalls = new Map();
         this.state.processedToolIds = new Set();
     }
@@ -121,6 +133,7 @@ export class StreamState {
             return true;
         });
         this.state.currentAssistantId = null;
+        this.state.lastClosedAssistantId = null;
         this.reconcileActiveToolCalls();
         if (discarded.length > 0) {
             // An id still held after its card goes swallows the announcement that would redraw it.
@@ -148,6 +161,7 @@ export class StreamState {
     /** Reset streaming state (thread switch). */
     resetStreaming() {
         this.closeCurrentAssistant();
+        this.state.lastClosedAssistantId = null;
         this.state.activeToolCalls = new Map();
         this.state.processedToolIds = new Set();
         this.state.unresolvedToolIds = new Set();
