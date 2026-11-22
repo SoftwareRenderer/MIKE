@@ -474,24 +474,16 @@ func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, 
 	// Read the record first: the files to delete are derived from its author and name.
 	ext, _ := h.store.GetByID(id)
 
-	// Stop sandbox if running
-	_ = h.sandbox.Destroy(id)
-
-	// Remove scoped storage for this extension so its data is not orphaned,
-	// even if the extension record itself is already gone.
-	_ = h.store.StorageDeleteAll(id)
-
-	if err := h.store.Delete(id); err != nil {
+	leftover, rowErr := h.deleteExtension(id, ext)
+	if rowErr != nil {
 		httputil.JSONError(w, http.StatusNotFound, "extension not found")
 		return
 	}
 
-	// Take the files with the row. The directory is what gets served and what the local scan offers
-	// for install, so leaving it behind resurrects the extension with its old manifest.
 	response := map[string]string{"status": "deleted"}
-	if warning := h.removeExtensionFiles(ext); warning != "" {
+	if leftover != "" {
 		// Reported, not swallowed: from the UI the extension is gone either way.
-		response["leftover"] = warning
+		response["leftover"] = leftover
 	}
 
 	httputil.JSONResponse(w, http.StatusOK, response)
@@ -500,6 +492,29 @@ func (h *ExtensionHandler) HandleDelete(w http.ResponseWriter, r *http.Request, 
 	if h.onExtensionChanged != nil {
 		h.onExtensionChanged()
 	}
+}
+
+// deleteExtension is the one path that takes an extension away: sandbox, scoped storage, row, then the
+// files its record names. No caller states a subset. The id is passed beside the record so a row that is
+// already gone still has its container and stored values taken. leftover is what the disk still holds, and
+// rowErr what the row deletion raised.
+func (h *ExtensionHandler) deleteExtension(id string, ext *Extension) (leftover string, rowErr error) {
+	// No sandbox manager means no container to stop.
+	if h.sandbox != nil {
+		_ = h.sandbox.Destroy(id)
+	}
+
+	// Scoped storage goes even when the record is already gone, so an extension that vanished halfway
+	// leaves no data behind its name.
+	_ = h.store.StorageDeleteAll(id)
+
+	if rowErr = h.store.Delete(id); rowErr != nil {
+		return "", rowErr
+	}
+
+	// Take the files with the row. The directory is what gets served and what the local scan offers
+	// for install, so leaving it behind resurrects the extension with its old manifest.
+	return h.removeExtensionFiles(ext), nil
 }
 
 // HandleSetEnabled toggles the enabled state of an extension.
@@ -868,6 +883,41 @@ func localRegistryEntry(le localExtension) RegistryEntry {
 		LocalPath:    le.Dir,
 		localDir:     le.Dir,
 	}
+}
+
+// HandleReloadDev makes one development row's bytes the running version: a task id in the body is Try
+// Extension and loads that task's worktree, no task id loads the repository. A manifest asking for
+// unacknowledged access answers 409 with what the install dialog renders; any other failure text is the
+// answer, because it is the sentence the person carries back to the agent.
+func (h *ExtensionHandler) HandleReloadDev(w http.ResponseWriter, r *http.Request, id string) {
+	var req struct {
+		TaskID *string `json:"task_id"`
+		Ack    string  `json:"ack"`
+	}
+	if !httputil.DecodeJSON(w, r, &req) {
+		return
+	}
+	taskID := ""
+	if req.TaskID != nil {
+		taskID = strings.TrimSpace(*req.TaskID)
+	}
+	ext, err := h.LoadDev(id, taskID, strings.TrimSpace(req.Ack))
+	if err != nil {
+		if errors.Is(err, ErrExtensionNotFound) {
+			httputil.JSONError(w, http.StatusNotFound, "extension not found")
+			return
+		}
+		var refused *ErrConsentRequired
+		if errors.As(err, &refused) {
+			httputil.JSONResponse(w, http.StatusConflict, consentAnswerOf(refused))
+			return
+		}
+		logging.For(logging.Extensions).Warnf("ext=%s could not load its development version: %v", id, err)
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	statuses := h.sandbox.ListRunning()
+	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
 }
 
 // HandleLocalExtensions lists the extensions in the local extensions directory as registry-style

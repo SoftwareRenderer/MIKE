@@ -6,6 +6,7 @@ package api
 
 import (
 	"encoding/json/v2"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -33,7 +34,7 @@ func scaffoldBundle() fstest.MapFS {
 
 // scaffoldHandler wires the create path over a store of its own. The task handler is left unwired:
 // starting a turn is the executor's decision, and these tests are about what the create writes.
-func scaffoldHandler(t *testing.T) (*ExtensionScaffoldHandler, *store.Store, *extensions.ExtensionStore, string) {
+func scaffoldHandler(t *testing.T) (*ExtensionScaffoldHandler, *store.Store, *extensions.ExtensionStore, *extensions.ExtensionHandler, string) {
 	t.Helper()
 	// The commit is part of the create, so the test supplies the identity the server would have been
 	// stamped with at boot rather than inheriting whoever runs the suite.
@@ -57,13 +58,28 @@ func scaffoldHandler(t *testing.T) (*ExtensionScaffoldHandler, *store.Store, *ex
 	}
 	extH := extensions.NewExtensionHandler(extStore, nil, nil, &extensions.ExtensionConfig{ExtensionsDir: extRoot})
 	extH.SetAuthoringBundle(scaffoldBundle())
+	// The create path asks the project table whether a row is abandoned, so the fixture wires one.
+	extH.SetDevSources(scaffoldSources{s: s})
 	h := NewExtensionScaffoldHandler(ExtensionScaffoldDeps{
 		Store:       s,
 		Projects:    projects,
 		Extensions:  extH,
 		ConfigStore: cfgStore,
 	})
-	return h, s, extStore, extRoot
+	return h, s, extStore, extH, extRoot
+}
+
+// scaffoldSources is the project table and the worktree layout as the create path sees them. No create
+// reads a task or a worktree.
+type scaffoldSources struct{ s *store.Store }
+
+func (f scaffoldSources) GetProject(id string) (*types.Project, error) { return f.s.GetProject(id) }
+func (f scaffoldSources) ListProjects() ([]types.Project, error)       { return f.s.ListProjects() }
+func (f scaffoldSources) GetTask(string) (*types.Task, error) {
+	return nil, errors.New("no task is loaded by a create")
+}
+func (f scaffoldSources) WorktreePath(string) (string, error) {
+	return "", errors.New("no worktree is loaded by a create")
 }
 
 func postScaffold(t *testing.T, h *ExtensionScaffoldHandler, body string) *httptest.ResponseRecorder {
@@ -75,7 +91,7 @@ func postScaffold(t *testing.T, h *ExtensionScaffoldHandler, body string) *httpt
 }
 
 func TestScaffoldRefusesAMissingNameOrDescription(t *testing.T) {
-	h, s, _, extRoot := scaffoldHandler(t)
+	h, s, _, _, extRoot := scaffoldHandler(t)
 	for _, body := range []string{`{}`, `{"name":"  "}`, `{"name":"My Ext"}`, `{"name":"My Ext","description":"  "}`} {
 		rec := postScaffold(t, h, body)
 		if rec.Code != http.StatusBadRequest {
@@ -95,7 +111,7 @@ func TestScaffoldRefusesAMissingNameOrDescription(t *testing.T) {
 }
 
 func TestScaffoldMakesRepositoryProjectRowAndTask(t *testing.T) {
-	h, s, extStore, extRoot := scaffoldHandler(t)
+	h, s, extStore, _, extRoot := scaffoldHandler(t)
 	rec := postScaffold(t, h, `{"name":"My Ext","description":"count the words on a card"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
@@ -157,8 +173,10 @@ func TestScaffoldMakesRepositoryProjectRowAndTask(t *testing.T) {
 	if !strings.Contains(task.Prompt, "count the words on a card") {
 		t.Errorf("the person's own words never reached the agent: %q", task.Prompt)
 	}
-	if !strings.Contains(task.Prompt, "extension-authoring") {
-		t.Error("the prompt lost the instruction that tells the agent to choose the type")
+	// The type stays the agent's decision to make and to report. The skill that decides it is named by the
+	// repository's own AGENTS.md, which the create writes beside the prompt.
+	if !strings.Contains(task.Prompt, "which type you chose") {
+		t.Error("the prompt lost the instruction that makes the agent name the type it chose")
 	}
 	if strings.Contains(task.Prompt, "count the words on a card") && strings.Count(task.Prompt, "count the words on a card") != 1 {
 		t.Error("the person's words were pasted twice")
@@ -175,7 +193,7 @@ func TestScaffoldMakesRepositoryProjectRowAndTask(t *testing.T) {
 
 // Without the worker pair on this card the start at the end of the create has nothing to run.
 func TestScaffoldTaskCarriesTheConfiguredDefaults(t *testing.T) {
-	h, s, _, _ := scaffoldHandler(t)
+	h, s, _, _, _ := scaffoldHandler(t)
 	mode := types.ModePlan
 	turns := 5
 	yes := true
@@ -220,17 +238,21 @@ func TestScaffoldTaskCarriesTheConfiguredDefaults(t *testing.T) {
 	}
 }
 
+// A row beside a live project holds the name, so the create is refused with a conflict.
 func TestScaffoldRefusesANameAlreadyTaken(t *testing.T) {
-	h, s, _, _ := scaffoldHandler(t)
+	h, s, _, _, _ := scaffoldHandler(t)
 	if rec := postScaffold(t, h, `{"name":"My Ext","description":"first"}`); rec.Code != http.StatusCreated {
 		t.Fatalf("first create = %d: %s", rec.Code, rec.Body.String())
 	}
 	rec := postScaffold(t, h, `{"name":"My Ext!","description":"second"}`)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("second create = %d, want 400: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("second create = %d, want 409: %s", rec.Code, rec.Body.String())
 	}
 	if !strings.Contains(rec.Body.String(), "already exists") {
 		t.Errorf("the refusal does not say the name is taken: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "UNIQUE constraint") {
+		t.Errorf("the refusal carries the index's own words: %s", rec.Body.String())
 	}
 	projects, err := s.ListProjects()
 	if err != nil {
@@ -241,30 +263,120 @@ func TestScaffoldRefusesANameAlreadyTaken(t *testing.T) {
 	}
 }
 
-func TestScaffoldWithoutAProjectPathLeavesNoRepository(t *testing.T) {
-	// The project path is the last thing that can refuse a create after the directory exists, so a
-	// create whose project never happened has to take the directory back with it.
-	h, s, extStore, extRoot := scaffoldHandler(t)
-	h.projects = nil // the wiring a build can be missing; the create must refuse rather than crash
-	rec := postScaffold(t, h, `{"name":"My Ext","description":"x"}`)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("create with no project path = %d, want 500: %s", rec.Code, rec.Body.String())
+// A repository outlives its project, so a name whose folder is still there is refused by the folder, which
+// the sentence names.
+func TestScaffoldRefusesANameWhoseRepositorySurvives(t *testing.T) {
+	h, _, extStore, _, _ := scaffoldHandler(t)
+	if rec := postScaffold(t, h, `{"name":"My Ext","description":"first"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("first create = %d: %s", rec.Code, rec.Body.String())
 	}
-	if _, err := os.Stat(filepath.Join(extRoot, extensions.DevNamespace, "my-ext")); !os.IsNotExist(err) {
-		t.Error("a create that made no project left its repository claiming the name")
+	rows, err := extStore.GetByType("")
+	if err != nil {
+		t.Fatal(err)
 	}
+	if len(rows) != 1 {
+		t.Fatalf("the create made %d rows, want its one", len(rows))
+	}
+	if err := extStore.Delete(rows[0].ID); err != nil {
+		t.Fatalf("uninstall the row: %v", err)
+	}
+
+	rec := postScaffold(t, h, `{"name":"My Ext","description":"second"}`)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create beside the surviving repository = %d, want 400: %s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, filepath.Join(extensions.DevNamespace, "my-ext")) {
+		t.Errorf("the refusal does not name the folder in the way: %s", body)
+	}
+}
+
+// A create that dies after the row exists must take the row back with the project and the repository; a
+// row left behind claims the name.
+func TestACreateThatDiesHalfwayLeavesNoRowBehind(t *testing.T) {
+	h, s, extStore, _, extRoot := scaffoldHandler(t)
+	if _, err := s.RawSQL().Exec(`CREATE TRIGGER abort_first_message BEFORE INSERT ON task_messages
+		BEGIN SELECT RAISE(ABORT, 'injected: the first message cannot be written'); END`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	rec := postScaffold(t, h, `{"name":"My Ext","description":"count the words on a card"}`)
+	if rec.Code == http.StatusCreated {
+		t.Fatal("the create reported success against a trigger that aborts its first message")
+	}
+	if strings.Contains(rec.Body.String(), "UNIQUE constraint") {
+		t.Errorf("the failure carries driver text: %s", rec.Body.String())
+	}
+	assertCreateLeftNothing(t, s, extStore, filepath.Join(extRoot, extensions.DevNamespace, "my-ext"))
+
+	if _, err := s.RawSQL().Exec(`DROP TRIGGER abort_first_message`); err != nil {
+		t.Fatalf("drop trigger: %v", err)
+	}
+	if rec := postScaffold(t, h, `{"name":"My Ext","description":"count the words on a card"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("the same name after the failure = %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// A row whose project and repository are both gone claims a name nobody can open. The create clears it and
+// lands.
+func TestACreateReclaimsTheRowOfAGoneProject(t *testing.T) {
+	h, s, extStore, _, extRoot := scaffoldHandler(t)
+	if rec := postScaffold(t, h, `{"name":"My Ext","description":"first"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("first create = %d: %s", rec.Code, rec.Body.String())
+	}
+	projects, err := s.ListProjects()
+	if err != nil || len(projects) != 1 {
+		t.Fatalf("projects = %+v (%v)", projects, err)
+	}
+	if err := s.DeleteProject(projects[0].ID); err != nil {
+		t.Fatalf("delete the project: %v", err)
+	}
+	repo := filepath.Join(extRoot, extensions.DevNamespace, "my-ext")
+	if err := os.RemoveAll(repo); err != nil {
+		t.Fatal(err)
+	}
+
+	if rec := postScaffold(t, h, `{"name":"My Ext","description":"second"}`); rec.Code != http.StatusCreated {
+		t.Fatalf("create beside the leftover row = %d: %s", rec.Code, rec.Body.String())
+	}
+	rows, err := extStore.GetByType("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Errorf("the leftover row survived, or the create made none: %+v", rows)
+	}
+}
+
+// assertCreateLeftNothing checks that a create which did not land made no project, row or directory.
+func assertCreateLeftNothing(t *testing.T, s *store.Store, extStore *extensions.ExtensionStore, repo string) {
+	t.Helper()
 	projects, err := s.ListProjects()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(projects) != 0 {
-		t.Errorf("a refused create left a project row: %+v", projects)
+		t.Errorf("the failed create left projects: %+v", projects)
 	}
 	rows, err := extStore.GetByType("")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 0 {
-		t.Errorf("a refused create left an extension row: %+v", rows)
+		t.Errorf("the failed create left the row claiming the name: %+v", rows)
 	}
+	if _, err := os.Stat(repo); !os.IsNotExist(err) {
+		t.Errorf("the failed create left its repository at %s", repo)
+	}
+}
+
+func TestScaffoldWithoutAProjectPathLeavesNoRepository(t *testing.T) {
+	// The project path is the last thing that can refuse a create after the directory exists, so a
+	// create whose project never happened has to take the directory back with it.
+	h, s, extStore, _, extRoot := scaffoldHandler(t)
+	h.projects = nil // the wiring a build can be missing; the create must refuse rather than crash
+	rec := postScaffold(t, h, `{"name":"My Ext","description":"x"}`)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("create with no project path = %d, want 500: %s", rec.Code, rec.Body.String())
+	}
+	assertCreateLeftNothing(t, s, extStore, filepath.Join(extRoot, extensions.DevNamespace, "my-ext"))
 }

@@ -29,6 +29,9 @@ const (
 	devStagingNamespace = "_try"
 	// devSlugMaxLen caps the directory name a person's extension name becomes.
 	devSlugMaxLen = 40
+	// devAuthor is the author every development row carries, not a registry namespace, so the name alone
+	// decides who holds it.
+	devAuthor = "operator"
 )
 
 func (e *Extension) IsDev() bool { return e != nil && e.InstallSource == DevInstallSource }
@@ -125,15 +128,6 @@ func devOrExtensionDir(extensionsDir string, ext *Extension) string {
 	return extensionDir(extensionsDir, ext.Author, ext.Name)
 }
 
-// DevServedURL is where a browser reaches a loaded development extension's files, or "" when nothing has
-// been loaded.
-func DevServedURL(extensionsDir string, ext *Extension) (string, bool) {
-	if !ext.IsDev() || ext.LoadedDir == "" {
-		return "", false
-	}
-	return servedURLFromDir(extensionsDir, devOrExtensionDir(extensionsDir, ext)), true
-}
-
 // DevStagingUnderRoot is the loaded copy of a task's bytes, relative to the extensions root, or "" when
 // the row loads the repository itself — which the server must not remove. LoadedDir is written only by
 // the load path, so its two shapes are the whole contract.
@@ -162,9 +156,42 @@ func (h *ExtensionHandler) removeDevStaging(ext *Extension) string {
 	return removeInstalledDir(ext.ID, absRoot, filepath.Join(absRoot, filepath.FromSlash(rel)))
 }
 
-// RemoveDevRepo deletes the repository directory the server created for a development project, and
-// returns the leftover message its deletion path reports. A path not strictly beneath the namespace
-// removes nothing: for every other project that directory is the person's work.
+// DeleteDevRows removes the development rows naming one project and reports what it could not remove. It
+// removes no file. A non-development row naming the project is not this project's to delete.
+func (h *ExtensionHandler) DeleteDevRows(projectID string) string {
+	if strings.TrimSpace(projectID) == "" {
+		return ""
+	}
+	exts, err := h.store.GetByType("")
+	if err != nil {
+		return fmt.Sprintf("the development rows of project %s could not be listed: %v", projectID, err)
+	}
+	var problems []string
+	deleted := false
+	for i := range exts {
+		ext := &exts[i]
+		if !ext.IsDev() || ext.ProjectID != projectID {
+			continue
+		}
+		leftover, rowErr := h.deleteExtension(ext.ID, ext)
+		if rowErr != nil {
+			problems = append(problems, fmt.Sprintf("row %s could not be deleted: %v", ext.ID, rowErr))
+			continue
+		}
+		deleted = true
+		if leftover != "" {
+			problems = append(problems, leftover)
+		}
+	}
+	// The browser's copy of the list carries these rows.
+	if deleted && h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
+	return strings.Join(problems, "; ")
+}
+
+// RemoveDevRepo deletes the repository directory a create made and reports what it could not remove. A path
+// not strictly beneath the namespace removes nothing.
 func (h *ExtensionHandler) RemoveDevRepo(projectPath string) string {
 	if strings.TrimSpace(projectPath) == "" {
 		return ""
@@ -197,6 +224,6 @@ func (h *ExtensionHandler) RemoveDevRepo(projectPath string) string {
 	if entries, err := os.ReadDir(devRoot); err == nil && len(entries) == 0 {
 		_ = os.Remove(devRoot)
 	}
-	logging.For(logging.Extensions).Infof("removed the development repository %s with its project", abs)
+	logging.For(logging.Extensions).Infof("removed the development repository %s created by a failed create", abs)
 	return ""
 }

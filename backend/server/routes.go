@@ -118,10 +118,8 @@ func (s *Server) setupRoutes() {
 	s.mux.HandleFunc("POST /api/extensions/install", s.extHandler.HandleInstall)
 	s.mux.HandleFunc("POST /api/extensions/install-local", s.extHandler.HandleInstallLocal)
 	s.mux.HandleFunc("GET /api/extensions/check-updates", s.extHandler.HandleCheckUpdates)
-	// Development extensions (docs/extension-authoring.md): what is loadable, the load itself, and the
-	// row for a repository whose row was uninstalled.
-	s.mux.HandleFunc("GET /api/extensions/dev", s.extHandler.HandleDevExtensions)
-	s.mux.HandleFunc("POST /api/extensions/dev-attach", s.extHandler.HandleDevAttach)
+	// Development extensions (docs/extension-authoring.md): the load itself, and the create that makes
+	// the repository, the project and the row beside each other.
 	s.mux.HandleFunc("POST /api/extensions/scaffold", s.scaffoldHandler.HandleScaffold)
 	s.mux.HandleFunc("POST /api/extensions/{id}/reload", func(w http.ResponseWriter, r *http.Request) {
 		s.extHandler.HandleReloadDev(w, r, r.PathValue("id"))

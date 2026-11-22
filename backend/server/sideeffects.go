@@ -49,7 +49,6 @@ var detachedOperations = []sideEffectEntry{
 	{"POST /api/projects/{projectID}/git/push", "publishes commits to the remote, which no later cancel can undo"},
 	{"POST /api/extensions/install", "checks out, builds an image and writes the row; install is atomic by design"},
 	{"POST /api/extensions/{id}/reload", "replaces the loaded development copy, then the row — a person pressing Try Extension or Reload"},
-	{"POST /api/extensions/dev-attach", "creates the row for a repository the server already holds"},
 	{"POST /api/extensions/scaffold", "writes a repository, a project, a row and a started task, and removes them all if any step fails"},
 	{"POST /api/extensions/install-local", "materializes the folder, then the row — in that order, so a folder with no row is listed as installable"},
 	{"POST /api/extensions/{id}/update", "moves the checkout to a new commit and may rebuild the image"},

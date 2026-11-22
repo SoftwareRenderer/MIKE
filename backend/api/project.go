@@ -43,10 +43,9 @@ type ProjectHandler struct {
 	// submoduleFetch is the operator's half of what fetching a submodule may contact. The project's half
 	// decides whether a turn asks at all; a person's click always may.
 	submoduleFetch git.SubmoduleFetch
-	// removes the repository directory of a project the server created under the development
-	// namespace, and reports what it could not remove. Declared here so a project's deletion stays one
-	// path; nil means this server has no extensions to develop.
-	devRepoCleanup func(projectPath string) string
+	// removes the development rows beside a project and reports what it could not remove. Rows only: a
+	// repository outlives its project. Nil means this server has no extensions to develop.
+	devCleanup func(projectID string) string
 }
 
 // projectSandboxOps is the sandbox operations owned by the project.
@@ -69,24 +68,24 @@ type ProjectDeps struct {
 	Tasks       taskTreeDeleter
 	HostRoot    *fsutil.HostRoot
 	DangerZone  sandbox.DangerZone
-	// DevRepoCleanup owns the repository directory of a development project; see ProjectHandler.
-	DevRepoCleanup func(projectPath string) string
+	// DevCleanup owns the development extension rows that stand beside a project; see ProjectHandler.
+	DevCleanup func(projectID string) string
 	// SubmoduleFetch carries the operator's decision into both submodule endpoints.
 	SubmoduleFetch git.SubmoduleFetch
 }
 
 func NewProjectHandler(deps ProjectDeps) *ProjectHandler {
 	return &ProjectHandler{
-		store:          deps.Store,
-		configStore:    deps.ConfigStore,
-		worktreeMgr:    deps.WorktreeMgr,
-		terminalMgr:    deps.TerminalMgr,
-		sandboxMgr:     deps.SandboxMgr,
-		executor:       deps.Executor,
-		hostRoot:       deps.HostRoot,
-		dangerZone:     deps.DangerZone,
-		tasks:          deps.Tasks,
-		devRepoCleanup: deps.DevRepoCleanup,
+		store:       deps.Store,
+		configStore: deps.ConfigStore,
+		worktreeMgr: deps.WorktreeMgr,
+		terminalMgr: deps.TerminalMgr,
+		sandboxMgr:  deps.SandboxMgr,
+		executor:    deps.Executor,
+		hostRoot:    deps.HostRoot,
+		dangerZone:  deps.DangerZone,
+		tasks:       deps.Tasks,
+		devCleanup:  deps.DevCleanup,
 
 		submoduleFetch: deps.SubmoduleFetch,
 	}
@@ -207,10 +206,10 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	httputil.JSONResponse(w, code, p)
 }
 
-// SetDevRepoCleanup aims the project deletion path at the development namespace. The extensions handler
-// is built after this one, so the aim is declared beside the rest of that wiring rather than reordered.
-func (h *ProjectHandler) SetDevRepoCleanup(cleanup func(projectPath string) string) {
-	h.devRepoCleanup = cleanup
+// SetDevCleanup aims the project deletion path at the development rows. The extensions handler is built
+// after this one, so this is wired rather than a constructor field.
+func (h *ProjectHandler) SetDevCleanup(cleanup func(projectID string) string) {
+	h.devCleanup = cleanup
 }
 
 // checkHostPath checks if path is inside the host jail.
@@ -956,19 +955,17 @@ func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, id string) {
 			logging.For(logging.Managers).Warnf("project %s: worktree directory cleanup failed: %v", id, err)
 		}
 	}
-	// A project the server created under the development namespace has no home elsewhere: its
-	// directory *is* the extension repository, so it goes with the project. Anywhere else the
-	// directory is the person's own work and nothing here touches it.
-	if h.devRepoCleanup != nil {
-		if p, err := h.store.GetProject(id); err == nil {
-			if leftover := h.devRepoCleanup(p.Path); leftover != "" {
-				logging.For(logging.Managers).Warnf("project %s: development repository cleanup failed: %s", id, leftover)
-			}
-		}
-	}
 	if err := h.store.DeleteProject(id); err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to delete project")
 		return
+	}
+	// A row naming this project can never load once the project is gone, and nothing else removes it. The
+	// repository stays: it is the person's git history. After the project row, so a deletion that failed
+	// claims to have taken nothing.
+	if h.devCleanup != nil {
+		if leftover := h.devCleanup(id); leftover != "" {
+			logging.For(logging.Managers).Warnf("project %s: development extension cleanup failed: %s", id, leftover)
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -1,8 +1,8 @@
 # Authoring a custom extension
 
 Read this before touching `backend/extensions/dev.go`, `dev_load.go`, `scaffold.go`, the
-`/extensions/dev*` routes, or `templates/extension/`. The rules are in `AGENTS.md → Extensions`; this
-file is the mechanism.
+`/api/extensions/{id}/reload` route, or `templates/extension/`. The rules are in `AGENTS.md → Extensions`;
+this file is the mechanism.
 
 A person gives a **name** and one sentence about what the extension should do. They never choose a
 type: the agent in the first task reads the authoring skill, decides the type, and writes the
@@ -21,9 +21,13 @@ extension name.
 | `extensions/_dev/_try/<slug>/<taskID>/` | the server's loaded copy of one task's uncommitted bytes |
 
 Nothing in the namespace is installable: `scanLocalExtensions` and `findLocalExtension` skip it, and
-`install-local` refuses `_dev` as an author. Deleting the **row** deletes the staging copy only; the
-repository goes with the **project**, through `RemoveDevRepo`, which removes nothing that is not
-strictly beneath the namespace and refuses a path that resolves out of it.
+`install-local` refuses `_dev` as an author. Nothing that deletes a row, a task or a project removes the
+repository: `RemoveDevRepo` unwinds the directory a create made and nothing else, and it removes nothing
+that is not strictly beneath the namespace and refuses a path that resolves out of it. A repository whose
+project is gone is an **unclaimed** directory — the person's own folder to read, keep, rename or remove.
+That is what keeps the project-removal dialog's promise ("The project folder itself will NOT be deleted",
+`app.project.removeMessage`) true of an authoring project as much as of any other: the server created that
+folder, and still never deletes it.
 
 `/extensions/` refuses every dot-prefixed segment (`noEscapeFS`), which is what lets a git repository
 live under the served root: `.git/config`, `.env` and `.agents/skills/**` are unreachable.
@@ -36,6 +40,29 @@ enable path refuses it. `devOrExtensionDir` is the single answer to "where do th
 — the served URL, the prompt overlay and the LLM mappings all resolve through it, so the browser's
 version and the server's version are never two different things.
 
+### The name
+
+Every development row is `(author = "operator", name = <slug>)`, and `(author, name)` is `UNIQUE`, so one
+row holds one name. A taken name is the person's own collision and is answered as one: the index refuses the
+insert and `isDuplicateName` turns that into a conflict naming the extension, so SQLite's text never walks
+out of a handler as an internal error.
+
+`POST /api/extensions/scaffold` asks the name before it writes a byte, through `ReserveDevName`. A row keeps
+the name while anything still owns it: a repository on disk, a project that exists, a project holding that
+path, or a value the person left in the row. The create is then refused with 409, having made nothing — what
+to do with that folder is the person's decision. A row with none of those is the remainder of a create that
+died after writing it: it is deleted through `deleteExtension` (docs/extension-lifecycle.md → Deleting an
+extension deletes its directory) and an Info line names it. A deletion may take that row because it holds
+nothing of anyone's — `devRowIsLeftover` is the one place that decides, and it reads the row's loaded state,
+its config, its acknowledgement and its stored keys.
+
+A project's deletion takes its own development rows with it, through `DeleteDevRows`, and removes no file:
+a row beside a deleted project claims a name, can never load, and has no other owner. The scaffold path
+rolls its own row back the same way when a later step of the create fails.
+
+Tests: `backend/extensions/dev_create_test.go`, `backend/api/extension_scaffold_test.go`,
+`backend/api/project_dev_repo_test.go`.
+
 ## Loading
 
 One entry point, `ExtensionHandler.LoadDev(id, taskID)`, behind `POST /api/extensions/{id}/reload`:
@@ -46,11 +73,12 @@ One entry point, `ExtensionHandler.LoadDev(id, taskID)`, behind `POST /api/exten
   the served root, so its files are copied into `_dev/_try/<slug>/<taskID>` first; the copy is
   replaced on every load, so a file the source dropped stops being served.
 
-`GET /api/extensions/dev` lists the rows beside the repositories that no row claims, and
-`POST /api/extensions/dev-attach` makes a row for one of them — the way back after an uninstall, which
-takes the row away and leaves the repository. Neither has a caller in the browser yet: the ordinary
-listing already carries a row's loaded state and served URL, and only the unclaimed-repository half
-needs this pair.
+Uninstalling a row leaves its repository: the row's deletion takes the staging copy and nothing else
+(docs/extension-lifecycle.md → Deleting an extension deletes its directory). An unclaimed folder is the
+person's own from then on — read, keep, rename or remove — and a create of the same name is refused while
+the folder stands, with the folder named in the sentence. No route lists unclaimed repositories or gives one
+a row: the ordinary listing carries a row's loaded state and served URL, and nothing in the browser ever
+called the pair that did.
 
 Every directory the load reads is derived from stored rows — the project's path, the task's worktree —
 never from a path in a request. A task must belong to the row's project. A task whose worktree is gone
