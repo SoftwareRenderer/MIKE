@@ -656,12 +656,14 @@ func (te *TaskExecutor) rowsDurable(projectID, taskID string) {
 	te.appStreamMgr.DurableThrough(projectID, taskID)
 }
 
-// heldReasoningFrame is the announcement a collapsed call owes when its reasoning stays hidden: the total
-// the reader never saw, and the row that stores it. `complete` names only the run's last row, so without
-// this every earlier call of a multi-call turn would be unopenable until the thread was read again.
-func heldReasoningFrame(msgID, reasoning, content string, hasToolCalls, collapsed bool) (types.StreamEvent, bool) {
-	// Nothing reasoned is nothing withheld: a frame here would hand the reader a toggle over an empty row.
-	if !collapsed || reasoning == "" || !types.ShouldHideReasoning(reasoning, content, hasToolCalls) {
+// closingReasoningFrame is the frame that says a collapsed call's count is over, and the row that stores the
+// reasoning behind it. The buffer hands the newest count frame to whoever subscribes next, so a call that left
+// no closer reads to a view arriving later as reasoning still arriving. Whether the reader was shown the text
+// decides nothing: the count went out either way. `complete` names only the run's last row, so the row id is
+// also what keeps an earlier call of a multi-call turn openable before the thread is read again.
+func closingReasoningFrame(msgID, reasoning string, collapsed bool) (types.StreamEvent, bool) {
+	// A call that reasoned nothing announced no count, so there is nothing to close.
+	if !collapsed || reasoning == "" {
 		return types.StreamEvent{}, false
 	}
 	return types.StreamEvent{Type: types.WSTypeReasoningProgress, Data: map[string]any{
@@ -669,10 +671,10 @@ func heldReasoningFrame(msgID, reasoning, content string, hasToolCalls, collapse
 	}}, true
 }
 
-// announceHeldReasoning asks where the row is written. The frame is what a reader needs to open the
-// reasoning through `?full=1`; the reader already holding the text is owed nothing.
-func (te *TaskExecutor) announceHeldReasoning(projectID, taskID, msgID, reasoning, content string, hasToolCalls, collapsed bool) {
-	frame, ok := heldReasoningFrame(msgID, reasoning, content, hasToolCalls, collapsed)
+// announceClosingReasoning asks where the row is written, so the closer is dated after the rows it belongs to
+// are durable and survives the trim they trigger.
+func (te *TaskExecutor) announceClosingReasoning(projectID, taskID, msgID, reasoning string, collapsed bool) {
+	frame, ok := closingReasoningFrame(msgID, reasoning, collapsed)
 	if !ok {
 		return
 	}

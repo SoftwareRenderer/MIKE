@@ -33,7 +33,7 @@ func (te *TaskExecutor) finalizeToolTurn(setup *taskExecSetup, lc *loopContext, 
 		Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: assistantCreatedAt,
 	}); err == nil {
 		te.rowsDurable(setup.projectID, setup.task.ID)
-		te.announceHeldReasoning(setup.projectID, setup.task.ID, assistantMsgID, lc.reasoningContent.String(), assistantText, len(lc.pendingToolCalls) > 0, lc.collapsedReasoning)
+		te.announceClosingReasoning(setup.projectID, setup.task.ID, assistantMsgID, lc.reasoningContent.String(), lc.collapsedReasoning)
 	}
 
 	// What cancelling this kills, and what it must never reach, is in toolCallContext.
@@ -523,7 +523,7 @@ func (te *TaskExecutor) finalizeTextTurn(setup *taskExecSetup, lc *loopContext, 
 		PromptMs: promptMs, PredictedMs: predictedMs,
 		Duration: duration, CreatedAt: time.Now().UTC(),
 	})
-	te.announceHeldReasoning(setup.projectID, setup.task.ID, assistantMsgID, lc.reasoningContent.String(), assistantText, false, lc.collapsedReasoning)
+	te.announceClosingReasoning(setup.projectID, setup.task.ID, assistantMsgID, lc.reasoningContent.String(), lc.collapsedReasoning)
 	lc.assistantContent.Reset()
 	lc.reasoningContent.Reset()
 
@@ -632,7 +632,7 @@ func (te *TaskExecutor) finalizeReasoningTurn(setup *taskExecSetup, lc *loopCont
 		PromptMs: promptMs, PredictedMs: predictedMs,
 		Duration: time.Since(lc.callStartTime).Milliseconds(), CreatedAt: time.Now().UTC(),
 	})
-	te.announceHeldReasoning(setup.projectID, setup.task.ID, assistantMsgID, reasoningText, "", false, lc.collapsedReasoning)
+	te.announceClosingReasoning(setup.projectID, setup.task.ID, assistantMsgID, reasoningText, lc.collapsedReasoning)
 
 	// Append reasoning to conversation history so the LLM sees its own thinking.
 	// Put in ReasoningContent so toAPIMessage sends it as reasoning_content.

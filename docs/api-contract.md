@@ -228,17 +228,22 @@ so a reconnect replays the newest count and rebuilds the rate from one frame rat
 When the call ends the reader is shown what the rules say they must see. `types.ShouldHideReasoning`
 (`backend/types/reasoning.go`) is that rule, the same predicate the message window's redaction pass applies, so
 a row cannot be readable by one path and withheld by the other. Reasoning that is the call's whole answer
-comes once, as one `reasoning` frame holding the complete text. Reasoning that stays hidden costs one more
-field: the last count of that call carries `message_id`, naming the row that stores what was never sent. That is
-what "Show reasoning" reads through `?full=1`. `complete` names only the run's last row, so without that field
-every earlier call of a multi-call turn would stay unopenable until the thread was read again. That last count
-keeps its `chars`: it is the call's full total, and the client counts it into the context donut because stored
-reasoning costs the next call's context. A call that reasoned nothing sends no such frame, because a row named
-over an empty reasoning is a toggle over nothing.
+comes once, as one `reasoning` frame holding the complete text.
+
+Every collapsed call that reasoned ends with one more count frame, whichever way that rule went. Its `chars` is
+the call's full total, which the client counts into the context donut because stored reasoning costs the next
+call's context. It carries `message_id` too, naming the row that stores the reasoning: what "Show reasoning"
+reads through `?full=1`, and — since `complete` names only the run's last row — the only way an earlier call of
+a multi-call turn stays openable. The count half is what that rule decides nothing about. The buffer holds the
+newest count frame for whoever subscribes next, so a call that left no closer reads to a view arriving later as
+reasoning still arriving, and the client draws its thinking notice from any count that was never closed. A call
+that reasoned nothing sends no frame: nothing was announced to close, and a row named over an empty reasoning is
+a toggle over nothing.
 Tests: `backend/exec/loop_reasoning_test.go`, `stream-handler.unit.ts`,
-`chat-entries-collapsed-reasoning.unit.svelte.ts` (the notice survives whichever branch draws the entry),
-`reasoning-rate.unit.ts` and `reasoning-block.unit.svelte.ts` (the figure's floor, and its clock),
-`frontend/tests/e2e/collapsed-reasoning.spec.ts`.
+`chat-entries-collapsed-reasoning.unit.svelte.ts` (the notice survives whichever branch draws the entry, and
+stays down while the call's own tool runs), `reasoning-rate.unit.ts` and `reasoning-block.unit.svelte.ts` (the
+figure's floor, and its clock), `frontend/tests/e2e/collapsed-reasoning.spec.ts`. That the buffer's newest count
+is always a closed one is `go test ./backend/exec -run 'TestAFreshSubscriberOverARunningToolCall'`.
 
 ### A broken failure loop adds no frame shape
 

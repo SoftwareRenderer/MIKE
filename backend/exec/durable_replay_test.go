@@ -15,9 +15,25 @@ import (
 	"github.com/coder/websocket"
 )
 
-// replayedEvents names the task events a live subscriber is sent within the window. Reads are pumped in a
-// goroutine because a read whose context expires closes the connection.
+// replayedEvents names the task events a live subscriber is sent within the window.
 func replayedEvents(t *testing.T, asm *stream.AppStreamManager, projectID, taskID string, window time.Duration) []string {
+	t.Helper()
+	var names []string
+	for _, e := range replayedTaskEvents(t, asm, projectID, taskID, window) {
+		names = append(names, e.name)
+	}
+	return names
+}
+
+// A task_event a subscriber was handed, read off the flat frame.
+type replayedEvent struct {
+	name string
+	data map[string]any
+}
+
+// replayedTaskEvents is what a subscriber arriving now is handed for the task it just took, oldest first.
+// Reads are pumped in a goroutine because a read whose context expires closes the connection.
+func replayedTaskEvents(t *testing.T, asm *stream.AppStreamManager, projectID, taskID string, window time.Duration) []replayedEvent {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(asm.HandleStream))
 	t.Cleanup(srv.Close)
@@ -55,7 +71,7 @@ func replayedEvents(t *testing.T, asm *stream.AppStreamManager, projectID, taskI
 		t.Fatalf("subscribe to the task: %v", err)
 	}
 
-	var events []string
+	var events []replayedEvent
 	deadline := time.After(window)
 	for {
 		select {
@@ -66,9 +82,12 @@ func replayedEvents(t *testing.T, asm *stream.AppStreamManager, projectID, taskI
 			if frame["type"] != string(types.WSTypeTaskEvent) {
 				continue
 			}
-			if event, _ := frame["event"].(string); event != "" {
-				events = append(events, event)
+			name, _ := frame["event"].(string)
+			if name == "" {
+				continue
 			}
+			data, _ := frame["data"].(map[string]any)
+			events = append(events, replayedEvent{name: name, data: data})
 		case <-deadline:
 			return events
 		}
@@ -104,5 +123,59 @@ func TestAFreshSubscriberAfterAResultRowIsOwedTheTail(t *testing.T) {
 		if event == string(types.WSTypeToolCall) || event == string(types.WSTypeToolResult) {
 			t.Fatalf("a subscriber arriving after the result row is owed %v: the finished iteration is still in the replay buffer", events)
 		}
+	}
+}
+
+// unansweredToolCallRow is a call whose row is written and whose result has not landed: what a view arriving
+// mid-tool-call reads, since the rows come before the calls run.
+func unansweredToolCallRow(msgs []types.TaskMessage) *types.TaskMessage {
+	for i := range msgs {
+		if msgs[i].Role == "tool_call" && msgs[i].ToolResult == "" {
+			return &msgs[i]
+		}
+	}
+	return nil
+}
+
+// TestAFreshSubscriberOverARunningToolCallIsNotToldItIsThinking: the buffer keeps a collapsed call's newest
+// count frame for whoever subscribes next, and the replay is applied in order, so that newest frame is what
+// decides whether a view arriving mid-tool-call believes the model is still thinking.
+func TestAFreshSubscriberOverARunningToolCallIsNotToldItIsThinking(t *testing.T) {
+	t.Parallel()
+	// The command sleeps, so the tool is still running while the replay is read, and the answer after it goes
+	// quiet so the turn is still open and its buffer has not been cleared.
+	srv, _ := crashLLM(t,
+		func(w http.ResponseWriter) { sseReasoningThenBashCall(w, "sleep 5") },
+		streamsATokenThenGoesQuiet(6*time.Second),
+	)
+	te, _, projectID, initialSHA := setupExecutorWithGit(t)
+	collapseReasoning(t, te, true)
+	const taskID = "count-closed-before-the-tool"
+	worktreePath := crashTask(t, te, projectID, initialSHA, taskID, srv.URL)
+	startExecRun(t, te, projectID, taskID, srv.URL, worktreePath)
+
+	threadID := "thread-" + taskID
+	deadline := time.Now().Add(60 * time.Second)
+	for unansweredToolCallRow(mustMessages(t, te, taskID, threadID)) == nil {
+		if time.Now().After(deadline) {
+			t.Fatalf("no unanswered tool_call row within 60s; roles = %v", rolesInOrder(t, te, taskID, threadID))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	var newest map[string]any
+	counts := 0
+	for _, e := range replayedTaskEvents(t, te.appStreamMgr, projectID, taskID, 400*time.Millisecond) {
+		if e.name != string(types.WSTypeReasoningProgress) {
+			continue
+		}
+		counts++
+		newest = e.data
+	}
+	if counts == 0 {
+		t.Fatal("no count frame came back: the call this test staged announced nothing to close")
+	}
+	if id, _ := newest["message_id"].(string); id == "" {
+		t.Errorf("the newest count frame a subscriber is handed is %v: nothing closed it", newest)
 	}
 }

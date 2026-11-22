@@ -631,7 +631,7 @@ func (te *TaskExecutor) persistAgentTurnEntries(projectID, taskID, threadID stri
 				Duration:         time.Since(startTime).Milliseconds(),
 				CreatedAt:        time.Now().UTC(),
 			})
-			te.announceHeldReasoning(projectID, taskID, msgID, entry.ReasoningContent, entry.Content, batchHasToolCall(entries), collapsed)
+			te.announceClosingReasoning(projectID, taskID, msgID, entry.ReasoningContent, collapsed)
 			totalPromptTokens += entry.PromptTokens
 			totalPredictedTokens += entry.PredictedTokens
 

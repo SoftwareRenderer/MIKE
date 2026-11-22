@@ -10,6 +10,19 @@ import (
 	"mike/backend/types"
 )
 
+// collapseReasoning sets the preference a collapsed run reads once, when it starts.
+func collapseReasoning(t *testing.T, te *TaskExecutor, on bool) {
+	t.Helper()
+	cfg, err := te.configStore.GetConfig()
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	cfg.CollapseReasoning = &on
+	if err := te.configStore.UpdateConfig(cfg); err != nil {
+		t.Fatalf("set collapse_reasoning: %v", err)
+	}
+}
+
 func captureFlusher(collapsed bool) (*streamFlusher, *[]types.StreamEvent) {
 	var events []types.StreamEvent
 	return newStreamFlusher("proj", "task", func(_, _ string, e types.StreamEvent) {
@@ -258,31 +271,42 @@ func TestAgentReasoningFeed_HeldSaysNothingWhileReasoningStreams(t *testing.T) {
 	}
 }
 
-// TestHeldReasoningFrameNamesTheRowBehindHiddenReasoning: the reasoning a collapsed call kept is read out of
-// the row that stored it, so the frame naming that row is the only path a reader has to the words.
-func TestHeldReasoningFrameNamesTheRowBehindHiddenReasoning(t *testing.T) {
+// TestHeldReasoningFrameClosesEveryCollapsedCount: the replay buffer keeps a collapsed call's newest count
+// frame for whoever subscribes next, and that frame is the only thing saying the count is over — including for
+// the call whose reasoning the reader was shown, which is the case that once owed no frame at all.
+func TestHeldReasoningFrameClosesEveryCollapsedCount(t *testing.T) {
 	t.Parallel()
 
 	long := strings.Repeat("x", 300)
-	frame, ok := heldReasoningFrame("row-1", long, "The answer.", false, true)
-	if !ok {
-		t.Fatal("a hidden reasoning owes the reader the row that stores it")
-	}
-	if frame.Type != types.WSTypeReasoningProgress {
-		t.Errorf("frame type = %v, want %v", frame.Type, types.WSTypeReasoningProgress)
-	}
-	data, isMap := frame.Data.(map[string]any)
-	if !isMap || data["message_id"] != "row-1" || data["chars"] != len(long) {
-		t.Errorf("frame data = %v, want the row id and the %d characters it holds", frame.Data, len(long))
+	cases := []struct {
+		name      string
+		reasoning string
+		collapsed bool
+		want      bool
+	}{
+		{name: "long reasoning", reasoning: long, collapsed: true, want: true},
+		{name: "brief reasoning", reasoning: "A brief thought", collapsed: true, want: true},
+		{name: "an uncollapsed run", reasoning: long, collapsed: false},
+		{name: "a call that reasoned about nothing", reasoning: "", collapsed: true},
 	}
 
-	if _, ok := heldReasoningFrame("row-2", "A brief thought", "", false, true); ok {
-		t.Error("reasoning that is the answer's whole self goes out as text, not as a row to open")
-	}
-	if _, ok := heldReasoningFrame("row-3", long, "The answer.", false, false); ok {
-		t.Error("an uncollapsed run streamed its reasoning, so no row is owed")
-	}
-	if _, ok := heldReasoningFrame("row-4", "", "The answer.", false, true); ok {
-		t.Error("nothing was reasoned, so nothing is withheld")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			frame, ok := closingReasoningFrame("row-1", tc.reasoning, tc.collapsed)
+			if ok != tc.want {
+				t.Fatalf("ok = %v, want %v", ok, tc.want)
+			}
+			if !ok {
+				return
+			}
+			if frame.Type != types.WSTypeReasoningProgress {
+				t.Errorf("frame type = %v, want %v", frame.Type, types.WSTypeReasoningProgress)
+			}
+			data, isMap := frame.Data.(map[string]any)
+			if !isMap || data["message_id"] != "row-1" || data["chars"] != len(tc.reasoning) {
+				t.Errorf("frame data = %v, want the row id and the %d characters it holds", frame.Data, len(tc.reasoning))
+			}
+		})
 	}
 }

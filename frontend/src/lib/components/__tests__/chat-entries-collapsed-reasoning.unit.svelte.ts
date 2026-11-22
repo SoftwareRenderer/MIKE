@@ -16,7 +16,6 @@ window.matchMedia = vi.fn().mockImplementation((query: string) => ({
 }));
 
 vi.mock('$lib/api', () => ({ getTaskMessageFull: vi.fn(), uploadTaskFile: vi.fn() }));
-vi.mock('$lib/utils/toolArgs', () => ({}));
 vi.mock('$lib/constants', () => ({ SCROLL_BOTTOM_THRESHOLD: 100 }));
 
 import ChatEntries from '$lib/components/Chat/ChatEntries.svelte';
@@ -88,6 +87,21 @@ describe('a collapsed call as the ordinary entry branch draws it', () => {
             isStreaming: false,
             hasReasoning: true,
             reasoningContent: '[HIDDEN]',
+        });
+        await flush();
+
+        expect(container.querySelector('.reasoning-pending')).toBeNull();
+        expect(container.querySelector('.reasoning-toggle')).toBeTruthy();
+    });
+
+    // The state while a turn's tool call runs: the entry still streams, its reasoning was never sent, its
+    // count is closed. Only a count says thinking is arriving, so neither half alone raises the notice.
+    it('says nothing about thinking while the tool call it asked for is running', async () => {
+        const container = renderAssistant({
+            isStreaming: true,
+            hasReasoning: true,
+            reasoningContent: '[HIDDEN]',
+            toolCalls: [{ toolId: 'tc-1', toolName: 'bash', args: { command: 'ls' }, isPending: true, startedAt: Date.now() }],
         });
         await flush();
 

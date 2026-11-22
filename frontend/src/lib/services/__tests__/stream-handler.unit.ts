@@ -1592,6 +1592,19 @@ describe('a collapsed turn announces its reasoning size, never its text', () => 
         expect(stream.state.entries.map(e => e.id)).toEqual(['row-7']);
     });
 
+    // What the buffer hands a view arriving mid-tool-call, in order: the counts the call announced while it
+    // reasoned, then the frame that closed the count. The last one decides.
+    it('leaves nothing standing as thinking when the replay ends on a closed count', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 400 } }, false);
+        handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-7' } }, false);
+
+        const entry = stream.state.entries[0]!;
+        expect(entry.id).toBe('row-7');
+        expect(entry.reasoningPending).toBeUndefined();
+        expect(entry.isStreaming).toBe(false);
+    });
+
     it('opens a fresh entry for the next call, whose row the count has not named', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-7' } }, false);
