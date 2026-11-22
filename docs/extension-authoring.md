@@ -87,12 +87,18 @@ believes they are looking at the task's is worse than an error.
 
 The copy takes the directory's own files (a manifest names its stylesheet, never the script its own
 `index.html` loads) plus every name a capability resolves, and applies the caps before the bytes are
-read. A link among the directory's own files is skipped — a worktree carries them; a link where the
-manifest says a file is is refused, because the served copy would silently hold the wrong bytes.
+read. It descends into no subdirectory, so a file the manifest does not point straight at stays in the
+worktree and the served copy 404s it. A link among the directory's own files is skipped — a worktree
+carries them; a link where the manifest says a file is is refused, because the served copy would
+silently hold the wrong bytes.
 
 `validateLoadedManifest` is the list an install runs, shared by both paths, so "it installed" and "it
 loaded" cannot mean different things. A manifest that fails validation leaves the version already running
-in place and answers with the failure text — the sentence the person relays to the agent.
+in place and answers with the failure text — the sentence the person relays to the agent. What it cannot
+see it leaves alone: the files a manifest names but does not open (`css_url`, `mappings_file`,
+`wasm_module`), an unknown injection point or permission, and which capability wins when a manifest
+declares two executing ones. The image checks belong to the install path only, so a container type with
+nothing to run fails at its first start; the skill's checklist is where an author is told to expect that.
 
 ### The access question
 
@@ -143,7 +149,10 @@ logs that refusal — the pair is what makes the card run.
 
 `templates/extension/` holds `README.md`, `AGENTS.md`, a `tests/README.md`, and the authoring skill
 under `.agents/skills/extension-authoring/` — the project's own skill root, so the container binds it
-read-only while the browser cannot reach it.
+read-only while the browser cannot reach it. The skill page decides the type and states what the load
+refuses; `references/manifest.md` is the grammar and `references/lsp.md`, `references/agent.md` and
+`references/llm.md` carry the fields of the types that cost an image or a module. Every JSON name the
+manifest types declare has to appear in one of them.
 
 ## Tests
 
@@ -151,8 +160,10 @@ read-only while the browser cannot reach it.
 
 - `dev_test.go` — the namespace, delete, listing, enable and repair guards.
 - `dev_load_test.go` — loading, the three consumers resolving into the staging copy, the prune.
-- `scaffold_test.go` — the bundle and the scaffolder: every example manifest passes the load validator,
-  and the grammar page names every field the Go manifest types declare, in both directions.
+- `scaffold_test.go` — the bundle and the scaffolder. Every example manifest passes the load validator.
+  Every JSON name the manifest types declare is named somewhere in the skill, walking into every
+  capability type, so a field added to Go without a page fails. And no table in the grammar page names a
+  field the types do not declare.
 - `backend/api/extension_scaffold_test.go` — the create path, and the defaults its first task arrives
   with.
 - `backend/api/project_dev_repo_test.go` — only a development project's directory is removed.

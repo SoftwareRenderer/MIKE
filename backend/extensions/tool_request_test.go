@@ -1,6 +1,9 @@
 package extensions
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // What breaks if these slip: an argument the model wrote becomes part of the request's path, so the
 // extension's credential pays a call at an endpoint its manifest never named.
@@ -72,5 +75,36 @@ func TestFillRequestEncodesAQueryValueExactlyOnce(t *testing.T) {
 	}
 	if got := filled.URL; got != "https://searx.example:443/search?format=json&q=two+cats%2Ffinal" {
 		t.Errorf("request URL = %q, want the argument encoded once", got)
+	}
+}
+
+// Nothing reads the upstream at load, so a `results` path naming one value rather than a list shows
+// only at the first call — the mistake a copied example carries into every manifest that copies it.
+func TestRenderAnswerRefusesAResultsPathThatNamesOneValue(t *testing.T) {
+	body := []byte(`{"page":{"name":"Example"},"status":{"indicator":"none","description":"All Systems Operational"},"components":[{"name":"API","status":"operational","description":"Request and response API"}]}`)
+
+	list := ToolResponse{Results: "components", Fields: []ToolField{{Label: "name", Key: "name"}, {Label: "status", Key: "status"}}}
+	answer, err := list.RenderAnswer(body, true)
+	if err != nil {
+		t.Fatalf("a list path must render: %v", err)
+	}
+	for _, want := range []string{"1.", "name: API", "status: operational"} {
+		if !strings.Contains(answer, want) {
+			t.Errorf("the answer is missing %q:\n%s", want, answer)
+		}
+	}
+
+	for _, path := range []string{"status.description", "page"} {
+		scalar := ToolResponse{Results: path, Fields: []ToolField{{Label: "status", Key: "description"}}}
+		if _, err := scalar.RenderAnswer(body, true); err == nil {
+			t.Errorf("results %q names one value and rendered anyway", path)
+		} else if !strings.Contains(err.Error(), "not a list of results") {
+			t.Errorf("results %q refused with the wrong sentence: %v", path, err)
+		}
+	}
+
+	missing := ToolResponse{Results: "nothing.here", Fields: []ToolField{{Label: "name", Key: "name"}}}
+	if _, err := missing.RenderAnswer(body, true); err == nil || !strings.Contains(err.Error(), "has no") {
+		t.Errorf("an absent path should name itself: %v", err)
 	}
 }

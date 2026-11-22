@@ -3,8 +3,8 @@ package extensions
 // Loading a development extension is how a person tests what their agent wrote. One rule decides the
 // bytes: the row loads from a directory derived from stored rows — the repository when no task is named,
 // the named task's worktree otherwise. Bytes outside the served root are copied into the staging tree
-// first, and this is the only load path: Try Extension passes a task id, the Extensions card's Reload
-// passes none, and both arrive here.
+// first, and this is the only load path. Try Extension is its only caller today, and it always names a
+// task, so the served copy — not the repository — is what a person sees until the next press replaces it.
 
 import (
 	"errors"

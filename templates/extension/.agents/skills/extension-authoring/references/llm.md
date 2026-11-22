@@ -11,6 +11,9 @@ only translate it.
 **first whose `match` prefix fits the configured base URL wins**, and everything after it is ignored
 for that request.
 
+`mappings_file` is a plain path inside this folder: absolute, or climbing out with `..`, or empty
+means the file is never read. Nothing checks it at load — see "How to tell it worked" below.
+
 ```json
 [
   {

@@ -7,14 +7,19 @@ package extensions
 import (
 	"encoding/json/v2"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
 	"time"
 )
+
+// skillSubdir is the authoring skill's directory inside the bundle.
+const skillSubdir = ".agents/skills/extension-authoring"
 
 // templateRoot is the on-disk bundle the binary embeds — `go:embed` is what makes them the same files.
 func templateRoot(t *testing.T) string {
@@ -40,7 +45,7 @@ func bundleFS(t *testing.T) fs.FS {
 // copies must be loadable, or the first extension anyone writes inherits a refusal.
 func TestEveryExampleManifestPassesTheLoadValidator(t *testing.T) {
 	h, _, _ := devHandler(t)
-	examples := filepath.Join(templateRoot(t), ".agents", "skills", "extension-authoring", "examples")
+	examples := filepath.Join(templateRoot(t), filepath.FromSlash(skillSubdir), "examples")
 	entries, err := os.ReadDir(examples)
 	if err != nil {
 		t.Fatalf("the bundle ships no examples: %v", err)
@@ -65,7 +70,7 @@ func TestEveryExampleManifestPassesTheLoadValidator(t *testing.T) {
 }
 
 func TestEveryImageBearingTypeHasAReferencePage(t *testing.T) {
-	references := filepath.Join(templateRoot(t), ".agents", "skills", "extension-authoring", "references")
+	references := filepath.Join(templateRoot(t), filepath.FromSlash(skillSubdir), "references")
 	for _, typ := range []string{"lsp", "agent", "llm"} {
 		if _, err := os.Stat(filepath.Join(references, typ+".md")); err != nil {
 			t.Errorf("the %s type has no reference page, so the agent has nothing to read about what it costs: %v", typ, err)
@@ -75,15 +80,10 @@ func TestEveryImageBearingTypeHasAReferencePage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// This direction only: every field the page's tables name exists in the types. The other
+	// direction is TestTheSkillNamesEveryDeclaredManifestField.
 	text := string(grammar)
-	// Every key the manifest types declare is named in the grammar page, and every field the page names
-	// exists in the types.
 	declared := manifestJSONKeys(reflect.TypeOf(ExtensionManifest{}))
-	for _, key := range declared {
-		if !strings.Contains(text, "`"+key+"`") {
-			t.Errorf("references/manifest.md never names %q, a field the manifest types declare", key)
-		}
-	}
 	for _, line := range strings.Split(text, "\n") {
 		if !strings.HasPrefix(strings.TrimSpace(line), "| `") {
 			continue
@@ -94,40 +94,95 @@ func TestEveryImageBearingTypeHasAReferencePage(t *testing.T) {
 		if key == "capabilities" || key == "config_schema" {
 			continue // named as their own sections, which is where their fields live
 		}
-		if !strings.Contains(" "+strings.Join(declared, " ")+" ", " "+key+" ") && !capabilityKeys[key] {
+		if !slices.Contains(declared, key) && !capabilityKeys[key] {
 			t.Errorf("references/manifest.md names %q, which no manifest type declares", key)
 		}
 	}
+}
+
+// TestTheSkillNamesEveryDeclaredManifestField is the other direction: a field the Go types declare
+// that no page names is a field no agent can write.
+func TestTheSkillNamesEveryDeclaredManifestField(t *testing.T) {
+	text := skillText(t)
+	for _, key := range manifestJSONKeys(reflect.TypeOf(ExtensionManifest{})) {
+		if !strings.Contains(text, "`"+key+"`") {
+			t.Errorf("%q is a field the manifest types declare that no page of the skill names", key)
+		}
+	}
+}
+
+// skillText is everything the agent reads before it writes a manifest: the skill page and the
+// reference pages beside it.
+func skillText(t *testing.T) string {
+	t.Helper()
+	skill := filepath.Join(templateRoot(t), filepath.FromSlash(skillSubdir))
+	var b strings.Builder
+	body, err := os.ReadFile(filepath.Join(skill, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Write(body)
+	entries, err := os.ReadDir(filepath.Join(skill, "references"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			continue
+		}
+		body, err := os.ReadFile(filepath.Join(skill, "references", e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(body)
+	}
+	return b.String()
 }
 
 var capabilityKeys = map[string]bool{
 	"lsp": true, "ui": true, "css": true, "agent": true, "network": true, "llm": true, "i18n": true, "tools": true,
 }
 
-// manifestJSONKeys is every JSON name the manifest's own fields declare — one level deep, which is
-// the level the grammar page tables.
+// manifestJSONKeys is every JSON name the manifest declares, walking into every type a capability
+// reaches: a nested field no page names is a field nobody can declare.
 func manifestJSONKeys(typ reflect.Type) []string {
-	var keys []string
+	keys := map[string]bool{}
+	collectJSONKeys(typ, keys, map[reflect.Type]bool{})
+	return slices.Sorted(maps.Keys(keys))
+}
+
+func collectJSONKeys(typ reflect.Type, keys map[string]bool, seen map[reflect.Type]bool) {
+	if seen[typ] {
+		return
+	}
+	seen[typ] = true
 	for i := 0; i < typ.NumField(); i++ {
-		tag := typ.Field(i).Tag.Get("json")
+		field := typ.Field(i)
+		tag := field.Tag.Get("json")
 		if tag == "" || tag == "-" {
 			continue
 		}
 		name := strings.Split(tag, ",")[0]
-		if name != "" {
-			keys = append(keys, name)
+		if name == "" || name == "-" {
+			continue
+		}
+		keys[name] = true
+		if nested := structBehind(field.Type); nested != nil && !seen[nested] {
+			collectJSONKeys(nested, keys, seen)
 		}
 	}
-	for _, nested := range []reflect.Type{reflect.TypeOf(Capabilities{})} {
-		for i := 0; i < nested.NumField(); i++ {
-			tag := nested.Field(i).Tag.Get("json")
-			name := strings.Split(tag, ",")[0]
-			if name != "" && name != "-" {
-				keys = append(keys, name)
-			}
-		}
+}
+
+// structBehind unwraps the pointers, slices and maps a field may hide its struct behind. Anything
+// unnamed (an `any`, a raw JSON value) declares nothing.
+func structBehind(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Array || t.Kind() == reflect.Map {
+		t = t.Elem()
 	}
-	return keys
+	if t.Kind() == reflect.Struct && t.PkgPath() != "" {
+		return t
+	}
+	return nil
 }
 
 func TestTheShippedAuthoringSkillIsDiscoverable(t *testing.T) {

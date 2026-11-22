@@ -7,8 +7,17 @@ running MIKE — no test framework, no fixture service. The shape is one file, r
 node tests/<name>.mjs
 ```
 
-against the dev server (`MIKE_BASE`, default `https://localhost:3000`), signing in with a token the
-operator provides rather than driving the passkey ceremony.
+against the dev server (`MIKE_BASE`, default `https://localhost:3000`).
+
+## What a script can authenticate as
+
+There is no password anywhere in MIKE, and a session exists only as the answer to a finished passkey
+ceremony, which a hand-rolled script does not complete. A bearer token the operator provisions is the
+other credential, and it reaches **the project and task routes only** — enough to create the task or
+the data your extension reads, not enough to open the board, its WebSocket, or
+`/api/extensions/**`. So a script that must *see* the extension in the interface either reuses a
+browser session the operator already holds, or it is not a script anyone can run unattended. Write
+the assertion you can actually make, and say which of the two it is.
 
 ## Whether you can run it here
 
