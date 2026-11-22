@@ -6,7 +6,8 @@ this file is the mechanism.
 
 A person gives a **name** and one sentence about what the extension should do. They never choose a
 type: the agent in the first task reads the authoring skill, decides the type, and writes the
-manifest. The whole loop is create → the agent writes → **Try Extension** → refresh the tab.
+manifest. The whole loop is create → the agent writes → **Try Extension**, which loads the version and
+reloads the tab.
 
 ## The namespace
 
@@ -69,9 +70,10 @@ One entry point, `ExtensionHandler.LoadDev(id, taskID)`, behind `POST /api/exten
 
 - **no task id** loads the repository, served in place. This is what the Extensions card's Reload will
   call once that card grows one.
-- **a task id** (the ReviewBar's Try Extension) loads that task's worktree. A worktree lives outside
-  the served root, so its files are copied into `_dev/_try/<slug>/<taskID>` first; the copy is
-  replaced on every load, so a file the source dropped stops being served.
+- **a task id** (the ReviewBar's Try Extension, offered only on a task in Review) loads that task's
+  worktree. A worktree lives outside the served root, so its files are copied into
+  `_dev/_try/<slug>/<taskID>` first; the copy is replaced on every load, so a file the source dropped
+  stops being served.
 
 Uninstalling a row leaves its repository: the row's deletion takes the staging copy and nothing else
 (docs/extension-lifecycle.md → Deleting an extension deletes its directory). An unclaimed folder is the
@@ -93,6 +95,17 @@ manifest says a file is is refused, because the served copy would silently hold 
 `validateLoadedManifest` is the list an install runs, shared by both paths, so "it installed" and "it
 loaded" cannot mean different things. A manifest that fails validation leaves the version already running
 in place and answers with the failure text — the sentence the person relays to the agent.
+
+A load that lands reloads the tab. An extension's frame, stylesheet and language pack take effect on a
+fresh document and nothing hot-mounts them, so `TryExtension` reloads the way `services/app-update.ts`
+does; only a refusal or a failure leaves the sentence on the bar to be relayed. That is also why the
+button answers to Review: the version worth loading is the one a run has just finished writing. A reload
+costs nothing the app cannot recover — the chat draft, the editor drafts and the offline queue are all
+in IndexedDB.
+
+Test: `frontend/src/lib/components/__tests__/review-bar-try-extension.unit.svelte.ts` over which task
+offers the button, and the reload assertions in
+`frontend/src/lib/composables/__tests__/try-extension.unit.svelte.ts`.
 
 ### The access question
 

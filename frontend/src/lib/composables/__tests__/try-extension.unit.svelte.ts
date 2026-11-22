@@ -29,20 +29,30 @@ function consentAnswer(over: Record<string, any> = {}) {
 
 const loaded = { status: 'loaded' as const, extension: { id: 'dev1' } };
 
+const reloadTab = vi.fn();
+
 beforeEach(() => {
     reload.mockReset();
     setMount.mockReset();
+    // A load answers by taking the tab down, so `reload` is asserted, not executed.
+    Object.defineProperty(window, 'location', {
+        value: { reload: reloadTab },
+        configurable: true,
+        writable: true,
+    });
+    reloadTab.mockClear();
 });
 
 describe('pressing Try Extension', () => {
-    it('loads the version and says so when nothing is asked', async () => {
+    it('loads the version and takes the tab down to show it', async () => {
         reload.mockResolvedValue(loaded);
         const tried = useTryExtension(() => 'dev1', () => 'task1');
         await tried.press();
         expect(reload).toHaveBeenCalledWith('dev1', 'task1', undefined);
         expect(tried.consent).toBeNull();
-        expect(tried.notice).toContain('refresh');
+        expect(tried.notice).toContain('reloading');
         expect(tried.busy).toBe(false);
+        expect(reloadTab).toHaveBeenCalledTimes(1);
     });
 
     it('holds the version as a question the server asked, not one it invented', async () => {
@@ -52,6 +62,7 @@ describe('pressing Try Extension', () => {
         expect(reload).toHaveBeenCalledTimes(1);
         expect(tried.consent?.fingerprint).toBe('fp-1');
         expect(tried.notice).toBe('');
+        expect(reloadTab).not.toHaveBeenCalled();
     });
 
     it('posts nothing when the question is closed', async () => {
@@ -61,6 +72,7 @@ describe('pressing Try Extension', () => {
         tried.dismiss();
         expect(tried.consent).toBeNull();
         expect(reload).toHaveBeenCalledTimes(1);
+        expect(reloadTab).not.toHaveBeenCalled();
     });
 
     it('echoes the fingerprint back on the acknowledged retry, and mounts nothing it was not told to', async () => {
@@ -71,7 +83,8 @@ describe('pressing Try Extension', () => {
         expect(setMount).not.toHaveBeenCalled();
         expect(reload).toHaveBeenLastCalledWith('dev1', 'task1', 'fp-1');
         expect(tried.consent).toBeNull();
-        expect(tried.notice).toContain('refresh');
+        expect(tried.notice).toContain('reloading');
+        expect(reloadTab).toHaveBeenCalledTimes(1);
     });
 
     it('applies the folders the person granted before retrying', async () => {
@@ -94,6 +107,7 @@ describe('pressing Try Extension', () => {
         await tried.answerConsent(true);
         expect(tried.notice).toContain('credentials');
         expect(reload).toHaveBeenCalledTimes(1);
+        expect(reloadTab).not.toHaveBeenCalled();
     });
 
     it('surfaces a refusal that is a failure rather than a question', async () => {
@@ -102,11 +116,13 @@ describe('pressing Try Extension', () => {
         await tried.press();
         expect(tried.notice).toContain('no worktree');
         expect(tried.consent).toBeNull();
+        expect(reloadTab).not.toHaveBeenCalled();
     });
 
     it('does nothing at all for a task whose row does not exist yet', async () => {
         const tried = useTryExtension(() => '', () => 'task1');
         await tried.press();
         expect(reload).not.toHaveBeenCalled();
+        expect(reloadTab).not.toHaveBeenCalled();
     });
 });

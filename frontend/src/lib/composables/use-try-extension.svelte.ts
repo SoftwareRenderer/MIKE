@@ -6,11 +6,12 @@ import { t } from '$lib/i18n';
 export interface TryExtension {
     /** A press is in flight; the button shows the spinner. */
     readonly busy: boolean;
-    /** What the review bar says: the loaded sentence, the refusal's sentence, or nothing. */
+    /** What the review bar says after a press: the failure, or the reloading sentence. */
     readonly notice: string;
     /** The version held for the person's answer, and null when nothing is being asked. */
     readonly consent: ExtensionConsentRequest | null;
-    /** Loads this task's bytes; a refusal lands in `consent`, anything else in `notice`. */
+    /** Loads this task's bytes and reloads the tab; a refusal lands in `consent`, anything else in
+     * `notice`. */
     press(): Promise<void>;
     /** `mount` is the folder answer the install dialog gives: grant applies them, decline loads anyway. */
     answerConsent(mount: boolean): Promise<void>;
@@ -23,7 +24,8 @@ export interface TryExtension {
  * the one the agent wrote — so a version that reaches for the network or for a folder on this machine
  * comes back as a question instead (docs/extension-authoring.md → Loading). The server decides that
  * question and this holds the three states it needs: the press, the review-bar sentence, the pending
- * answer.
+ * answer. A load that lands reloads the tab, which is the only thing that mounts a version; only a
+ * refusal or a failure leaves the person reading this view.
  */
 export function useTryExtension(getExtensionId: () => string, getTaskId: () => string): TryExtension {
     let busy = $state(false);
@@ -44,8 +46,8 @@ export function useTryExtension(getExtensionId: () => string, getTaskId: () => s
                 consent = outcome.consent;
                 return;
             }
-            // The bytes are loaded; nothing here remounts an extension's frame, so the person refreshes.
-            notice = t('chat.review.tryExtensionLoaded');
+            notice = t('chat.review.tryExtensionReloading');
+            window.location.reload();
         } catch (e) {
             notice = asSentence(e);
         } finally {

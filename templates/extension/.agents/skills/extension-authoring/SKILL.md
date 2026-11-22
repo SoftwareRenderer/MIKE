@@ -46,8 +46,9 @@ need a Dockerfile, and none of them has an example to copy.
 4. Keep the entry files' names the ones the manifest names. A `ui` extension's entry page is always
    `index.html`; its `<script>` tags are external files (inline script is blocked by the CSP), and
    it loads `/host-client.js` before its own script.
-5. Stop. The person presses **Try Extension** on this task; MIKE validates and reports. If the
-   message names a manifest field, fix that field and press it again.
+5. Stop. Once the task is in Review the person presses **Try Extension** on it; MIKE validates,
+   reports, and reloads the tab when the version loads. If the message names a manifest field, fix
+   that field and press it again.
 
 Only what the manifest names is used or copied — an extra file is dead weight the browser can still
 fetch, and a file the manifest forgot is invisible however correct it is.
