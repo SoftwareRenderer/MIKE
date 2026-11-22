@@ -144,7 +144,10 @@ test.describe('a collapsed reasoning stream', () => {
     const notice = page.locator('.reasoning-pending');
     await expect(notice).toBeVisible();
     await expect(notice).toContainText('Processing');
-    await expect(notice).toContainText('tok/s');
+    // Whether this turn earns a figure is the product's answer — six chunks at 100ms may not span the window
+    // `formatReasoningRate` prices — so asserting either way would ride on machine speed. The figure and its
+    // clock are `reasoning-block.unit.svelte.ts`'s, on a clock it controls.
+    await expect(notice).toHaveText(/^\s*Processing( · [\d.,]+ tok\/s)?\s*$/);
     // A toggle over reasoning that has not finished arriving is the same claim made twice.
     await expect(page.locator('.reasoning-toggle')).toHaveCount(0);
 

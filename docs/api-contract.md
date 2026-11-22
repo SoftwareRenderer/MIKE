@@ -215,6 +215,11 @@ the wire while it is being written. What replaces every `reasoning` frame of tha
 `{"chars": N}`, the characters this LLM call has reasoned. The client prices that count into the token rate it
 shows, and never estimates one from a partial text, because no text arrives.
 
+The figure beside that count is `formatReasoningRate`'s (`frontend/src/lib/utils/reasoning-rate.ts`) average
+over the wait, so the corner re-reads its own clock while it is up: a provider gone quiet must read as a
+slower average, not as the rate from before the pause. A wait under a second prices nothing and the corner
+says `Processing` alone, because the first count frame already carries what the flusher buffered before it.
+
 `chars` is cumulative for one LLM call and resets with it — the boundary that resets `newStreamFlusher`
 (`backend/exec/loop.go`) — because the client accumulates per assistant entry and an entry is one call. It is
 a **state** frame, not a content frame: `bufferContentFrames` (`backend/stream/app_stream.go`) leaves it out,
@@ -232,6 +237,7 @@ reasoning costs the next call's context. A call that reasoned nothing sends no s
 over an empty reasoning is a toggle over nothing.
 Tests: `backend/exec/loop_reasoning_test.go`, `stream-handler.unit.ts`,
 `chat-entries-collapsed-reasoning.unit.svelte.ts` (the notice survives whichever branch draws the entry),
+`reasoning-rate.unit.ts` and `reasoning-block.unit.svelte.ts` (the figure's floor, and its clock),
 `frontend/tests/e2e/collapsed-reasoning.spec.ts`.
 
 ### A broken failure loop adds no frame shape

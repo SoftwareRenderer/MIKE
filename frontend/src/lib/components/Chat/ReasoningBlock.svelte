@@ -4,6 +4,9 @@
     import Spinner from '$lib/components/Spinner.svelte';
     import { formatReasoningRate } from '$lib/utils/reasoning-rate';
 
+    /** The figure is an average over the whole wait, so half a second is finer than it moves. */
+    const PENDING_RATE_TICK_MS = 500;
+
     interface Props {
         reasoningContent?: string;
         hasReasoning?: boolean;
@@ -38,8 +41,34 @@
     /** Thinking that is arriving but not shown: the count says what is happening and how fast. */
     let pending = $derived(isStreaming && withheld && !!reasoningPending && reasoningPending.chars > 0);
 
-    // Recomputed when a new count lands, the only moment the rate has anything new in it.
-    let pendingRate = $derived(pending ? formatReasoningRate(reasoningPending!.chars, Date.now() - reasoningPending!.startedAt) : '');
+    let pendingElapsed = $state(0);
+    // Non-reactive timerRef: state would loop this effect on itself.
+    let timerRef: ReturnType<typeof setInterval> | null = null;
+
+    // Why the figure is priced on a tick rather than on the count frame: see `formatReasoningRate`.
+    $effect(() => {
+        const wait = reasoningPending;
+        const stop = () => {
+            if (timerRef !== null) {
+                clearInterval(timerRef);
+                timerRef = null;
+            }
+        };
+        if (!pending || !wait) {
+            stop();
+            return;
+        }
+        const startedAt = wait.startedAt;
+        pendingElapsed = Date.now() - startedAt;
+        if (timerRef === null) {
+            timerRef = setInterval(() => {
+                pendingElapsed = Date.now() - startedAt;
+            }, PENDING_RATE_TICK_MS);
+        }
+        return stop;
+    });
+
+    let pendingRate = $derived(pending ? formatReasoningRate(reasoningPending!.chars, pendingElapsed) : '');
 
     // Withheld text opens on a click, never on its own.
     let reasoningExpanded = $derived(
@@ -72,7 +101,7 @@
 {#if pending}
     <div class="reasoning-pending" role="status">
         <Spinner size={12} decorative />
-        <span class="reasoning-pending-label">{t('chat.reasoning.processing')} · {pendingRate}</span>
+        <span class="reasoning-pending-label">{t('chat.reasoning.processing')}{#if pendingRate} · <span aria-hidden="true">{pendingRate}</span>{/if}</span>
     </div>
 {:else if showReasoningToggle}
     <div class="reasoning-block" class:expanded={reasoningExpanded}>

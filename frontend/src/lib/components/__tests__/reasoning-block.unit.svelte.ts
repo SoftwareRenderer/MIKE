@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { render, cleanup, fireEvent, waitFor } from '@testing-library/svelte';
+import { tick } from 'svelte';
 import ReasoningBlock from '../Chat/ReasoningBlock.svelte';
 import { getTaskMessageFull } from '$lib/api';
 
@@ -11,6 +12,7 @@ vi.mock('$lib/api', () => ({
 
 afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.restoreAllMocks();
 });
 
@@ -54,6 +56,42 @@ describe('a collapsed turn waiting on its reasoning', () => {
         expect(block.spinner()).toBeTruthy();
         expect(block.pending()?.getAttribute('role')).toBe('status');
         expect(block.spinner()?.getAttribute('aria-hidden')).toBe('true');
+    });
+
+    it('announces the state and not the figure it keeps renumbering', () => {
+        const block = renderBlock({ hasReasoning: true, isStreaming: true, reasoningPending: pending });
+        const label = block.pending()?.querySelector('.reasoning-pending-label');
+
+        expect(label?.textContent).toContain('Processing');
+        expect(label?.querySelector('[aria-hidden="true"]')?.textContent).toMatch(/\d+(\.\d+)? tok\/s/);
+    });
+
+    // The count arrives before there is a window worth dividing by.
+    it('says it is processing and promises no rate the first frame cannot support', () => {
+        const block = renderBlock({
+            hasReasoning: true, isStreaming: true,
+            reasoningPending: { chars: 4000, startedAt: Date.now() },
+        });
+
+        expect(block.pending()).toBeTruthy();
+        expect(block.pendingText().trim()).toBe('Processing');
+    });
+
+    it('re-averages the wait while the provider says nothing new', async () => {
+        vi.useFakeTimers();
+        vi.setSystemTime(0);
+        const block = renderBlock({
+            hasReasoning: true, isStreaming: true,
+            reasoningPending: { chars: 4000, startedAt: 0 },
+        });
+
+        expect(block.pendingText()).not.toMatch(/tok\/s/);
+
+        await vi.advanceTimersByTimeAsync(8000);
+        await tick();
+
+        // 4000 counted characters is a thousand estimated tokens over the eight seconds waited.
+        expect(block.pendingText()).toContain('125 tok/s');
     });
 
     it('offers nothing to open while there is nothing stored to open', () => {

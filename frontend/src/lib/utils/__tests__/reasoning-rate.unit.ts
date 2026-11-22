@@ -26,7 +26,12 @@ describe('the rate of a collapsed turn', () => {
     it('keeps the fraction while the rate is a trickle, so a warming-up model is not zero', () => {
         expect(formatReasoningRate(40, 20000)).toBe('0.5 tok/s');
         expect(formatReasoningRate(0, 2000)).toBe('0 tok/s');
-        expect(formatReasoningRate(100, 0)).toBe('0 tok/s');
+    });
+
+    it('says nothing about speed until the window is long enough to average', () => {
+        expect(formatReasoningRate(4000, 0)).toBe('');
+        expect(formatReasoningRate(4000, 999)).toBe('');
+        expect(formatReasoningRate(4000, 1000)).toBe('1,000 tok/s');
     });
 
     it('renders the number in the active locale and the unit in nobody\'s', () => {

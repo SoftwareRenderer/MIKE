@@ -166,7 +166,7 @@ describe('a project row whose clone stopped', () => {
         const { container } = renderSidebar({ projects: [makeProject('clone-pending-3', 'repo', { cloning: true, cloneProgress: 0 })] });
 
         const row = container.querySelector('.project-item') as HTMLElement;
-        expect(row.getAttribute('title')).toBe('Cloning repository…');
+        expect(row.getAttribute('title')).toBe('Cloning repository...');
         const track = container.querySelector('.clone-progress') as HTMLElement;
         expect(track.className).toContain('indeterminate');
         expect(track.getAttribute('aria-valuenow')).toBeNull();
