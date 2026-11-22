@@ -84,6 +84,10 @@ load from it, and `GET /api/extensions/local` lists it as installable.
 - Removal runs **after** the row delete, so an unremovable directory cannot make an extension
   undeletable; a failure is reported as `leftover` in the response (rendered by `ExtensionsTab`) and a
   `LEFTOVER FILES` log line, because invisible files are still served.
+- `deleteExtension` (`backend/extensions/handler.go`) is the one path that takes an extension away —
+  sandbox, scoped storage, row, then the files its record names. `HandleDelete` and the project deletion
+  that owns a development row (`DeleteDevRows`) both run through it; neither states a subset of those
+  steps, and neither answers with the other's status code.
 - Updates are unaffected — `CheckoutExtension` removes the destination first.
 - Test: `backend/extensions/delete_files_test.go`.
 

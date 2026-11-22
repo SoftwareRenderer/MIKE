@@ -221,8 +221,13 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     existing.tc.toolName = data.tool_name;
                     existing.tc.displayName = data.tool_display_name;
                     existing.tc.args = data.args || {};
-                    const newRawArgs = data.raw_args_delta ? (existing.tc.raw_args || '') + data.raw_args_delta : data.raw_args;
-                    existing.tc.raw_args = newRawArgs;
+                    // As with the path below: a frame carrying neither the argument body nor a piece of it
+                    // says nothing about it. A re-broadcast of a stored tool_call row is that frame.
+                    if (data.raw_args_delta) {
+                        existing.tc.raw_args = (existing.tc.raw_args || '') + data.raw_args_delta;
+                    } else if (data.raw_args) {
+                        existing.tc.raw_args = data.raw_args;
+                    }
                     existing.tc.sandbox = data.sandbox;
                     // A frame that names no file says nothing about which file this is — the one
                     // already known came from the arguments as they streamed.

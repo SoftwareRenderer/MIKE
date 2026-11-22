@@ -56,7 +56,7 @@
         /** Load this task's bytes and report what came back; the text is the person's to relay. */
         onTryExtension?: () => Promise<void>;
         isTryingExtension?: boolean;
-        /** The load's answer: the manifest's own failure, or the instruction to refresh. */
+        /** The load's answer: the manifest's own failure, or the reloading sentence. */
         tryExtensionNotice?: string;
     } = $props();
 
@@ -70,7 +70,7 @@
      that means one of them asks for: the class names all four. -->
 <!-- A task of an authoring project: the version under review is loaded here, and the load's answer is
      the text the person carries back to the agent, so it is shown rather than flashed. -->
-{#if devExtension && onTryExtension}
+{#if taskStatus === 'review' && devExtension && onTryExtension}
     <div class="chat-review-bar" data-bar="dev">
         {#if tryExtensionNotice}
             <span class="try-notice" role="status">{tryExtensionNotice}</span>

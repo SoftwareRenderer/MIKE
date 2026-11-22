@@ -1,12 +1,13 @@
 # Authoring a custom extension
 
 Read this before touching `backend/extensions/dev.go`, `dev_load.go`, `scaffold.go`, the
-`/extensions/dev*` routes, or `templates/extension/`. The rules are in `AGENTS.md → Extensions`; this
-file is the mechanism.
+`/api/extensions/{id}/reload` route, or `templates/extension/`. The rules are in `AGENTS.md → Extensions`;
+this file is the mechanism.
 
 A person gives a **name** and one sentence about what the extension should do. They never choose a
 type: the agent in the first task reads the authoring skill, decides the type, and writes the
-manifest. The whole loop is create → the agent writes → **Try Extension** → refresh the tab.
+manifest. The whole loop is create → the agent writes → **Try Extension**, which loads the version and
+reloads the tab.
 
 ## The namespace
 
@@ -21,9 +22,13 @@ extension name.
 | `extensions/_dev/_try/<slug>/<taskID>/` | the server's loaded copy of one task's uncommitted bytes |
 
 Nothing in the namespace is installable: `scanLocalExtensions` and `findLocalExtension` skip it, and
-`install-local` refuses `_dev` as an author. Deleting the **row** deletes the staging copy only; the
-repository goes with the **project**, through `RemoveDevRepo`, which removes nothing that is not
-strictly beneath the namespace and refuses a path that resolves out of it.
+`install-local` refuses `_dev` as an author. Nothing that deletes a row, a task or a project removes the
+repository: `RemoveDevRepo` unwinds the directory a create made and nothing else, and it removes nothing
+that is not strictly beneath the namespace and refuses a path that resolves out of it. A repository whose
+project is gone is an **unclaimed** directory — the person's own folder to read, keep, rename or remove.
+That is what keeps the project-removal dialog's promise ("The project folder itself will NOT be deleted",
+`app.project.removeMessage`) true of an authoring project as much as of any other: the server created that
+folder, and still never deletes it.
 
 `/extensions/` refuses every dot-prefixed segment (`noEscapeFS`), which is what lets a git repository
 live under the served root: `.git/config`, `.env` and `.agents/skills/**` are unreachable.
@@ -36,21 +41,46 @@ enable path refuses it. `devOrExtensionDir` is the single answer to "where do th
 — the served URL, the prompt overlay and the LLM mappings all resolve through it, so the browser's
 version and the server's version are never two different things.
 
+### The name
+
+Every development row is `(author = "operator", name = <slug>)`, and `(author, name)` is `UNIQUE`, so one
+row holds one name. A taken name is the person's own collision and is answered as one: the index refuses the
+insert and `isDuplicateName` turns that into a conflict naming the extension, so SQLite's text never walks
+out of a handler as an internal error.
+
+`POST /api/extensions/scaffold` asks the name before it writes a byte, through `ReserveDevName`. A row keeps
+the name while anything still owns it: a repository on disk, a project that exists, a project holding that
+path, or a value the person left in the row. The create is then refused with 409, having made nothing — what
+to do with that folder is the person's decision. A row with none of those is the remainder of a create that
+died after writing it: it is deleted through `deleteExtension` (docs/extension-lifecycle.md → Deleting an
+extension deletes its directory) and an Info line names it. A deletion may take that row because it holds
+nothing of anyone's — `devRowIsLeftover` is the one place that decides, and it reads the row's loaded state,
+its config, its acknowledgement and its stored keys.
+
+A project's deletion takes its own development rows with it, through `DeleteDevRows`, and removes no file:
+a row beside a deleted project claims a name, can never load, and has no other owner. The scaffold path
+rolls its own row back the same way when a later step of the create fails.
+
+Tests: `backend/extensions/dev_create_test.go`, `backend/api/extension_scaffold_test.go`,
+`backend/api/project_dev_repo_test.go`.
+
 ## Loading
 
 One entry point, `ExtensionHandler.LoadDev(id, taskID)`, behind `POST /api/extensions/{id}/reload`:
 
 - **no task id** loads the repository, served in place. This is what the Extensions card's Reload will
   call once that card grows one.
-- **a task id** (the ReviewBar's Try Extension) loads that task's worktree. A worktree lives outside
-  the served root, so its files are copied into `_dev/_try/<slug>/<taskID>` first; the copy is
-  replaced on every load, so a file the source dropped stops being served.
+- **a task id** (the ReviewBar's Try Extension, offered only on a task in Review) loads that task's
+  worktree. A worktree lives outside the served root, so its files are copied into
+  `_dev/_try/<slug>/<taskID>` first; the copy is replaced on every load, so a file the source dropped
+  stops being served.
 
-`GET /api/extensions/dev` lists the rows beside the repositories that no row claims, and
-`POST /api/extensions/dev-attach` makes a row for one of them — the way back after an uninstall, which
-takes the row away and leaves the repository. Neither has a caller in the browser yet: the ordinary
-listing already carries a row's loaded state and served URL, and only the unclaimed-repository half
-needs this pair.
+Uninstalling a row leaves its repository: the row's deletion takes the staging copy and nothing else
+(docs/extension-lifecycle.md → Deleting an extension deletes its directory). An unclaimed folder is the
+person's own from then on — read, keep, rename or remove — and a create of the same name is refused while
+the folder stands, with the folder named in the sentence. No route lists unclaimed repositories or gives one
+a row: the ordinary listing carries a row's loaded state and served URL, and nothing in the browser ever
+called the pair that did.
 
 Every directory the load reads is derived from stored rows — the project's path, the task's worktree —
 never from a path in a request. A task must belong to the row's project. A task whose worktree is gone
@@ -59,12 +89,29 @@ believes they are looking at the task's is worse than an error.
 
 The copy takes the directory's own files (a manifest names its stylesheet, never the script its own
 `index.html` loads) plus every name a capability resolves, and applies the caps before the bytes are
-read. A link among the directory's own files is skipped — a worktree carries them; a link where the
-manifest says a file is is refused, because the served copy would silently hold the wrong bytes.
+read. It descends into no subdirectory, so a file the manifest does not point straight at stays in the
+worktree and the served copy 404s it. A link among the directory's own files is skipped — a worktree
+carries them; a link where the manifest says a file is is refused, because the served copy would
+silently hold the wrong bytes.
 
 `validateLoadedManifest` is the list an install runs, shared by both paths, so "it installed" and "it
 loaded" cannot mean different things. A manifest that fails validation leaves the version already running
-in place and answers with the failure text — the sentence the person relays to the agent.
+in place and answers with the failure text — the sentence the person relays to the agent. What it cannot
+see it leaves alone: the files a manifest names but does not open (`css_url`, `mappings_file`,
+`wasm_module`), an unknown injection point or permission, and which capability wins when a manifest
+declares two executing ones. The image checks belong to the install path only, so a container type with
+nothing to run fails at its first start; the skill's checklist is where an author is told to expect that.
+
+A load that lands reloads the tab. An extension's frame, stylesheet and language pack take effect on a
+fresh document and nothing hot-mounts them, so `TryExtension` reloads the way `services/app-update.ts`
+does; only a refusal or a failure leaves the sentence on the bar to be relayed. That is also why the
+button answers to Review: the version worth loading is the one a run has just finished writing. A reload
+costs nothing the app cannot recover — the chat draft, the editor drafts and the offline queue are all
+in IndexedDB.
+
+Test: `frontend/src/lib/components/__tests__/review-bar-try-extension.unit.svelte.ts` over which task
+offers the button, and the reload assertions in
+`frontend/src/lib/composables/__tests__/try-extension.unit.svelte.ts`.
 
 ### The access question
 
@@ -115,7 +162,10 @@ logs that refusal — the pair is what makes the card run.
 
 `templates/extension/` holds `README.md`, `AGENTS.md`, a `tests/README.md`, and the authoring skill
 under `.agents/skills/extension-authoring/` — the project's own skill root, so the container binds it
-read-only while the browser cannot reach it.
+read-only while the browser cannot reach it. The skill page decides the type and states what the load
+refuses; `references/manifest.md` is the grammar and `references/lsp.md`, `references/agent.md` and
+`references/llm.md` carry the fields of the types that cost an image or a module. Every JSON name the
+manifest types declare has to appear in one of them.
 
 ## Tests
 
@@ -123,8 +173,10 @@ read-only while the browser cannot reach it.
 
 - `dev_test.go` — the namespace, delete, listing, enable and repair guards.
 - `dev_load_test.go` — loading, the three consumers resolving into the staging copy, the prune.
-- `scaffold_test.go` — the bundle and the scaffolder: every example manifest passes the load validator,
-  and the grammar page names every field the Go manifest types declare, in both directions.
+- `scaffold_test.go` — the bundle and the scaffolder. Every example manifest passes the load validator.
+  Every JSON name the manifest types declare is named somewhere in the skill, walking into every
+  capability type, so a field added to Go without a page fails. And no table in the grammar page names a
+  field the types do not declare.
 - `backend/api/extension_scaffold_test.go` — the create path, and the defaults its first task arrives
   with.
 - `backend/api/project_dev_repo_test.go` — only a development project's directory is removed.

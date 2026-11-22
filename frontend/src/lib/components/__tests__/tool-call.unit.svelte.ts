@@ -62,12 +62,41 @@ function makeToolCall(overrides = {}) {
 }
 
 describe('ToolCall - pending status text', () => {
-    it('shows "Editing..." for pending edit_file', () => {
+    // Which of the three sources names the path is `streamedPath`'s own contract, pinned beside its
+    // definition in `toolArgs.unit.ts`; what this card decides is what it does with the answer.
+    it('names the file a pending edit_file is editing', () => {
         const { container } = render(ToolCall, {
             ...baseProps,
             toolCall: makeToolCall({
                 toolName: 'edit_file',
                 args: { path: 'src/file.go', edits: [{ oldText: 'a', newText: 'b' }] },
+                isPending: true,
+            }),
+        });
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Editing: src/file.go');
+    });
+
+    it('names the edited file the tool event carries when the arguments do not', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'edit_file',
+                args: {},
+                path: 'src/file.go',
+                isPending: true,
+            }),
+        });
+        expect(container.querySelector('.tool-args')?.textContent).toBe('');
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Editing: src/file.go');
+    });
+
+    it('shows "Editing..." for a pending edit_file while no source names a file', () => {
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'edit_file',
+                args: {},
+                raw_args: '{"edits":[{"oldText":"a',
                 isPending: true,
             }),
         });
@@ -192,6 +221,52 @@ describe('ToolCall - pending status text', () => {
             }),
         });
         expect(container.querySelector('.progress-text')?.textContent).toBe('Writing...');
+    });
+
+    it('holds the elapsed time back, and the filename with it, while the edit is still generating', () => {
+        const startedAt = Date.now() - 10000;
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'edit_file',
+                args: {},
+                raw_args: '{"path":"src/file.go","edits":[{"oldText":"a',
+                isPending: true,
+                startedAt,
+            }),
+        });
+        expect(container.querySelector('.progress-text')?.textContent).toBe('Editing: src/file.go');
+    });
+
+    it('shows elapsed time for an edit whose arguments have arrived and is now running', () => {
+        const startedAt = Date.now() - 10000;
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'edit_file',
+                args: {},
+                raw_args: '{"path":"src/file.go","edits":[{"oldText":"a","newText":"b"}]}',
+                isPending: true,
+                startedAt,
+            }),
+        });
+        expect(container.querySelector('.progress-text')?.textContent).toContain('Running for');
+    });
+
+    it('shows elapsed time for an edit handed over as parsed arguments with no raw body', () => {
+        // An agent adapter's frame carries args and no `raw_args`, so the arguments being whole is
+        // the only signal that this call is executing rather than still generating.
+        const startedAt = Date.now() - 10000;
+        const { container } = render(ToolCall, {
+            ...baseProps,
+            toolCall: makeToolCall({
+                toolName: 'edit_file',
+                args: { path: 'src/file.go', edits: [{ oldText: 'a', newText: 'b' }] },
+                isPending: true,
+                startedAt,
+            }),
+        });
+        expect(container.querySelector('.progress-text')?.textContent).toContain('Running for');
     });
 });
 

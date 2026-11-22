@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"mike/backend/errs"
 	"mike/backend/types"
 )
 
@@ -52,6 +53,9 @@ func (f fakeDevSources) WorktreePath(taskID string) (string, error) {
 type missingRow struct{ id string }
 
 func (m *missingRow) Error() string { return "no row for " + m.id }
+
+// The fake classifies a missing row as the store does, so a reader can tell gone from broken.
+func (m *missingRow) Unwrap() error { return errs.ErrNotFound }
 
 // devFixture lays out a development project the way the scaffold does: a repository inside the
 // namespace, a worktree of the same project outside the served root, and the row between them. The two
@@ -468,83 +472,6 @@ func TestPruningADeletedTaskTakesItsLoadedCopy(t *testing.T) {
 	// Pruning again, or pruning a task no row names, changes nothing and says nothing.
 	h.PruneDevStaging("task1")
 	h.PruneDevStaging("task-no-row")
-}
-
-// TestDevListingShowsARepositoryWhoseRowIsGone: the repository survives its row on purpose, so the
-// listing must name it and the attach route must give it a row again.
-func TestDevListingShowsARepositoryWhoseRowIsGone(t *testing.T) {
-	h, store, root := devHandler(t)
-	writeTree(t, DevRepoDir(root, "my-ext"), map[string]string{"manifest.json": uiManifest("My Ext")})
-	writeTree(t, DevRepoDir(root, "orphan"), map[string]string{"manifest.json": uiManifest("Orphan")})
-	h.SetDevSources(fakeDevSources{
-		projects: map[string]*types.Project{
-			"my-project":     {ID: "my-project", Name: "my-project", Path: DevRepoDir(root, "my-ext")},
-			"orphan-project": {ID: "orphan-project", Name: "orphan", Path: DevRepoDir(root, "orphan")},
-		},
-		tasks: map[string]*types.Task{},
-	})
-	createDevRow(t, store, "dev1", "My Ext", "", "")
-
-	list := func() []DevExtension {
-		req := httptest.NewRequest(http.MethodGet, "/api/extensions/dev", nil)
-		rec := httptest.NewRecorder()
-		h.HandleDevExtensions(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("listing = %d: %s", rec.Code, rec.Body.String())
-		}
-		var out []DevExtension
-		if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
-			t.Fatal(err)
-		}
-		return out
-	}
-	seen := map[string]DevExtension{}
-	for _, e := range list() {
-		seen[e.Slug] = e
-	}
-	if got, ok := seen["orphan"]; !ok {
-		t.Fatalf("the unrowed repository is not listed, so it has no way back: %+v", seen)
-	} else if got.ID != "" || got.Loaded {
-		t.Errorf("an unrowed repository claims a row it does not have: %+v", got)
-	}
-	if got, ok := seen["my-ext"]; !ok || got.ID != "dev1" {
-		t.Errorf("the repository with a row is not reported as itself: %+v", seen)
-	}
-	if _, ok := seen[devStagingNamespace]; ok {
-		t.Error("the staging tree was listed as an authoring repository")
-	}
-
-	attach := func(slug string) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/api/extensions/dev-attach", strings.NewReader(`{"slug":"`+slug+`"}`))
-		rec := httptest.NewRecorder()
-		h.HandleDevAttach(rec, req)
-		return rec
-	}
-	rec := attach("orphan")
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("attaching the orphaned repository = %d: %s", rec.Code, rec.Body.String())
-	}
-	var attached ExtensionResponse
-	if err := json.Unmarshal(rec.Body.Bytes(), &attached); err != nil {
-		t.Fatal(err)
-	}
-	if attached.ProjectID != "orphan-project" || attached.InstallSource != DevInstallSource || attached.Loaded {
-		t.Errorf("the attached row is not an unloaded row beside that project: %+v", attached)
-	}
-	for _, e := range list() {
-		if e.Slug == "orphan" && e.ID == "" {
-			t.Error("the attached repository is still listed as unrowed")
-		}
-	}
-	if rec := attach("orphan"); rec.Code != http.StatusConflict {
-		t.Errorf("attaching twice = %d, want 409: %s", rec.Code, rec.Body.String())
-	}
-	if rec := attach("nowhere"); rec.Code != http.StatusNotFound {
-		t.Errorf("attaching a repository that does not exist = %d, want 404", rec.Code)
-	}
-	if rec := attach("../.."); rec.Code != http.StatusBadRequest {
-		t.Errorf("attaching a name that is not a slug = %d, want 400: %s", rec.Code, rec.Body.String())
-	}
 }
 
 // --- The consent gate (consent.go, docs/extension-authoring.md → Loading) ---

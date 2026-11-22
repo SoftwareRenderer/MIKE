@@ -66,7 +66,7 @@ const devTaskPreamble = "You are writing a MIKE extension in this repository.\n\
 	"Write manifest.json at the repository root beside the files it names, and copy from the skill's " +
 	"examples rather than inventing a shape.\n\n" +
 	"When you finish, say which type you chose, why, and what the person should look at after they " +
-	"press Try Extension and refresh the tab.\n\n" +
+	"press Try Extension.\n\n" +
 	"What the person asked for:\n"
 
 // HandleScaffold answers POST /api/extensions/scaffold. The person supplies a name and one
@@ -89,6 +89,12 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 	// The task handler is optional: a build that cannot run a turn still creates the extension.
 	if h.ext == nil || h.projects == nil {
 		httputil.Fail(w, fmt.Errorf("the create path is not wired"), "create extension", "")
+		return
+	}
+
+	// Before the first directory exists, so a refusal creates nothing.
+	if err := h.ext.ReserveDevName(name); err != nil {
+		httputil.Fail(w, err, "create extension", "")
 		return
 	}
 
@@ -148,6 +154,7 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 	// the log alone.
 	applyTaskDefaults(task, h.configStore, nil, nil)
 	if err := h.store.CreateTask(task); err != nil {
+		h.rollbackDevRow(project.ID)
 		h.rollbackProject(project.ID)
 		cleanup(err)
 		return
@@ -155,6 +162,7 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 	thread := &types.TaskThread{TaskID: task.ID, Name: "Main", IsActive: true, GitBranch: task.Branch, CreatedAt: task.CreatedAt}
 	if err := h.store.CreateThread(thread); err != nil {
 		h.rollbackTask(project.ID, task.ID)
+		h.rollbackDevRow(project.ID)
 		h.rollbackProject(project.ID)
 		cleanup(err)
 		return
@@ -162,6 +170,7 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 	task.CurrentThreadID = thread.ID
 	if err := h.store.UpdateTask(task); err != nil {
 		h.rollbackTask(project.ID, task.ID)
+		h.rollbackDevRow(project.ID)
 		h.rollbackProject(project.ID)
 		cleanup(err)
 		return
@@ -171,6 +180,7 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 		Content: task.Prompt, CreatedAt: task.CreatedAt,
 	}); err != nil {
 		h.rollbackTask(project.ID, task.ID)
+		h.rollbackDevRow(project.ID)
 		h.rollbackProject(project.ID)
 		cleanup(err)
 		return
@@ -210,6 +220,13 @@ func initialCommit(dir, name string) error {
 		return fmt.Errorf("the scaffolded files could not be committed: %s", strings.TrimSpace(out))
 	}
 	return nil
+}
+
+// rollbackDevRow takes away the row the create made. A row left behind claims the name.
+func (h *ExtensionScaffoldHandler) rollbackDevRow(projectID string) {
+	if leftover := h.ext.DeleteDevRows(projectID); leftover != "" {
+		logging.For(logging.Extensions).Warnf("development rows from a failed create were left behind: %s", leftover)
+	}
 }
 
 // rollbackProject deletes the project row created by a create that failed afterwards. Nothing else

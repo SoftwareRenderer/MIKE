@@ -3,22 +3,20 @@ package extensions
 // Loading a development extension is how a person tests what their agent wrote. One rule decides the
 // bytes: the row loads from a directory derived from stored rows — the repository when no task is named,
 // the named task's worktree otherwise. Bytes outside the served root are copied into the staging tree
-// first, and this is the only load path: Try Extension passes a task id, the Extensions card's Reload
-// passes none, and both arrive here.
+// first, and this is the only load path. Try Extension is its only caller today, and it always names a
+// task, so the served copy — not the repository — is what a person sees until the next press replaces it.
 
 import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"mike/backend/errs"
 	"mike/backend/fsutil"
-	"mike/backend/httputil"
 	"mike/backend/types"
 	"mike/pkg/logging"
 )
@@ -411,170 +409,97 @@ func consentAnswerOf(refused *ErrConsentRequired) consentAnswer {
 	return answer
 }
 
-// HandleReloadDev makes one development row's bytes the running version: a task id in the body is Try
-// Extension and loads that task's worktree, no task id loads the repository. A manifest asking for
-// unacknowledged access answers 409 with what the install dialog renders; any other failure text is the
-// answer, because it is the sentence the person carries back to the agent.
-func (h *ExtensionHandler) HandleReloadDev(w http.ResponseWriter, r *http.Request, id string) {
-	var req struct {
-		TaskID *string `json:"task_id"`
-		Ack    string  `json:"ack"`
-	}
-	if !httputil.DecodeJSON(w, r, &req) {
-		return
-	}
-	taskID := ""
-	if req.TaskID != nil {
-		taskID = strings.TrimSpace(*req.TaskID)
-	}
-	ext, err := h.LoadDev(id, taskID, strings.TrimSpace(req.Ack))
-	if err != nil {
-		if errors.Is(err, ErrExtensionNotFound) {
-			httputil.JSONError(w, http.StatusNotFound, "extension not found")
-			return
-		}
-		var refused *ErrConsentRequired
-		if errors.As(err, &refused) {
-			httputil.JSONResponse(w, http.StatusConflict, consentAnswerOf(refused))
-			return
-		}
-		logging.For(logging.Extensions).Warnf("ext=%s could not load its development version: %v", id, err)
-		httputil.JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	statuses := h.sandbox.ListRunning()
-	httputil.JSONResponse(w, http.StatusOK, h.toResponse(ext, statuses))
-}
-
 // DevResponse answers the create path about the row it just made, in the shape the listing uses. That
 // row has no container yet, so there is no sandbox status to report.
 func (h *ExtensionHandler) DevResponse(ext *Extension) ExtensionResponse {
 	return h.toResponse(ext, nil)
 }
 
-// DevExtension is one thing a person can load: a row, or a repository under the namespace that no row
-// claims anymore.
-type DevExtension struct {
-	ID        string `json:"id,omitempty"`
-	Slug      string `json:"slug"`
-	Name      string `json:"name"`
-	Type      string `json:"type,omitempty"`
-	ProjectID string `json:"project_id,omitempty"`
-	TaskID    string `json:"task_id,omitempty"`
-	Loaded    bool   `json:"loaded"`
-	ServedURL string `json:"served_url,omitempty"`
+// devNameTaken is the refusal for a name another row holds: MIKE's sentence, never driver text.
+func devNameTaken(slug string) error {
+	return errs.Conflict(fmt.Sprintf("an extension named %s already exists — delete it in Settings → Extensions, or choose another name", slug))
 }
 
-// HandleDevExtensions lists the rows beside the repositories no row claims — the project whose extension
-// was uninstalled. The ordinary listing already carries a row's loaded state and served URL, so this
-// route exists for the unclaimed-repository half.
-func (h *ExtensionHandler) HandleDevExtensions(w http.ResponseWriter, r *http.Request) {
+// devRowIsLeftover reports whether a development row is the remainder of a create that never landed: no
+// repository, no project naming it or holding its path, and nothing configured or stored in it.
+func (h *ExtensionHandler) devRowIsLeftover(slug string, row *Extension) (bool, error) {
 	root, err := filepath.Abs(h.config.ExtensionsDirOrDefault())
 	if err != nil {
-		httputil.Fault(w, "resolve the extensions directory", err)
-		return
-	}
-	exts, err := h.store.GetByType("")
-	if err != nil {
-		httputil.Fault(w, "list extensions", err)
-		return
-	}
-	repos, err := os.ReadDir(DevRoot(root))
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		httputil.Fault(w, "read the development directory", err)
-		return
-	}
-	claimed := map[string]bool{}
-	var out []DevExtension
-	for i := range exts {
-		ext := &exts[i]
-		if !ext.IsDev() {
-			continue
-		}
-		entry := DevExtension{ID: ext.ID, Name: ext.Name, Type: ext.Type, ProjectID: ext.ProjectID, TaskID: ext.TaskID, Loaded: ext.IsLoaded()}
-		if h.devSources != nil {
-			if p, err := h.devSources.GetProject(ext.ProjectID); err == nil {
-				entry.Slug = filepath.Base(p.Path)
-				claimed[entry.Slug] = true
-			}
-		}
-		if url, ok := DevServedURL(root, ext); ok {
-			entry.ServedURL = url
-		}
-		out = append(out, entry)
-	}
-	for _, dir := range repos {
-		if !dir.IsDir() || dir.Name() == devStagingNamespace {
-			continue
-		}
-		if claimed[dir.Name()] {
-			continue
-		}
-		out = append(out, DevExtension{Slug: dir.Name(), Name: dir.Name()})
-	}
-	revalidateListBeforeUse(w)
-	httputil.JSONResponse(w, http.StatusOK, out)
-}
-
-// HandleDevAttach creates the row for a repository that has none — the way back after an uninstall,
-// which takes the row away and deliberately leaves the repository.
-func (h *ExtensionHandler) HandleDevAttach(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Slug string `json:"slug"`
-	}
-	if !httputil.DecodeJSON(w, r, &req) {
-		return
-	}
-	slug, err := DevSlug(req.Slug)
-	if err != nil {
-		httputil.JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if h.devSources == nil {
-		httputil.JSONError(w, http.StatusBadRequest, "this server cannot see projects, so a repository cannot be attached")
-		return
-	}
-	root, err := filepath.Abs(h.config.ExtensionsDirOrDefault())
-	if err != nil {
-		httputil.Fault(w, "resolve the extensions directory", err)
-		return
+		return false, fmt.Errorf("the extensions directory %q could not be resolved: %w", h.config.ExtensionsDirOrDefault(), err)
 	}
 	repo := DevRepoDir(root, slug)
-	if info, err := os.Stat(repo); err != nil || !info.IsDir() {
-		httputil.JSONError(w, http.StatusNotFound, "no development repository is named "+slug)
-		return
+	if _, err := os.Stat(repo); err == nil {
+		// A repository on disk means the row was uninstalled, not abandoned.
+		return false, nil
+	}
+	if h.devSources == nil {
+		// Without the project table nothing here can call a row abandoned.
+		return false, nil
+	}
+	if row.ProjectID != "" {
+		if _, err := h.devSources.GetProject(row.ProjectID); err == nil {
+			return false, nil
+		} else if !errs.IsNotFound(err) {
+			return false, err
+		}
 	}
 	projects, err := h.devSources.ListProjects()
 	if err != nil {
-		httputil.Fault(w, "list projects", err)
-		return
+		return false, err
 	}
-	var projectID string
 	for _, p := range projects {
 		if abs, err := filepath.Abs(p.Path); err == nil && abs == repo {
-			projectID = p.ID
-			break
+			return false, nil
 		}
 	}
-	if projectID == "" {
-		httputil.JSONError(w, http.StatusNotFound, "no project owns "+slug)
-		return
+	if row.IsLoaded() || row.Enabled || row.TaskID != "" || row.NetworkAck != "" || len(row.Config) > 0 {
+		return false, nil
 	}
-	if existing := h.devRowForProject(projectID); existing != nil {
-		httputil.JSONError(w, http.StatusConflict, "this repository already has an extension: "+existing.ID)
-		return
-	}
-	ext, err := h.CreateDevRow(filepath.Base(repo), projectID)
+	stored, err := h.store.StorageCountAll(row.ID)
 	if err != nil {
-		httputil.Fault(w, "create the extension", err)
-		return
+		return false, err
 	}
-	statuses := h.sandbox.ListRunning()
-	httputil.JSONResponse(w, http.StatusCreated, h.toResponse(ext, statuses))
+	return stored == 0, nil
+}
+
+// ReserveDevName is the create path's name check before it writes a byte. A row something still owns keeps
+// the name and the create is refused; a row nothing owns is deleted, which is safe because devRowIsLeftover
+// said it holds nothing.
+func (h *ExtensionHandler) ReserveDevName(name string) error {
+	slug, err := DevSlug(name)
+	if err != nil {
+		return err
+	}
+	row, err := h.store.GetByAuthorName(devAuthor, slug)
+	if errs.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	leftover, err := h.devRowIsLeftover(slug, row)
+	if err != nil {
+		return err
+	}
+	if !leftover {
+		return devNameTaken(slug)
+	}
+	files, rowErr := h.deleteExtension(row.ID, row)
+	if rowErr != nil {
+		return fmt.Errorf("the leftover extension row %s could not be deleted: %w", row.ID, rowErr)
+	}
+	if files != "" {
+		logging.For(logging.Extensions).Warnf("ext=%s LEFTOVER FILES: %s", row.ID, files)
+	}
+	logging.For(logging.Extensions).Infof("ext=%s dropped the leftover development row named %s: no project and no repository claimed it", row.ID, slug)
+	if h.onExtensionChanged != nil {
+		h.onExtensionChanged()
+	}
+	return nil
 }
 
 // CreateDevRow creates the unloaded row that stands beside an authoring repository: no manifest, not
-// enabled, because a repository nobody has loaded has nothing to register.
+// enabled. The (author, name) index is what refuses a name another row holds.
 func (h *ExtensionHandler) CreateDevRow(name, projectID string) (*Extension, error) {
 	slug, err := DevSlug(name)
 	if err != nil {
@@ -583,11 +508,14 @@ func (h *ExtensionHandler) CreateDevRow(name, projectID string) (*Extension, err
 	ext := &Extension{
 		ID:            fmt.Sprintf("dev-%s-%d", slug, time.Now().Unix()),
 		Name:          slug,
-		Author:        "operator",
+		Author:        devAuthor,
 		InstallSource: DevInstallSource,
 		ProjectID:     projectID,
 	}
 	if err := h.store.Create(ext); err != nil {
+		if isDuplicateName(err) {
+			return nil, devNameTaken(slug)
+		}
 		return nil, err
 	}
 	// The row is a change like any other: without this broadcast the browser's app-wide copy of the
@@ -597,20 +525,6 @@ func (h *ExtensionHandler) CreateDevRow(name, projectID string) (*Extension, err
 		h.onExtensionChanged()
 	}
 	return ext, nil
-}
-
-// devRowForProject finds the row that stands beside one project's repository, if any.
-func (h *ExtensionHandler) devRowForProject(projectID string) *Extension {
-	exts, err := h.store.GetByType("")
-	if err != nil {
-		return nil
-	}
-	for i := range exts {
-		if exts[i].IsDev() && exts[i].ProjectID == projectID {
-			return &exts[i]
-		}
-	}
-	return nil
 }
 
 // PruneDevStaging removes a deleted task's loaded copy, so a task that is gone leaves nothing being

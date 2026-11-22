@@ -409,8 +409,9 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
 
 - **Deleting a task is one path** — deleted events, every teardown step for its subtree, one prune and one
   board broadcast. No caller states a subset of those steps.
-- **Deleting a project deletes its tasks**, roots first, then its container, terminal session and worktree
-  directory: the startup sweep skips running containers, so nothing else removes them.
+- **Deleting a project deletes its tasks**, roots first, then its container, terminal session, worktree
+  directory and the development extension rows beside its repository: the startup sweep skips running
+  containers, so nothing else removes them.
 - **Cleanup failures are reported, not fatal**, and the leftover is logged by name.
 
 ## Extensions
@@ -435,7 +436,8 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
 - **The `_dev` namespace is the server's**: repositories live in `extensions/_dev/<slug>` and nothing under
   it is installable.
 - **A development row loads from a directory derived from stored rows**, never from a path in a request, and
-  deleting the row never deletes the repository — the project's deletion does. `docs/extension-authoring.md`.
+  nothing this server deletes — a row, a task or a project — deletes the repository; only its author does.
+  `docs/extension-authoring.md`.
 - **A development load that declares egress or a host folder is refused until a person acknowledges it** —
   the same conditions the install dialog reads, asked of the manifest the load would apply. An
   unacknowledged load enables nothing and copies nothing into the served tree. `docs/extension-authoring.md → Loading`.

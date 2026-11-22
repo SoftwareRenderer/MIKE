@@ -14,6 +14,8 @@ import (
 	"mike/backend/store"
 	"mike/backend/types"
 	"mike/pkg/logging"
+
+	sqlite "modernc.org/sqlite"
 )
 
 // mapSensitiveConfig transforms config values declared sensitive by the schema.
@@ -342,6 +344,17 @@ func (es *ExtensionStore) rowJSON(id string, ext *Extension) (extensionRowJSON, 
 	}, nil
 }
 
+// sqliteConstraintUnique is SQLITE_CONSTRAINT_UNIQUE. The driver exports no codes.
+const sqliteConstraintUnique = 2067
+
+// isDuplicateName reports whether a store failure is the (author, name) index refusing a second row under an
+// identity the table holds. It is the only UNIQUE failure this table can raise — a repeated id is a
+// primary-key failure, a different code — so the code alone answers.
+func isDuplicateName(err error) bool {
+	var e *sqlite.Error
+	return errors.As(err, &e) && e.Code() == sqliteConstraintUnique
+}
+
 // Create inserts a new extension.
 func (es *ExtensionStore) Create(ext *Extension) error {
 	now := time.Now().UTC().Format(time.RFC3339)
@@ -520,6 +533,15 @@ func (es *ExtensionStore) StorageDelete(extID, namespace, key string) error {
 		return fmt.Errorf("delete storage: %w", err)
 	}
 	return nil
+}
+
+// StorageCountAll counts every key an extension holds, across namespaces; StorageList answers one at a time.
+func (es *ExtensionStore) StorageCountAll(extID string) (int, error) {
+	var count int
+	if err := es.db.QueryRow(`SELECT COUNT(*) FROM extension_storage WHERE ext_id = ?`, extID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count storage: %w", err)
+	}
+	return count, nil
 }
 
 // StorageDeleteAll removes all stored values for an extension.

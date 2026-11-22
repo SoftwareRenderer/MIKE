@@ -13,7 +13,7 @@ import (
 // the row but loses either field on the wire leaves every task of that authoring project with no way to
 // load what the agent wrote.
 func TestScaffoldRowIsListedForTheProjectThatOwnsIt(t *testing.T) {
-	h, _, extStore, _ := scaffoldHandler(t)
+	h, _, extStore, _, _ := scaffoldHandler(t)
 	rec := postScaffold(t, h, `{"name":"My Ext","description":"count the words on a card"}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())

@@ -684,9 +684,8 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS, author
 	})
 	s.extHandler.SetDevSources(devSources{store: store, worktrees: worktreeMgr})
 	s.taskHandler.SetDevStagingPrune(s.extHandler.PruneDevStaging)
-	// A development project's repository lives in the extensions tree, so its deletion belongs to the
-	// project path and the extensions package owns the containment.
-	s.projectHandler.SetDevRepoCleanup(s.extHandler.RemoveDevRepo)
+	// Deleting a development project removes its rows; the extensions package decides what a row may take.
+	s.projectHandler.SetDevCleanup(s.extHandler.DeleteDevRows)
 	s.extHandler.SetOnImageUpdated(func(extID string) {
 		s.lspHandler.BroadcastLSPReset()
 	})
