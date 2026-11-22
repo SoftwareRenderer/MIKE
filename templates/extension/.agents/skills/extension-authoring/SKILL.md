@@ -48,10 +48,10 @@ example to copy.
    entry page is.
 5. Check your own work against the list under "What the load will not catch". A press that reports no
    error is not proof the extension does anything.
-6. Stop. The person presses **Try Extension** on this task; MIKE validates the manifest and reports.
-   If the message names a manifest field, fix that field and press it again. A version the person has
-   not approved yet comes back as a question first — say in your final message what it asks for, so
-   the question is expected.
+6. Stop. Once the task is in Review the person presses **Try Extension** on it; MIKE validates the
+   manifest, reports, and reloads the tab when the version loads. If the message names a manifest
+   field, fix that field and press it again. A version the person has not approved yet comes back as
+   a question first — say in your final message what it asks for, so the question is expected.
 
 ## What the load refuses
 

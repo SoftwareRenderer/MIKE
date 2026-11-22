@@ -66,7 +66,7 @@ const devTaskPreamble = "You are writing a MIKE extension in this repository.\n\
 	"Write manifest.json at the repository root beside the files it names, and copy from the skill's " +
 	"examples rather than inventing a shape.\n\n" +
 	"When you finish, say which type you chose, why, and what the person should look at after they " +
-	"press Try Extension and refresh the tab.\n\n" +
+	"press Try Extension.\n\n" +
 	"What the person asked for:\n"
 
 // HandleScaffold answers POST /api/extensions/scaffold. The person supplies a name and one

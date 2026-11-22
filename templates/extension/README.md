@@ -2,9 +2,11 @@
 
 An extension for [MIKE](https://getmike.dev), written by an agent on this machine.
 
-Nothing is built, bundled or installed on the way: `manifest.json` at this root says what the
-extension is. Press **Try Extension** on a task to load that task's files, then refresh the tab — and
-press again after any edit, because a refresh alone shows the last load's bytes.
+MIKE runs the folder as soon as a version of it is loaded, so what you see in the browser is the
+bytes in this directory — nothing is built, bundled or installed on the way. `manifest.json` at this
+root says what the extension is; press **Try Extension** on a task in Review to load that task's
+version, and the tab reloads itself to show it. After an edit press again — a refresh alone shows the
+bytes of the last press.
 
 Start by reading `AGENTS.md`, then the `extension-authoring` skill under `.agents/skills/`. The
 skill decides the extension's type from what it is for, and `references/manifest.md` is the whole

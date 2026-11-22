@@ -30,5 +30,5 @@ default image for a project with no Dockerfile is `docker.io/library/ubuntu:late
 
 Either is the person's decision, not yours: it changes what their tasks run on. Ask, or write the
 test and say plainly that it has not been run and what it would take to run it. For a `ui`, `css` or
-`i18n` extension the honest evidence is the person pressing **Try Extension** and refreshing — the
-manifest was validated when it loaded, and the rest is what they see.
+`i18n` extension the honest evidence is the person pressing **Try Extension** — the manifest was
+validated when it loaded, and the rest is what they see.
