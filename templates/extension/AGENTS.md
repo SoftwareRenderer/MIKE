@@ -14,7 +14,7 @@ files MIKE reads, and the only build step is the person pressing **Try Extension
   `manifest.json` — a new capability, a new file name — lands only when the person presses **Try
   Extension**, which validates the manifest and answers with the failure text. Relay that text to
   them; it names the field that is wrong.
-- A refresh of the tab is required after a manifest load. Nothing hot-reloads the manifest.
+- Nothing hot-reloads the manifest: the press loads it and the tab reloads.
 
 ## How to work
 
