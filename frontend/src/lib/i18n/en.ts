@@ -1764,6 +1764,7 @@ const catalog = {
     'chat.tool.preparing': 'Preparing',
     'chat.tool.preparingPath': 'Preparing: {path}',
     'chat.tool.editing': 'Editing...',
+    'chat.tool.editingPath': 'Editing: {path}',
     'chat.tool.writingFile': 'Writing...',
     'chat.tool.writing': 'Writing',
     'chat.tool.writingPath': 'Writing: {path}',

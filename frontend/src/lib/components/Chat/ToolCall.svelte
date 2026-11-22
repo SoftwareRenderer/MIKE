@@ -43,16 +43,14 @@
         )
     );
 
-    // A pending write_file whose arguments have not all arrived: the model is still generating the
-    // content, so nothing is being written yet.
-    let isWriteGenerating = $derived(
-        tc.toolName === 'write_file' && tc.isPending &&
-        !tc.args.content && !rawArgsComplete(tc.raw_args)
-    );
+    let pendingPath = $derived(streamedPath(tc.args, tc.raw_args, tc.path));
 
-    // The filename as soon as the tool event or the arguments still arriving carry one.
-    let writeStreamPath = $derived(
-        tc.toolName === 'write_file' ? streamedPath(tc.args, tc.raw_args, tc.path) : ''
+    // A writing tool still generating its arguments is not running yet. Whole arguments are the other
+    // half of that answer: an agent adapter's frame carries parsed args and no raw body at all.
+    let isWriteGenerating = $derived(
+        (tc.toolName === 'write_file' || tc.toolName === 'edit_file') &&
+        !rawArgsComplete(tc.raw_args) &&
+        !(tc.toolName === 'write_file' ? tc.args.content : Array.isArray(tc.args.edits))
     );
 
     // Elapsed time for pending tool calls — updates every second via timer.
@@ -97,15 +95,19 @@
 
     // Pending-tool-call progress line: one message per variant, placeholders included, so a language
     // that puts them elsewhere can say so. `bash` before its command is complete falls through to "Writing".
+    //
+    // A card with no arguments yet has only this line to name the file with, so the writing tools name
+    // it here as `read_file` and `bash` do; a `write_file` holds it back when its header prints it.
     let progressText = $derived.by(() => {
-        // The elapsed line measures the tool running, so it waits for the tool: while a write is
-        // still generating its content, the filename is what the line has to say.
+        // The elapsed line measures the tool running, so it waits for the tool — `isWriteGenerating`.
         if (elapsedText && !isWriteGenerating) return elapsedText;
         if (tc.toolName === 'request_review') return t('chat.tool.writingSummary');
         if (tc.toolName === 'ask_question') return t('chat.tool.writingQuestion');
-        if (tc.toolName === 'edit_file') return t('chat.tool.editing');
+        if (tc.toolName === 'edit_file') {
+            return pendingPath ? t('chat.tool.editingPath', { path: pendingPath }) : t('chat.tool.editing');
+        }
         if (tc.toolName === 'write_file') {
-            return writeStreamPath && !argsDisplay ? t('chat.tool.writingPath', { path: writeStreamPath }) : t('chat.tool.writingFile');
+            return pendingPath && !argsDisplay ? t('chat.tool.writingPath', { path: pendingPath }) : t('chat.tool.writingFile');
         }
         if (tc.toolName === 'bash' && isBashExecuting) {
             return tc.path ? t('chat.tool.runningPath', { path: tc.path }) : t('chat.tool.running');

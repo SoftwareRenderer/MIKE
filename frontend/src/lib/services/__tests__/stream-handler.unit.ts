@@ -416,6 +416,16 @@ describe('createStreamHandler', () => {
         expect(stream.state.entries[0].toolCalls![0].path).toBe('src/file.go');
     });
 
+    it('a tool_call frame carrying no argument body keeps the arguments already streamed', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'tool_call', data: { tool_id: 'ed1', tool_name: 'edit_file', args: null, raw_args: '{"path":"src/file.go","edits":[{"oldText":"a' } }, false);
+        // A re-broadcast of the stored tool_call row: neither `raw_args` nor `raw_args_delta`, which
+        // said nothing about the body and must not drop the card back to naming no file.
+        handleEvent({ type: 'tool_call', data: { tool_id: 'ed1', tool_name: 'edit_file', args: null } }, false);
+
+        expect(stream.state.entries[0].toolCalls![0].raw_args).toBe('{"path":"src/file.go","edits":[{"oldText":"a');
+    });
+
     it('regression: ask_question auto-answer re-broadcast updates resolved tool call', () => {
         // Flow for an auto-started subtask: the question tool_result arrives first,
         // then the backend re-broadcasts the auto-answer (from parent context) for the
