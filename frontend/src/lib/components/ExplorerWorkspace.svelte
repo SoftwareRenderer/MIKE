@@ -174,6 +174,7 @@
                         activeFilePath={core.activeFilePath}
                         unsavedFiles={core.unsavedFiles}
                         pinnedFiles={core.pinnedFiles}
+                        focusRequest={core.focusRequest}
                         onFocused={core.handleEditorFocused}
                         onSymbolsUpdate={core.handleSymbolsUpdate}
                         onHasChanges={core.handleHasChanges}

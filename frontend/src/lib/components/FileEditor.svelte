@@ -94,6 +94,7 @@
         onLinesSelected = null,
         initialScrollTop = 0,
         onScrollTop = () => {},
+        focusRequest = 0,
     }: {
         projectId: string;
         projectPath?: string;
@@ -131,6 +132,8 @@
         initialScrollTop?: number;
         /** Called (throttled) with the scroller's current scrollTop. */
         onScrollTop?: (top: number) => void;
+        /** The caret was asked for on this buffer; 0 is no ask. See the effect that spends it. */
+        focusRequest?: number;
     } = $props();
 
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
@@ -1483,6 +1486,15 @@
         if (filePath) {
             loadFile();
         }
+    });
+
+    // The caret the listing asked for. The effect waits on `editorReady` rather than on `view`, which is
+    // not reactive and arrives with it. Spent once, so a tab becoming active again is not a second ask.
+    let focusSpent = 0;
+    $effect(() => {
+        if (!focusRequest || focusRequest === focusSpent || !editorReady || !active || !view) return;
+        focusSpent = focusRequest;
+        view.focus();
     });
 
     // Create editor after content is loaded and DOM is ready.

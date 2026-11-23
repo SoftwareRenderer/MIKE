@@ -869,6 +869,28 @@ Tests: `go test ./backend/server/ -run TestFSListingOfASandboxedProject` — a s
 started a container, answered a host path, or offered an escaping link as a folder fails there — and
 `TestFSRoutesOfASandboxedProjectActOnTheHostBytes` for the paste and download halves.
 
+## Creating a file is not saving one
+
+`POST /api/fs/write` serves both clicks, and which one it is decides whether bytes survive.
+
+- **A save overwrites; that is the route's purpose.** The editor's save is that caller, and it sends no
+  flag at all.
+- **A create asks for a free name.** The listing's New file row sends `exclusive: true`, and nothing else
+  does. A target that already holds something answers `400 path already exists` — the words
+  `POST /api/fs/mkdir` uses — and writes nothing, because a create carries empty content and would
+  otherwise empty the file the person meant to add. `refuseExistingTarget` is the one place that answer
+  is given.
+- **The name is judged by the jail, not by the listing.** A listing is a cache a watcher keeps fresh, and
+  its rows can be older than the click, so the check walks
+  `fsutil.NewContainedRoots(target.roots...)` — the containment the write itself takes.
+- **The new file then opens, pinned, and the caret follows it.** `FileBrowserView` hands the written path
+  to `onFileCreated`, and `ExplorerCore.handleFileCreated` makes it a pinned tab, so it never spends the
+  preview slot a browse-through takes. `docs/navigation.md → File List` holds the caret rule and why the
+  listing keeps its hands off the keyboard for that one click.
+
+Tests: `go test ./backend/server/ -run TestFSWriteExclusive` for the refusal and the save that must keep
+overwriting, and `frontend/src/lib/api/__tests__/fs.unit.ts` for the flag on the request.
+
 ## The directory listing's ignored rows
 
 `GET /api/fs?project=&task=&path=&files=1` answers one directory. Every `entry` carries `name`,

@@ -190,6 +190,8 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Path    string `json:"path"`
 		Content string `json:"content"`
+		// A create rather than a save: the name must be free. See refuseExistingTarget.
+		Exclusive bool `json:"exclusive"`
 	}
 	if !httputil.DecodeJSON(w, r, &req) {
 		return
@@ -210,6 +212,9 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := s.fsWriteTarget(w, r, project, req.Path)
 	if !ok {
+		return
+	}
+	if req.Exclusive && !s.refuseExistingTarget(w, target) {
 		return
 	}
 	if !s.writeContainedFile(w, target, []byte(req.Content)) {
@@ -1063,6 +1068,21 @@ func (s *Server) fsWriteTarget(w http.ResponseWriter, r *http.Request, project *
 		return fsTarget{}, false
 	}
 	return target, true
+}
+
+// refuseExistingTarget answers a create whose name already belongs to something. The name is asked of
+// the jail the write itself walks, so a link planted at it is refused rather than followed. ok is false
+// after writing the response.
+func (s *Server) refuseExistingTarget(w http.ResponseWriter, target fsTarget) bool {
+	_, err := fsutil.NewContainedRoots(target.roots...).Stat(target.path)
+	if err == nil {
+		JSONError(w, http.StatusBadRequest, "path already exists")
+		return false
+	}
+	if s.hostRefused(w, err) {
+		return false
+	}
+	return true
 }
 
 // writeContainedFile writes content to a target that fsWriteTarget already contained,

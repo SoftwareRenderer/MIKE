@@ -119,7 +119,7 @@ describe('a phone commits a new name without an Enter key', () => {
 
         await waitFor(() => expect(postedTo('/api/fs/write').length).toBe(1));
         const write = postedTo('/api/fs/write')[0];
-        expect(write.body).toEqual({ path: `${ROOT}/notes.md`, content: '' });
+        expect(write.body).toEqual({ path: `${ROOT}/notes.md`, content: '', exclusive: true });
         expect(write.query).toContain(`project=${PROJECT}`);
         expect(write.query).toContain(`task=${TASK}`);
         await waitFor(() => expect(container.querySelector('.new-file-input')).toBeNull());

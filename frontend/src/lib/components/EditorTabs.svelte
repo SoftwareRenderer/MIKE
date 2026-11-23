@@ -17,7 +17,7 @@
 
     let { projectId, projectPath, containerPath, taskId, openFiles, activeFilePath, unsavedFiles, pinnedFiles, onFocused, onSymbolsUpdate, onHasChanges,
         onSelectTab, onCloseTab, onPinTab, onSave, saving, onToggleFullscreen, mobileFullscreen, pendingFsEvent = null,
-        onLinesSelected = null, scrollTops, onScrollTop, isMobile = false }: {
+        onLinesSelected = null, scrollTops, onScrollTop, isMobile = false, focusRequest = null }: {
         projectId: string;
         projectPath?: string;
         /** The container root this tree is listed by, for a sandboxed project. */
@@ -47,6 +47,8 @@
         onScrollTop?: (path: string, top: number) => void;
         /** Narrow layout: the tab bar shows the active file's undo/redo pair. */
         isMobile?: boolean;
+        /** The tab that owes the caret — see `ExplorerCore.focusRequest`. */
+        focusRequest?: { path: string; nonce: number } | null;
     } = $props();
 
     const fullscreenTitle = $derived(fullscreenToggleTitle(appStore.config));
@@ -71,6 +73,11 @@
 
     function getFileName(path: string): string {
         return baseName(path) || path;
+    }
+
+    /** The caret ask belonging to this tab; 0 for another tab's. */
+    function focusNonceFor(path: string): number {
+        return focusRequest && focusRequest.path === path ? focusRequest.nonce : 0;
     }
 
     function handleEditorFocused(filePath: string, focused: boolean) {
@@ -250,6 +257,7 @@
                         targetLine={file.targetLine}
                         reveal={file.reveal}
                         active={file.path === activeFilePath}
+                        focusRequest={focusNonceFor(file.path)}
                         onFocused={(focused: boolean) => handleEditorFocused(file.path, focused)}
                         onSymbolsUpdate={(symbols) => handleSymbolsUpdate(file.path, symbols)}
                         onSymbolsPending={() => handleSymbolsPending(file.path)}

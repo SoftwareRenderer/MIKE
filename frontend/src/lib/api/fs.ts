@@ -228,6 +228,8 @@ export async function readFsArchiveEntry(params: {
 /**
  * Write one file. `fallback` is the caller's own sentence for a refusal that carries none, so a save and
  * a file creation say what the user was doing rather than what the code was calling.
+ *
+ * `exclusive` marks the second of those: the server refuses the write when the name is already taken.
  */
 export async function writeFsFile(params: {
     project: string;
@@ -235,8 +237,10 @@ export async function writeFsFile(params: {
     path: string;
     content: string;
     fallback: string;
+    exclusive?: boolean;
 }): Promise<void> {
-    await postFsJSON(`${API_BASE}/fs/write`, scopeQuery(params), { path: params.path, content: params.content }, params.fallback);
+    const body = { path: params.path, content: params.content, ...(params.exclusive ? { exclusive: true } : {}) };
+    await postFsJSON(`${API_BASE}/fs/write`, scopeQuery(params), body, params.fallback);
 }
 
 /**

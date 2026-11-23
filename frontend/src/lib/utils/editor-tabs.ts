@@ -28,13 +28,16 @@ export interface PersistedFileTab {
  *
  * A tab that is already open keeps its place until the request names a line;
  * a new tab replaces the unpinned (preview) one when there is one, which is
- * what makes a browse-through of search results reuse a single tab.
+ * what makes a browse-through of search results reuse a single tab. A request carrying `pin` is the
+ * person's own tab — a file they made or double-clicked — so it joins the list instead of spending that
+ * slot on somebody else's behalf.
  */
 export function revealFileTab(
     files: OpenFileTab[],
     path: string,
     line: number,
     isPinned: (path: string) => boolean,
+    pin = false,
 ): OpenFileTab[] {
     const existing = files.findIndex(f => f.path === path);
     if (existing >= 0) {
@@ -44,7 +47,7 @@ export function revealFileTab(
         return next;
     }
     const tab: OpenFileTab = { path, targetLine: line > 0 ? line : 0, reveal: line > 0 ? 1 : 0 };
-    const preview = files.findIndex(f => !isPinned(f.path));
+    const preview = pin ? -1 : files.findIndex(f => !isPinned(f.path));
     if (preview >= 0) {
         const next = [...files];
         next[preview] = tab;

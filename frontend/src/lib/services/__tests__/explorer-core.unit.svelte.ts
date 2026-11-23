@@ -1,9 +1,10 @@
 /**
- * `ExplorerCore` — the four decisions the explorer makes about what it is showing.
+ * `ExplorerCore` — the five decisions the explorer makes about what it is showing.
  *
  *  - a commit's other side is its **first parent**, never the row above it in the log;
  *  - the files the list removed take their tabs, drafts and undo history with them —
  *    and nothing else goes with them;
+ *  - a file the list **created** opens as its own pinned tab, with the caret asked for;
  *  - `resetTabs` answers to the subject it was called for, so a re-run of the screen's
  *    effect does not throw away the line a go-to-definition jump asked for;
  *  - the tabs are written to the record of the subject that held them, even when the write
@@ -217,6 +218,79 @@ describe('the explorer after the file list removed something', () => {
         expect(c.openFiles.map((f) => f.path)).toEqual([`${ROOT}/notes.md`]);
         expect(handedTo).toEqual([]);
         expect(draftCleared).not.toHaveBeenCalled();
+    });
+});
+
+// ─── The file the listing just created ──────────────────────────────────────
+// A create is not a click, and a create the server refuses gets neither the tab nor the caret.
+
+describe('the explorer after the listing created a file', () => {
+    it('opens the new file as its own pinned tab, active, leaving the preview tab where it was', () => {
+        const c = core();
+        click(c, `${ROOT}/mid-edit.md`); // the preview tab, holding work in progress
+        handedTo = [];
+
+        c.handleFileCreated(`${ROOT}/new/notes.md`);
+
+        expect(c.openFiles.map((f) => f.path)).toEqual([`${ROOT}/mid-edit.md`, `${ROOT}/new/notes.md`]);
+        expect(c.activeFilePath).toBe(`${ROOT}/new/notes.md`);
+        expect(c.pinnedFiles.has(`${ROOT}/new/notes.md`)).toBe(true);
+        expect(handedTo).toEqual([`${ROOT}/new/notes.md`]);
+    });
+
+    it('asks the editor for the caret, and asks again when the same path is created twice', () => {
+        const c = core();
+        c.handleFileCreated(`${ROOT}/notes.md`);
+        const first = c.focusRequest;
+        expect(first?.path).toBe(`${ROOT}/notes.md`);
+
+        c.handleFileCreated(`${ROOT}/notes.md`);
+
+        expect(c.focusRequest?.path).toBe(first?.path);
+        expect(c.focusRequest?.nonce).not.toBe(first?.nonce);
+    });
+
+    it('asks for no caret when a row was only clicked', () => {
+        const c = core();
+
+        click(c, `${ROOT}/notes.md`);
+
+        expect(c.focusRequest).toBeNull();
+    });
+
+    it('opens nothing until the worktree the file lives in can be made', async () => {
+        let allow = false;
+        const c = core([], { prepareFileOpen: () => Promise.resolve(allow) });
+
+        c.handleFileCreated(`${ROOT}/notes.md`);
+        await tick();
+        expect(c.openFiles).toEqual([]);
+        expect(c.focusRequest).toBeNull();
+
+        allow = true;
+        c.handleFileCreated(`${ROOT}/notes.md`);
+        await tick();
+        expect(c.openFiles.map((f) => f.path)).toEqual([`${ROOT}/notes.md`]);
+        expect(c.pinnedFiles.has(`${ROOT}/notes.md`)).toBe(true);
+    });
+
+    it('leaves a file outside this explorer unopened and uncared-for', () => {
+        const c = core();
+
+        c.handleFileCreated('/somewhere/else.md');
+
+        expect(c.openFiles).toEqual([]);
+        expect(c.focusRequest).toBeNull();
+    });
+
+    it('leaves the caret ask behind when the screen moves to another subject', () => {
+        const c = core();
+        c.handleFileCreated(`${ROOT}/notes.md`);
+        expect(c.focusRequest).not.toBeNull();
+
+        c.resetTabs('another-task');
+
+        expect(c.focusRequest).toBeNull();
     });
 });
 

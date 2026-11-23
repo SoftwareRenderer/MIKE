@@ -41,12 +41,16 @@ The file list panel handles clipboard and rename keys (Ctrl+X, Ctrl+C, Ctrl+V, F
 
 **Focus persistence**: When a folder changes, the row holding focus may vanish. If the panel held focus before the change, `loadDir` ensures the listing itself (`tabindex="-1"`) is focused after rendering new rows. If the panel did not hold focus, it stays unfocused to avoid stealing focus from the editor.
 
+**One hand-off takes the caret on purpose**: the file the person just created is the file they are about to type into. `onFileCreated` asks `ExplorerCore.handleFileCreated` for its tab, and the ask reaches `FileEditor` as `focusRequest`. It travels as a prop, not an event: the editor for a new tab is a chunk away, and it builds its view after it has read the file. That same click passes `focusLeaves` to `loadDir`, so the rule above does not take back the keyboard the name row held a moment earlier. An ask is spent once: a tab that merely becomes active again is not a second request, and no editor spends an ask that named another tab.
+
 **Selection**:
 - **No selection**: A key aimed at a row targets that row (`focusedRowPath` reads `[data-index]`). Ctrl+V pastes into the current folder.
 - **With selection**: Actions apply to the selection.
 - **No focus/selection**: Silent no-op.
 
-Tests: `components/__tests__/file-browser-clipboard.unit.svelte.ts`.
+Tests: `components/__tests__/file-browser-clipboard.unit.svelte.ts`,
+`components/__tests__/file-browser-create-opens.unit.svelte.ts` for the keyboard the listing keeps off,
+and `components/__tests__/editor-tabs-created-caret.unit.svelte.ts` for the caret the editor takes.
 
 ## Explorer branch list (`ExplorerHeader.svelte`)
 

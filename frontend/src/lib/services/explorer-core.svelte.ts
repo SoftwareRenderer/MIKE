@@ -104,6 +104,13 @@ export class ExplorerCore {
 
     editorFocused = $state(false);
     editorSaving = $state(false);
+    /**
+     * The tab that owes the caret, and how many times it has been asked for: a file the person just
+     * created is typed into, not merely listed. A request carried down as a prop, never an event —
+     * `docs/navigation.md → File List` holds why. The editor spends the nonce; 0 is no ask for that tab.
+     */
+    focusRequest = $state<{ path: string; nonce: number } | null>(null);
+    private lastFocusNonce = 0;
     symbols = $state<LSPSymbol[]>([]);
     showFind = $state(false);
     activeTab = $state<'files' | 'editor' | 'symbols' | 'changes'>('files');
@@ -250,6 +257,7 @@ export class ExplorerCore {
         this.recordKey = this.edges.storageKey();
         this.openFiles = [];
         this.activeFilePath = '';
+        this.focusRequest = null;
         this.pinnedFiles = new Set();
         this.unsavedFiles = new Set();
         this.scrollTops = {};
@@ -317,22 +325,36 @@ export class ExplorerCore {
     };
 
     handleFileSelected = (path: string, line?: number, pin = false): void => {
+        this.openRequested(path, line, pin, false);
+    }
+
+    /**
+     * The listing created a file the person is about to type into, so it opens pinned — never into the
+     * preview slot — and asks for the caret. `revealFileTab` and `focusRequest` hold those two rules.
+     */
+    handleFileCreated = (path: string): void => {
+        this.openRequested(path, undefined, true, true);
+    }
+
+    /** Every open goes through here, so a task's worktree is made before its file is read. */
+    private openRequested(path: string, line: number | undefined, pin: boolean, focus: boolean): void {
         if (!this.isPathSafe(path)) return;
         const prepare = this.edges.prepareFileOpen;
         if (prepare) {
-            void prepare().then(ok => { if (ok) this.openFile(path, line, pin) });
+            void prepare().then(ok => { if (ok) this.openFile(path, line, pin, focus) });
             return;
         }
-        this.openFile(path, line, pin);
+        this.openFile(path, line, pin, focus);
     }
 
-    private openFile(path: string, line: number | undefined, pin: boolean): void {
+    private openFile(path: string, line: number | undefined, pin: boolean, focus: boolean): void {
         this.closeCommitDiff();
-        this.openFiles = revealFileTab(this.openFiles, path, line || 0, p => this.pinnedFiles.has(p));
+        this.openFiles = revealFileTab(this.openFiles, path, line || 0, p => this.pinnedFiles.has(p), pin);
         this.activeFilePath = path;
         if (pin) this.pinTab(path);
         this.edges.updateFile(path);
         if (this.edges.isMobile.isMobile) this.activeTab = 'editor';
+        if (focus) this.focusRequest = { path, nonce: ++this.lastFocusNonce };
     }
 
     pinTab = (path: string): void => {

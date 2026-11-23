@@ -4,7 +4,7 @@
     import { sandboxMountPath } from '$lib/utils/path';
     import { taskRelativeFsPath, type FsEvent } from '$lib/utils/fs-event';
 
-    let { projectId, projectName, taskId, taskPath, initialPath = '', sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind, onDeleted }: {
+    let { projectId, projectName, taskId, taskPath, initialPath = '', sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onFileCreated, onPathChange, onToggleFind, onDeleted }: {
         projectId: string;
         projectName: string;
         taskId: string;
@@ -15,6 +15,7 @@
         unsavedFiles: string[];
         pendingFsEvent: FsEvent | null;
         onFileSelected: (path: string, line?: number, pin?: boolean) => void;
+    onFileCreated?: (path: string) => void;
         onPathChange: (path: string) => void;
         onToggleFind?: () => void;
         onDeleted?: (paths: string[]) => void;
@@ -54,6 +55,7 @@
     emptyMessage={t('explorer.taskFiles.empty')}
     pendingMessage={t('explorer.shared.loading')}
     onFileSelected={openFile}
+    {onFileCreated}
     {onPathChange}
     {onToggleFind}
 />

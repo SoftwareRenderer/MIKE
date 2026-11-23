@@ -46,6 +46,7 @@
         mapFsEvent,
         onFsEvent,
         onMutated,
+        onFileCreated,
         onDeleted,
         extraEntryInfo,
         listingClass = '',
@@ -78,6 +79,9 @@
         onFsEvent?: (op: 'create' | 'delete', relPath: string) => void;
         /** This listing wrote something: a file, a folder, or an uploaded run. */
         onMutated?: () => void;
+        /** A file this listing just wrote, which the caller opens — the person is about to type into it.
+         *  A row they clicked is opened by `onFileSelected`. */
+        onFileCreated?: (path: string) => void;
         /** Paths that no longer exist, so the editor can close any tab open on them. */
         onDeleted?: (paths: string[]) => void;
         extraEntryInfo?: (entry: FsEntry) => EntryBadge | null;
@@ -136,12 +140,16 @@
         }
     });
 
-    async function loadDir(path: string) {
+    /**
+     * List one directory. `focusLeaves` says the caret is going elsewhere on purpose — a created file is
+     * about to be typed into — so the listing keeps its hands off the keyboard its name row held.
+     */
+    async function loadDir(path: string, focusLeaves = false) {
         // Clamp to root: nothing above it is listed, whatever a row, a crumb or a keystroke asked for.
         const target = path.startsWith(rootPath) ? path : rootPath;
         // Reloading the current directory keeps the selection; opening a different one clears it.
         const sameDir = target === currentPath;
-        const heldKeyboard = rootEl?.contains(document.activeElement) ?? false;
+        const heldKeyboard = !focusLeaves && (rootEl?.contains(document.activeElement) ?? false);
         menu = null;
         loading = true;
         error = '';
@@ -230,17 +238,20 @@
         if (!name || creating) return;
         creating = true;
         createError = '';
+        const path = currentPath + '/' + name;
         try {
             await writeFsFile({
                 project: projectId,
                 task: taskId,
-                path: currentPath + '/' + name,
+                path,
                 content: '',
+                exclusive: true,
                 fallback: t('explorer.shared.errCreateFile'),
             });
             showNewFile = false;
             newFileName = '';
-            loadDir(currentPath);
+            onFileCreated?.(path);
+            loadDir(currentPath, true);
             onMutated?.();
         } catch (e) {
             createError = errorText(e, t('explorer.shared.errCreateFile'));

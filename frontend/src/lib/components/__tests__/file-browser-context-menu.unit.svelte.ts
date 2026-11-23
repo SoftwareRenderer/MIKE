@@ -318,7 +318,7 @@ describe('adding something to the folder the file list shows', () => {
 
         await waitFor(() => expect(posts.map(p => p.pathname)).toContain('/api/fs/write'));
         const write = posts.find(p => p.pathname === '/api/fs/write')!;
-        expect(write.body).toEqual({ path: `${ROOT}/notes.md`, content: '' });
+        expect(write.body).toEqual({ path: `${ROOT}/notes.md`, content: '', exclusive: true });
         expect(write.query).toContain(`project=${PROJECT}`);
         expect(write.query).toContain(`task=${TASK}`);
     });

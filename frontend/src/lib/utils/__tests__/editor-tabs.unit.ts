@@ -60,6 +60,21 @@ describe('revealFileTab', () => {
         expect(revealFileTab(preview, 'b.go', 2, allPinned).map(f => f.path)).toEqual(['a.go', 'b.go']);
     });
 
+    it('a tab asked for as a pinned one joins the list instead of spending the preview slot', () => {
+        // The listing created a file while someone was mid-edit in the unpinned tab; the click that made
+        // the file must not cost them that tab.
+        const preview = openAt('a.go', 1);
+
+        expect(revealFileTab(preview, 'new.go', 0, nonePinned, true).map(f => f.path))
+            .toEqual(['a.go', 'new.go']);
+    });
+
+    it('a pinned request for an open file lands on that tab rather than adding a second one', () => {
+        const opened = revealFileTab([], 'new.go', 0, nonePinned, true);
+
+        expect(revealFileTab(opened, 'new.go', 7, nonePinned, true)).toHaveLength(1);
+    });
+
     it('the request leaves the tab list it was given untouched', () => {
         const before = openAt('main.go', 10);
 

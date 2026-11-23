@@ -6,7 +6,7 @@
     import FileBrowserView from '$lib/components/FileBrowserView.svelte';
     import { t } from '$lib/i18n';
 
-    let { projectId, projectPath, initialPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onPathChange, onToggleFind, onDeleted }: {
+    let { projectId, projectPath, initialPath, sandboxEnabled, unsavedFiles, pendingFsEvent, onFileSelected, onFileCreated, onPathChange, onToggleFind, onDeleted }: {
         projectId: string;
         projectPath: string;
         initialPath?: string;
@@ -14,6 +14,7 @@
         unsavedFiles: string[];
         pendingFsEvent: { op: 'create' | 'delete'; path: string } | null;
         onFileSelected: (path: string, line?: number, pin?: boolean) => void;
+    onFileCreated?: (path: string) => void;
         onPathChange: (path: string) => void;
         onToggleFind?: () => void;
         onDeleted?: (paths: string[]) => void;
@@ -107,6 +108,7 @@
     pendingMessage={t('explorer.branchFiles.initSandbox')}
     treeAriaLabel={t('explorer.branchFiles.treeAria')}
     {onFileSelected}
+    {onFileCreated}
     {onPathChange}
     {onToggleFind}
 />

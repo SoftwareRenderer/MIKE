@@ -83,6 +83,17 @@ describe('writeFsFile', () => {
         expect(JSON.parse(init.body)).toEqual({ path: '/r/a.go', content: 'x' });
     });
 
+    it('asks the server for a free name when the caller is creating a file', async () => {
+        const { writeFsFile } = await import('$lib/api/fs');
+        mockFetch.mockResolvedValue(res(200, { status: 'written' }));
+
+        await writeFsFile({
+            project: 'p1', path: '/r/a.go', content: '', fallback: 'Failed to create file', exclusive: true,
+        });
+
+        expect(JSON.parse(sent().init.body)).toEqual({ path: '/r/a.go', content: '', exclusive: true });
+    });
+
     it('says the server\'s reason when it has one and the caller\'s otherwise', async () => {
         const { writeFsFile } = await import('$lib/api/fs');
         mockFetch.mockResolvedValueOnce(res(403, { error: 'path is outside the allowed host directories' }));
