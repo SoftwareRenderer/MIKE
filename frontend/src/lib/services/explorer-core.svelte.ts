@@ -21,6 +21,11 @@ const COMMIT_BATCH_SIZE = 30;
 const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
 /** Tab state is written after a quiet period: a click through several tabs is one write. */
 const TAB_SAVE_DELAY_MS = 300;
+/** The listing's scroller, as `FileBrowserView` renders it. */
+const FILE_LIST_SELECTOR = '.file-browser-list';
+/** How long the listing's scroll restore waits for a listing that has nothing to scroll yet. */
+const FILE_LIST_RESTORE_ATTEMPTS = 20;
+const FILE_LIST_RESTORE_POLL_MS = 100;
 
 /**
  * What App hands either explorer screen, whatever it is browsing. A screen adds its own subject
@@ -42,7 +47,8 @@ export interface ExplorerProps {
  * differently. The core owns everything else about an explorer screen.
  */
 interface ExplorerEdges {
-    /** IndexedDB key of this screen's tab list and unsaved set. */
+    /** The record this screen's tabs, pins, scroll and unsaved marker are written to — one of
+     * `$lib/storage`'s `explorerRecordKey`s. */
     storageKey: () => string;
     /** Path prefixes a file must sit under to be openable here. */
     pathRoots: () => string[];
@@ -62,6 +68,19 @@ interface ExplorerEdges {
     prepareFileOpen?: () => Promise<boolean>;
     /** Take an Escape before the shared order does. True means it was consumed. */
     consumeEscape?: () => boolean;
+}
+
+    /** The explorer screens this browser has mounted: text under an editor the person is looking at is never
+     *  that task's to take away, so a wipe asks them what is open. */
+    const mountedCores = new Set<ExplorerCore>();
+
+/** The file paths the mounted explorer screens hold open, in either spelling their editor used. */
+export function openExplorerPaths(): Set<string> {
+    const paths = new Set<string>();
+    for (const core of mountedCores) {
+        for (const tab of core.openFiles) paths.add(tab.path);
+    }
+    return paths;
 }
 
 /**
@@ -112,24 +131,63 @@ export class ExplorerCore {
     private lastEventCount = 0;
     /** The subject whose tabs the screen holds; the argument `resetTabs` answers to. */
     private tabsSubject = '';
+    /**
+     * The record these tabs are written to, captured with the subject rather than read from the edges when a
+     * write fires: a debounced write that outlives a switch must land under the subject whose tabs it holds.
+     */
+    private recordKey = $state('');
+    /** The listing's offset is applied to the first listing that can scroll, not to every one after it. */
+    private fileListScrollRestored = false;
 
     constructor(edges: ExplorerEdges) {
         this.edges = edges;
+        this.recordKey = edges.storageKey();
 
         $effect(() => {
-            loadUnsavedFiles(edges.storageKey()).then(paths => { this.unsavedFiles = new Set(paths); }).catch(() => {});
+            loadUnsavedFiles(this.recordKey).then(paths => { this.unsavedFiles = new Set(paths); }).catch(() => {});
         });
 
         $effect(() => {
             this.unsavedFiles;
-            saveUnsavedFiles(edges.storageKey(), [...this.unsavedFiles]).catch(() => {});
+            this.recordKey;
+            saveUnsavedFiles(this.recordKey, [...this.unsavedFiles]).catch(() => {});
         });
 
         $effect(() => {
             this.openFiles;
             this.activeFilePath;
             this.pinnedFiles;
+            this.recordKey;
             this.queueTabSave();
+        });
+
+        // The listing's own scroll: taken on every scroll, and handed back once — restoring it again would
+        // fight a reader who is already moving through the folder. The record is read so a new subject re-arms it.
+        $effect(() => {
+            this.recordKey;
+            const el = this.fileBrowserEl;
+            if (!el) return;
+            el.addEventListener('scroll', this.handleFileListScroll, true);
+            let timer: ReturnType<typeof setInterval> | null = null;
+            if (!this.fileListScrollRestored) {
+                this.fileListScrollRestored = true;
+                let attempts = 0;
+                const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
+                timer = setInterval(() => {
+                    attempts++;
+                    const list = el.querySelector<HTMLElement>(FILE_LIST_SELECTOR);
+                    if (list && this.fileListScroll > 0 && list.scrollHeight > list.clientHeight) {
+                        list.scrollTop = Math.min(this.fileListScroll, list.scrollHeight - list.clientHeight);
+                        stop();
+                    } else if (attempts >= FILE_LIST_RESTORE_ATTEMPTS) {
+                        stop();
+                    }
+                }, FILE_LIST_RESTORE_POLL_MS);
+            }
+            return () => {
+                if (timer) clearInterval(timer);
+                el.removeEventListener('scroll', this.handleFileListScroll, true);
+            };
         });
 
         $effect(() => {
@@ -154,10 +212,12 @@ export class ExplorerCore {
 
     /** The listeners an explorer owns for as long as it is mounted. */
     mount(): void {
+        mountedCores.add(this);
         window.addEventListener(EDITOR_SAVE_SETTLED, this.handleSaveSettled);
     }
 
     unmount(): void {
+        mountedCores.delete(this);
         window.removeEventListener(EDITOR_SAVE_SETTLED, this.handleSaveSettled);
         if (this.saveBackstop) { clearTimeout(this.saveBackstop); this.saveBackstop = null; }
         this.flushTabSave();
@@ -175,29 +235,46 @@ export class ExplorerCore {
     // ---- Tabs ----
 
     /**
-     * Empty the tab list and the unsaved set for a new subject — a project, a task — and only when the
-     * subject is new. A screen re-runs its subject effect without the subject changing, and clearing
+     * Empty the tab list, the offsets and the unsaved set for a new subject — a project, a task — and only
+     * when the subject is new. A screen re-runs its subject effect without the subject changing, and clearing
      * then letting the address bar re-open the file throws away whatever the caller asked for beyond a
      * path: a go-to-definition jump that opened this explorer carries a line, and the URL carries none.
      */
     resetTabs(subject: string): void {
         if (subject === this.tabsSubject) return;
+        // The tabs still held belong to the subject being left, so they reach its record first — but a screen
+        // built for this subject has held nothing of its own, and writing then would erase the record its
+        // caller is about to read back.
+        if (this.tabsSubject !== '') this.flushTabSave();
         this.tabsSubject = subject;
+        this.recordKey = this.edges.storageKey();
         this.openFiles = [];
         this.activeFilePath = '';
         this.pinnedFiles = new Set();
         this.unsavedFiles = new Set();
+        this.scrollTops = {};
+        this.fileListScroll = 0;
+        this.fileListScrollRestored = false;
     }
 
     loadSavedTabs(): Promise<EditorTabState | null> {
-        return loadEditorTabs(this.edges.storageKey());
+        return loadEditorTabs(this.recordKey);
     }
 
-    /** Adopt a restored list. Which of its tabs survive, and how scroll is merged, is the caller's. */
+    /** Adopt a restored list. Which of its tabs survive is the caller's. */
     applyTabs(openFiles: OpenFileTab[], activeFilePath: string, pinnedFiles: Set<string>): void {
         this.openFiles = openFiles;
         this.activeFilePath = activeFilePath;
         this.pinnedFiles = pinnedFiles;
+    }
+
+    /**
+     * Adopt the offsets a restored record holds, keeping any this screen has already reported: a file opened
+     * from a link has an offset of its own before the read lands.
+     */
+    adoptScroll(saved: EditorTabState): void {
+        this.scrollTops = { ...saved.scrollTops, ...this.scrollTops };
+        this.fileListScroll = this.fileListScroll || (saved.fileListScroll ?? 0);
     }
 
     queueTabSave(): void {
@@ -209,7 +286,7 @@ export class ExplorerCore {
     }
 
     private writeTabState(): void {
-        saveEditorTabs(this.edges.storageKey(), {
+        saveEditorTabs(this.recordKey, {
             openFiles: toPersistedTabs(this.openFiles),
             activeFilePath: this.activeFilePath,
             pinnedFiles: [...this.pinnedFiles],
@@ -228,6 +305,14 @@ export class ExplorerCore {
 
     handleEditorScrollTop = (path: string, top: number): void => {
         this.scrollTops[path] = top;
+        this.queueTabSave();
+    };
+
+    /** The listing's offset, kept in the record that holds the tabs. */
+    private handleFileListScroll = (): void => {
+        const list = this.fileBrowserEl?.querySelector<HTMLElement>(FILE_LIST_SELECTOR);
+        if (!list) return;
+        this.fileListScroll = list.scrollTop;
         this.queueTabSave();
     };
 

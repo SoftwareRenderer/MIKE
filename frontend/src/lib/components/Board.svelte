@@ -76,7 +76,10 @@
             (async () => {
                 const allIds = new Set(tasks.map(t => t.id));
                 const roots = editorRecordRoots(appStore.projects, appStore.config?.workspace_dir);
-                await gc(allIds, roots.size ? roots : undefined, undefined, projectId);
+                // An empty project list — the board drawn before the projects landed — declares no record
+                // stale, the rule `editorRecordRoots` holds for the buffers beside it.
+                const projectIds = new Set(appStore.projects.map(p => p.id));
+                await gc(allIds, roots.size ? roots : undefined, projectIds.size ? projectIds : undefined, projectId);
             })().catch(() => {});
         }
     });

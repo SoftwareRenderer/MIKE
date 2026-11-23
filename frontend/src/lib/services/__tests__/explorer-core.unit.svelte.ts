@@ -1,12 +1,15 @@
 /**
- * `ExplorerCore` — the three decisions the explorer makes about what it is showing.
+ * `ExplorerCore` — the four decisions the explorer makes about what it is showing.
  *
  *  - a commit's other side is its **first parent**, never the row above it in the log;
  *  - the files the list removed take their tabs, drafts and undo history with them —
  *    and nothing else goes with them;
  *  - `resetTabs` answers to the subject it was called for, so a re-run of the screen's
- *    effect does not throw away the line a go-to-definition jump asked for.
+ *    effect does not throw away the line a go-to-definition jump asked for;
+ *  - the tabs are written to the record of the subject that held them, even when the write
+ *    lands after the screen has moved on.
  */
+import { tick } from 'svelte';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ExplorerCore } from '$lib/services/explorer-core.svelte';
 import type { GitCommit } from '$lib/types';
@@ -16,13 +19,15 @@ const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf899d69f826635b6';
 
 const draftCleared = vi.hoisted(() => vi.fn());
 const historyCleared = vi.hoisted(() => vi.fn());
+/** Every tab write, with the record key it went to. */
+const savedTabs = vi.hoisted(() => vi.fn());
 
 vi.mock('$lib/storage', async (importOriginal) => ({
     ...(await importOriginal<typeof import('$lib/storage')>()),
     clearEditorDraft: (path: string) => { draftCleared(path); return Promise.resolve(); },
     clearEditorHistory: (path: string) => { historyCleared(path); return Promise.resolve(); },
     loadEditorTabs: async () => null,
-    saveEditorTabs: async () => {},
+    saveEditorTabs: (key: string, state: unknown) => { savedTabs(key, state); return Promise.resolve(); },
     loadUnsavedFiles: async () => [],
     saveUnsavedFiles: async () => {},
 }));
@@ -34,7 +39,7 @@ let asked: Array<[string, string]> = [];
 /** The paths the screen was last handed, in order. */
 let handedTo: Array<string | null> = [];
 
-function core(commits: GitCommit[] = []): ExplorerCore {
+function core(commits: GitCommit[] = [], overrides: Partial<ExplorerEdges> = {}): ExplorerCore {
     const edges: ExplorerEdges = {
         storageKey: () => 'explorer-test',
         pathRoots: () => [ROOT],
@@ -50,6 +55,7 @@ function core(commits: GitCommit[] = []): ExplorerCore {
             asked.push([baseHash, headHash]);
             return [];
         },
+        ...overrides,
     };
     // ExplorerCore creates effects, which need a root outside a component in a test.
     let created!: ExplorerCore;
@@ -238,5 +244,115 @@ describe('ExplorerCore.resetTabs', () => {
 
         expect(c.openFiles).toEqual([]);
         expect(c.activeFilePath).toBe('');
+    });
+});
+
+// ─── Which record the tabs are written to ───────────────────────────────────
+// A project's explorer and each of its tasks' explorers hold their own list, and the
+// address bar moves before the screen's effect does. A write that read the key when it
+// fired would land a screen's tabs in the record of whoever arrived next.
+
+describe('the record an explorer writes its tabs to', () => {
+    it('leaves the record alone on the first subject it adopts, which is the one it is about to restore', () => {
+        vi.useFakeTimers();
+        const c = core([], { storageKey: () => 'task-1' });   // built for this subject, holding nothing
+        c.queueTabSave();                                     // the write its construction queued
+        savedTabs.mockClear();
+
+        c.resetTabs('task-1');                                // the screen's effect, ahead of the restore
+
+        expect(savedTabs).not.toHaveBeenCalled();
+        vi.useRealTimers();
+    });
+
+    it('writes the tabs it still held to the subject it is leaving', () => {
+        vi.useFakeTimers();
+        let subject = 'task-1';
+        const c = core([], { storageKey: () => subject });
+        c.resetTabs('task-1');
+        c.handleFileSelected(`${ROOT}/a.go`, 0, true);
+        c.queueTabSave();                       // a click's write, still waiting out the quiet period
+        savedTabs.mockClear();
+
+        subject = 'task-2';                     // the address bar moved; the screen's effect runs next
+        c.resetTabs('task-2');
+
+        const [key, state] = savedTabs.mock.calls[0] as [string, { openFiles: unknown }];
+        expect(key).toBe('task-1');
+        expect(state.openFiles).toEqual([{ path: `${ROOT}/a.go`, targetLine: 0 }]);
+        vi.useRealTimers();
+    });
+
+    it('lands a write that fires after the address bar moved under the subject whose tabs it holds', () => {
+        vi.useFakeTimers();
+        let subject = 'task-1';
+        const c = core([], { storageKey: () => subject });
+        c.resetTabs('task-1');
+        c.handleFileSelected(`${ROOT}/a.go`, 0, true);
+        c.queueTabSave();
+        savedTabs.mockClear();
+
+        subject = 'task-2';                     // the move, with the effect not yet run
+        vi.advanceTimersByTime(300);
+
+        expect(savedTabs).toHaveBeenCalledTimes(1);
+        expect(savedTabs.mock.calls[0][0]).toBe('task-1');
+        vi.useRealTimers();
+    });
+});
+
+// ─── The listing's own scroll ───────────────────────────────────────────────
+// The file listing keeps one offset per screen, written beside the tabs and handed back
+// once — restoring it to every rebuilt listing would fight a reader already moving.
+// Both explorers mount the same core, so this is measured here rather than twice.
+
+describe("the listing's scroll", () => {
+    /** The scroller as `ExplorerWorkspace` binds it, with the geometry jsdom cannot give it. */
+    function listing(scrollHeight = 0, clientHeight = 0): { el: HTMLDivElement; list: HTMLDivElement } {
+        const el = document.createElement('div');
+        const list = document.createElement('div');
+        list.className = 'file-browser-list';
+        Object.defineProperty(list, 'scrollHeight', { configurable: true, get: () => scrollHeight });
+        Object.defineProperty(list, 'clientHeight', { configurable: true, get: () => clientHeight });
+        el.appendChild(list);
+        return { el, list };
+    }
+
+    it("writes the listing's offset with the tabs of the screen that scrolled", async () => {
+        vi.useFakeTimers();
+        const c = core();
+        const { el, list } = listing(3000, 300);
+        c.fileBrowserEl = el;
+        await tick();                           // the effect that binds the scroller is queued
+
+        list.scrollTop = 240;
+        list.dispatchEvent(new Event('scroll'));
+        c.queueTabSave();
+        vi.advanceTimersByTime(300);
+
+        expect(c.fileListScroll).toBe(240);
+        expect(savedTabs).toHaveBeenCalledWith('explorer-test', expect.objectContaining({ fileListScroll: 240 }));
+        vi.useRealTimers();
+    });
+
+    it('hands the offset back to the first listing that can scroll, and to no later one', async () => {
+        vi.useFakeTimers();
+        const c = core();
+        c.fileListScroll = 150;
+        const first = listing(3000, 300);
+        c.fileBrowserEl = first.el;
+        await tick();
+
+        vi.advanceTimersByTime(100);
+        expect(first.list.scrollTop).toBe(150);
+
+        // The reader has since moved on, and the listing was rebuilt: their position stands.
+        first.list.scrollTop = 40;
+        const second = listing(3000, 300);
+        c.fileBrowserEl = second.el;
+        await tick();
+        vi.advanceTimersByTime(1000);
+        expect(second.list.scrollTop).toBe(0);
+        vi.useRealTimers();
     });
 });

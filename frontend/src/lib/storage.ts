@@ -7,8 +7,8 @@
 //   drafts             — key: taskId → string (draft chat text)
 //   editor-drafts      — key: file path → EditorDraft (unsaved buffer + the file bytes it diverged from)
 //   editor-history     — key: file path → PersistedEditorHistory (undo/redo history)
-//   editor-tabs        — key: projectId → EditorTabState
-//   unsaved-files      — key: projectId → string[]
+//   editor-tabs        — key: explorerRecordKey → EditorTabState (one screen's tabs, pins and scroll)
+//   unsaved-files      — key: explorerRecordKey → string[]
 //   offline-queue      — key 'actions' → QueuedAction[]; key 'queue-owner' → the window
 //                        that replays the actions (utils/queue-ownership.ts)
 //   explorer-layout    — key 'layout' → ExplorerLayout
@@ -58,6 +58,12 @@ const KEY_ACTIONS = 'actions';
 /** Which window replays the queue, beside the actions it replays. */
 const KEY_QUEUE_OWNER = 'queue-owner';
 const KEY_LAYOUT = 'layout';
+
+/**
+ * What separates a task explorer's record key from its project's. A task id and a project id come from one
+ * alphabet, so the project half is spelled out in the key rather than trusted to be unique.
+ */
+const TASK_KEY_SEP = ':task:';
 
 const ALL_STORES = [
     STORE_COLLAPSED_TASKS,
@@ -337,15 +343,15 @@ export async function clearEditorHistory(path: string): Promise<void> {
 
 // ─── Unsaved files (IndexedDB: unsaved-files store) ─────────────────────────
 
-/** Load unsaved file paths for a project. */
-export async function loadUnsavedFiles(projectId: string): Promise<string[]> {
-    const result = await dbGet<string[]>(STORE_UNSAVED_FILES, projectId, isArray);
+/** Load the unsaved file paths one explorer screen recorded. */
+export async function loadUnsavedFiles(recordKey: string): Promise<string[]> {
+    const result = await dbGet<string[]>(STORE_UNSAVED_FILES, recordKey, isArray);
     return result ?? [];
 }
 
-/** Save unsaved file paths for a project. */
-export async function saveUnsavedFiles(projectId: string, paths: string[]): Promise<void> {
-    return dbPut(STORE_UNSAVED_FILES, projectId, paths);
+/** Save the unsaved file paths one explorer screen recorded. */
+export async function saveUnsavedFiles(recordKey: string, paths: string[]): Promise<void> {
+    return dbPut(STORE_UNSAVED_FILES, recordKey, paths);
 }
 
 // ─── Explorer layout (IndexedDB: explorer-layout store) ─────────────────────
@@ -584,6 +590,11 @@ export async function saveCollapsedDiffFiles(scope: string, ids: Set<string>): P
 
 // ─── Garbage collection ─────────────────────────────────────────────────────
 
+/** Where a task's worktree lives. The explorer that lists it and the wipe that forgets it both read this. */
+export function taskWorktreeRoot(workspaceDir: string, projectId: string, taskId: string): string {
+    return workspaceDir ? `${workspaceDir}/${projectId}/${taskId}` : '';
+}
+
 /**
  * Every path an editor can key a record by for the projects named: the checkout on the host, the container's
  * mount for a sandboxed project, and that project's task worktrees under the workspace. A root missing here
@@ -632,7 +643,7 @@ export async function gc(allTaskIds: Set<string>, allProjectPaths?: Set<string>,
     }
 
     if (allProjectIds) {
-        await cleanEditorTabsByProject(allProjectIds);
+        await cleanExplorerRecordsByProject(allProjectIds);
     }
 
     if (projectId) {
@@ -696,12 +707,17 @@ async function cleanEditorRecordsByProject(allProjectPaths: Set<string>): Promis
     }
 }
 
-/** Remove editor tab entries for projects that no longer exist. */
-async function cleanEditorTabsByProject(allProjectIds: Set<string>): Promise<void> {
-    const keys = await dbGetAllKeys(STORE_EDITOR_TABS);
-    const toDelete = keys.filter(key => !allProjectIds.has(key));
-    if (toDelete.length > 0) {
-        await dbDeleteKeys(STORE_EDITOR_TABS, toDelete);
+/** The project an explorer record belongs to: a task's record carries its project in its own key. */
+function recordOwnerProject(key: string): string {
+    const sep = key.indexOf(TASK_KEY_SEP);
+    return sep < 0 ? key : key.slice(0, sep);
+}
+
+/** Remove the explorer records of projects that no longer exist. A task's record goes with its project. */
+async function cleanExplorerRecordsByProject(allProjectIds: Set<string>): Promise<void> {
+    for (const store of [STORE_EDITOR_TABS, STORE_UNSAVED_FILES]) {
+        const toDelete = (await dbGetAllKeys(store)).filter(key => !allProjectIds.has(recordOwnerProject(key)));
+        if (toDelete.length > 0) await dbDeleteKeys(store, toDelete);
     }
 }
 
@@ -813,8 +829,10 @@ export async function removeBoardCache(key: string): Promise<void> {
     return dbDelete(STORE_BOARD_CACHE, key);
 }
 
-// ─── Editor tabs (IndexedDB: editor-tabs store) ──────────────────────────────
-// Persists open file tabs, active file, and pinned files per project.
+// ─── Explorer records (IndexedDB: editor-tabs + unsaved-files stores) ────────
+// What one explorer screen remembers, under `explorerRecordKey`: the files it left open, where each pane and
+// the file listing were scrolled, and which of those files held unsaved text. `docs/reconnection.md` owns the
+// rules; a screen is the project's own explorer or one task's, never the two sharing one record.
 
 interface EditorTabFile {
     path: string;
@@ -829,14 +847,83 @@ export interface EditorTabState {
     fileListScroll?: number;
 }
 
-/** Load persisted editor tab state for a project. Returns `null` if none exists. */
-export async function loadEditorTabs(projectId: string): Promise<EditorTabState | null> {
-    return dbGet<EditorTabState>(STORE_EDITOR_TABS, projectId);
+/** The key of one explorer screen's records: the project's explorer keeps the bare project id, and a task's
+ *  explorer hangs its record off that. */
+export function explorerRecordKey(projectId: string, taskId?: string): string {
+    return taskId ? `${projectId}${TASK_KEY_SEP}${taskId}` : projectId;
 }
 
-/** Save editor tab state for a project. */
-export async function saveEditorTabs(projectId: string, state: EditorTabState): Promise<void> {
-    return dbPut(STORE_EDITOR_TABS, projectId, state);
+/** Load the tab state of one explorer screen. Returns `null` if none exists. */
+export async function loadEditorTabs(recordKey: string): Promise<EditorTabState | null> {
+    return dbGet<EditorTabState>(STORE_EDITOR_TABS, recordKey);
+}
+
+/** Save the tab state of one explorer screen. */
+export async function saveEditorTabs(recordKey: string, state: EditorTabState): Promise<void> {
+    return dbPut(STORE_EDITOR_TABS, recordKey, state);
+}
+
+/** What `forgetTaskExplorer` takes from its caller. */
+export interface ForgetTaskExplorer {
+    /** `config.workspace_dir`. Empty leaves only the paths the record itself names. */
+    workspaceDir?: string;
+    /** The paths a mounted explorer holds open; their buffers stay. */
+    heldPaths?: ReadonlySet<string>;
+}
+
+/** The file paths the other live explorer records of this project name. */
+async function pathsNamedByOtherRecords(projectId: string, exceptKey: string): Promise<Set<string>> {
+    const prefix = `${projectId}${TASK_KEY_SEP}`;
+    const keys = (await dbGetAllKeys(STORE_EDITOR_TABS))
+        .filter(key => key !== exceptKey && (key === projectId || key.startsWith(prefix)));
+    const named = new Set<string>();
+    for (const key of keys) {
+        for (const file of (await loadEditorTabs(key))?.openFiles ?? []) named.add(file.path);
+    }
+    return named;
+}
+
+/**
+ * Forget everything one task's explorer left: its tabs with their scroll, its unsaved marker, and the buffer
+ * and undo chain of the files it was holding. Those last two are keyed by file path — a sandboxed task's by the
+ * container's mount, a spelling every task of that project shares — so what was the task's comes from its worktree
+ * root and from the paths its own record names, and a path a live editor or another live record names is left.
+ */
+export async function forgetTaskExplorer(
+    projectId: string,
+    taskId: string,
+    { workspaceDir = '', heldPaths }: ForgetTaskExplorer = {},
+): Promise<void> {
+    const key = explorerRecordKey(projectId, taskId);
+    const named = new Set((await loadEditorTabs(key))?.openFiles.map(f => f.path) ?? []);
+    const kept = await pathsNamedByOtherRecords(projectId, key);
+    const root = taskWorktreeRoot(workspaceDir, projectId, taskId);
+    const taken = (path: string) =>
+        ((root !== '' && path.startsWith(root + '/')) || named.has(path))
+        && !kept.has(path) && !heldPaths?.has(path);
+    for (const store of [STORE_EDITOR_DRAFTS, STORE_EDITOR_HISTORY]) {
+        const toDelete = (await dbGetAllKeys(store)).filter(taken);
+        if (toDelete.length > 0) await dbDeleteKeys(store, toDelete);
+    }
+    await dbDelete(STORE_EDITOR_TABS, key);
+    await dbDelete(STORE_UNSAVED_FILES, key);
+}
+
+/**
+ * Forget the explorer records of tasks this project's board no longer holds — deleted here or in another
+ * browser. A task sitting in Done is still on the board, and is not this rule's.
+ */
+export async function pruneTaskExplorerRecords(
+    projectId: string,
+    liveTaskIds: ReadonlySet<string>,
+    options: ForgetTaskExplorer = {},
+): Promise<void> {
+    const prefix = `${projectId}${TASK_KEY_SEP}`;
+    const gone = (await dbGetAllKeys(STORE_EDITOR_TABS))
+        .filter(key => key.startsWith(prefix))
+        .map(key => key.slice(prefix.length))
+        .filter(taskId => !liveTaskIds.has(taskId));
+    for (const taskId of gone) await forgetTaskExplorer(projectId, taskId, options);
 }
 
 // ─── Sign-out ────────────────────────────────────────────────────────────────
