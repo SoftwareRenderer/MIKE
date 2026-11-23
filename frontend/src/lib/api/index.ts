@@ -82,6 +82,7 @@ export {
 export {
     sendTaskMessage,
     getTaskMessages,
+    getTaskMessageHead,
     readCachedWindow,
     MESSAGE_JUMP_LIMIT,
     getTaskTurns,

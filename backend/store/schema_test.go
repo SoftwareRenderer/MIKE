@@ -138,6 +138,7 @@ var indexReads = []struct {
 	{"a task's messages", taskMessagesAllSQL, []any{"schema-task"}, "idx_task_messages_task_time"},
 	{"the newest row of a thread", lastMessageInThreadSQL, []any{"schema-thread"}, "idx_task_messages_thread_time"},
 	{"the prompts of a thread", userTurnCols + `thread_id = ?` + userTurnOnly + ` ` + newestFirstOrder + ` LIMIT ?`, []any{TurnLabelChars, "schema-thread", 5}, "idx_task_messages_user_thread"},
+	{"the opening page of a thread", messageKeyCols + `thread_id = ?` + ` ` + messageOrder + ` LIMIT ?`, []any{"schema-thread", 5}, "idx_task_messages_thread_time"},
 	{"the prompts of a task", userTurnCols + `task_id = ?` + userTurnOnly + ` ` + newestFirstOrder + ` LIMIT ?`, []any{TurnLabelChars, "schema-task", 5}, "idx_task_messages_user_task"},
 	{"a session by its digest", `SELECT id FROM sessions WHERE token_hash = ?`, []any{"schema-digest"}, "idx_sessions_token_hash"},
 	{"the claim horizon prune", pruneExpiredClaimsSQL, []any{"2026-01-01T00:00:00Z"}, "idx_client_claims_created_at"},

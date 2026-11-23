@@ -421,7 +421,7 @@ func hasIndex(t *testing.T, s *Store, name string) bool {
 // cursorOfRow encodes one row's position, the way the prompt read hands one out.
 func cursorOfRow(t *testing.T, s *Store, taskID, threadID, id string) string {
 	t.Helper()
-	keys, err := s.messageKeys(taskID, threadID, nil, nil, 100000)
+	keys, err := s.messageKeys(taskID, threadID, nil, nil, newestFirstOrder, 100000)
 	if err != nil {
 		t.Fatalf("read positions: %v", err)
 	}

@@ -572,9 +572,25 @@ rows held cannot be joined: another thread's read, or a truncation that cut the 
 **Paging has two starters**, and each names what it wants. The list edge is the passive one: it fires a
 request a viewport and a half before the reader gets there (`atTopOfList` and its `EARLIER_EDGE_VIEWPORTS`,
 in `frontend/src/lib/utils/chat-window.ts`), so the page lands while they are still reading toward it. The
-bubble floors one page at the prompt it names. The go-to-first control walks `before` until
-`X-Messages-More` runs out, so it lands the conversation's first message rather than the top of the window
-loaded so far.
+bubble floors one page at the prompt it names. The go-to-first control reads the conversation's opening page
+(`?head=1`) and lands that, then fills the rows between it and the window with the ordinary `before` walk.
+
+**The head read is the other direction, not a window with a floor.** `?head=1` answers the oldest `limit`
+answers, oldest first, cut at an answer boundary like any page — `store.GetTaskMessageHeadPage` reads it and
+`oldestUnits` cuts it. It refuses `before` and `from` with a 400 naming the parameter: the two directions cut
+from opposite ends, and honouring both would return rows the reader holds while skipping the ones between.
+It carries neither `X-Messages-Before` nor `X-Messages-More`, because it is not a step of a walk and a client
+that read a cursor out of it would page the wrong way. A client asks it with `getTaskMessageHead`, which
+sends no `If-None-Match`: the revision describes the newest window, which this response is not.
+
+**The gap a head read leaves is the client's to name, never to fake.** It is never cached — a page fetched by
+cursor or by head is not a window, and `widenCache` writes the newest window alone. It is never drawn as
+though it were real: `TaskChat` keeps the head rows in their own list, and `ChatEntries` sets a notice
+between the two halves while the fill runs, rather than a spacer guessing at the height of rows nobody has
+read. The head rows join the transcript through `prependRows`, so the walk reaching the start drops them on
+its own, and a newest-window read that cannot be joined clears them with the conversation it replaced.
+Tests: `backend/store/messages_head_test.go`, `backend/server/handler_message_head_test.go`, and
+`frontend/tests/e2e/chat-window-scroll.spec.ts` for the landing while the fill is still out.
 
 The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never

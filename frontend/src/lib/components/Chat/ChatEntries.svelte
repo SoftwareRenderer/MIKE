@@ -59,6 +59,7 @@
         onRetryHistory,
         hasEarlier = false,
         loadingEarlier = false,
+        gapAboveEntryId = '',
         onLoadEarlier,
         turns = [],
         turnsHasMore = false,
@@ -113,6 +114,8 @@
         /** Fetch the next-older window, called when the reader reaches the top edge. Whether rows
          * arrived is the jump's business; the top edge ignores the answer. */
         onLoadEarlier?: () => Promise<unknown>;
+        /** An entry id means rows are missing above that entry and the notice says so; empty is no gap. */
+        gapAboveEntryId?: string;
         /** The prompts the header can name, oldest first: what the prompt read answers. */
         turns?: ChatTurn[];
         /** Older prompts exist beyond that list. */
@@ -470,6 +473,10 @@
           <div class="chat-content" bind:this={chatContentEl}>
             {#each entries as entry, entryIdx (entry.id)}
                 {@const meta = entryMetas[entryIdx] as EntryMeta}
+                {#if gapAboveEntryId && entry.id === gapAboveEntryId}
+                    <!-- Said, not padded: a spacer guessing at the height of unread rows would move the reader. -->
+                    <p class="history-notice" role="status">{t('chat.entries.loadingEarlierRows')}</p>
+                {/if}
                 <div class="chat-entry" data-entry-id={entry.id}>
                 {#if entry.role === 'user'}
                     {#if meta.cpThread || meta.cpState}

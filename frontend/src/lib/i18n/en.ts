@@ -1797,6 +1797,7 @@ const catalog = {
     'chat.entries.historyCached': 'Showing cached data',
     'chat.entries.historyFailed': 'Could not read this conversation',
     'chat.entries.historyOwing': 'Could not read this conversation — showing the running turn as it arrives',
+    'chat.entries.loadingEarlierRows': 'Loading messages',
     'chat.entries.historyRetry': 'Retry',
     'chat.entries.scrollToMessage': 'Scroll to message',
     'chat.entries.scrollToFirst': 'Scroll to first message',

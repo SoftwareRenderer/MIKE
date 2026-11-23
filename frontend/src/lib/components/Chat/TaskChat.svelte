@@ -3,7 +3,7 @@
     import type { StreamEvent, StreamEventType, Provider, Thread, ChatEntry, TaskMessage, Task, ChatTurn } from '$lib/types';
     import type { DiffManifest } from '$lib/types/diff';
     import { AGENT_URL_PREFIX, isAgentProvider } from '$lib/types';
-    import { sendTaskMessage, getTaskMessages, readCachedWindow, type MessageWindow, MESSAGE_JUMP_LIMIT, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
+    import { sendTaskMessage, getTaskMessages, getTaskMessageHead, readCachedWindow, type MessageWindow, MESSAGE_JUMP_LIMIT, getTaskTurns, deleteTaskMessagesAfter, deleteTaskMessage, updateTaskMessage, stopTask, updateTask, moveTask, getTaskThreads, switchTaskThread, forkTaskThread, checkMessageDelete, commitAndDone, summarizeTask, compactTask, getOfflineStatus, onQueueChanged, onQueueFlushed, getQueuedTaskIds, getQueuedSends, getRefusedSends, getDroppedTaskIds, getTask, isFromCache, type AppStream, type SendResult } from '$lib/api';
     import { PENDING_SEND_ID_PREFIX, pendingSendEntries } from '$lib/utils/pending-sends';
     import { appStore, dialogStore, updateTaskInBoard, updateTaskAndSelection } from '$lib/stores';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
@@ -55,10 +55,15 @@
     let historyLoading = $state(false);
     /** Set when the transcript may not be current: read from this device's mirror, or not read at all. */
     let historyNotice = $state<WindowReadNotice>(null);
+    /** The entry the gap notice sits above; empty when the transcript is contiguous. */
+    let gapAboveEntryId = $state('');
     /** The stream this chat holds its task key on, set while the chat is mounted. */
     let heldStream: AppStream | null = null;
     /** Rows every window has delivered, oldest first; the transcript is rebuilt from these. */
     let historyRows: TaskMessage[] = [];
+    /** The conversation's opening page, read by the go-to-first control. Its own list rather than
+     * `historyRows`: those are the walk's rows, and the walk's cursor names their oldest. */
+    let headRows: TaskMessage[] = [];
     /** Where the next-older window starts, and whether there is one. */
     let earlierCursor = $state('');
     let hasEarlier = $state(false);
@@ -424,6 +429,13 @@
     function resetStreamState() {
         stream.resetForThreadSwitch();
         historyRevision = '';
+        dropHeadRows();
+    }
+
+    /** Forget the opening page: a conversation that was replaced must not carry another thread's first rows
+     * in front of it. */
+    function dropHeadRows(): void {
+        headRows = [];
     }
 
     /** Merge an updated task into the app store. */
@@ -659,6 +671,7 @@
                 const joined = applyWindowRead(historyRows, window.messages);
                 if (!joined.keepsEarlier) {
                     stream.state.entries = entriesWithoutRows(stream.state.entries);
+                    dropHeadRows();
                 }
                 historyRows = joined.rows;
 
@@ -735,10 +748,13 @@
     /** Draws the transcript from the rows loaded so far. Rebuilding it whole keeps a turn the window cut
      * in the middle as one entry. */
     function renderHistory(scrollAfter: boolean, executionState: string) {
-        const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(historyRows);
+        // The opening page joins here and nowhere else: dedup by id drops it once the walk reaches the start.
+        const rows = prependRows(historyRows, headRows);
+        const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(rows);
         stream.state.checkpointCommitHashes = checkpointHashes;
+        gapAboveEntryId = headRows.length > 0 ? (historyRows[0]?.id ?? '') : '';
 
-        stream.state.entries = mergeLoadedHistory(mergedDbEntries, historyRows.map(m => m.id), stream.state.entries, taskIsInFlight(executionState));
+        stream.state.entries = mergeLoadedHistory(mergedDbEntries, rows.map(m => m.id), stream.state.entries, taskIsInFlight(executionState));
         // These are new entry objects, so refs captured while streaming are now
         // detached; re-point them before more events for this turn arrive.
         stream.reconcileActiveToolCalls();
@@ -765,12 +781,15 @@
         /** Re-pin the reader while the prepended rows find their heights. A jump owns the scroll and lands
          * once, so it declines the wait. */
         settle?: boolean;
+        /** Draw the rows as they land. A jump's fill declines this: the reader is waiting for one row, the
+         * one at the start. */
+        render?: boolean;
     }
 
     /** Adds the next-older window above the rows held, leaving the reader on their row: the entry under
      * the top edge is found again by id afterwards. True when rows arrived. */
     async function loadEarlierMessages(page: OlderPage = {}): Promise<boolean> {
-        const { from = '', limit = 0, settle = true } = page;
+        const { from = '', limit = 0, settle = true, render = true } = page;
         // The cursor is named for exactly as long as older rows exist, so the flag is the guard.
         if (!hasEarlier) return false;
         // A reader who reaches the top edge while a jump is paging asks for the same page: waiting on the
@@ -785,13 +804,15 @@
             const held = historyRows.length;
             try {
                 const older = await getTaskMessages(projectId, taskId, { before: earlierCursor, from, limit });
-                const el = follow.el;
-                // Read where the reader is now, not where the request went out: they may have kept scrolling
-                // while it was in flight, and pinning them back to that is a jump.
-                const anchor = readingAbove && settle && el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
+                // Where the reader is now, not where the request went out: they may have kept scrolling
+                // while it was in flight, and pinning them back to that is a jump. Nothing is read when the
+                // rows will not be drawn.
+                const el = render ? follow.el : null;
+                const anchor = render && readingAbove && settle && el ? resolveAnchor(measuredEntries(el), el.getBoundingClientRect().top) : null;
                 historyRows = prependRows(historyRows, older.messages);
                 earlierCursor = older.before;
                 hasEarlier = older.hasMore;
+                if (!render) return historyRows.length > held;
                 renderHistory(false, knownExecutionState);
                 await tick();
                 // A jump declines the settle and lands at its caller's hand, so it gets neither.
@@ -845,13 +866,41 @@
     }
 
     /**
-     * Pages the older windows until the conversation runs out, so the caller can land the reader on its first
-     * message. A page that answers nothing ends the walk with rows still above.
+     * Reads the conversation's opening page and hands it back for the caller to land: one read whether the
+     * thread holds fifty rows or five thousand. The rows between here and the window fill behind the
+     * landing — awaiting them here would queue the landing behind the whole thread again.
      */
     async function walkToFirstMessage(): Promise<void> {
-        while (hasEarlier && !destroyed) {
-            if (!(await loadEarlierMessages({ limit: MESSAGE_JUMP_LIMIT, settle: false }))) return;
+        if (!hasEarlier || destroyed) return;
+        try {
+            headRows = await getTaskMessageHead(projectId, taskId);
+        } catch {
+            // No opening page: the rows held stay contiguous, so there is nothing to fill and no gap to
+            // name — the caller lands on the oldest row held.
+            return;
         }
+        if (destroyed) return;
+        renderHistory(false, knownExecutionState);
+        await tick();
+        void fillBehindTheLanding();
+    }
+
+    /**
+     * Reads the rows between the opening page and the window and draws them once: the reader is already
+     * where they asked to be, and every row these deliver lands below their viewport.
+     *
+     * A fill that stops early keeps the opening page — the oldest row held is then as close to the start as
+     * the app knows.
+     */
+    async function fillBehindTheLanding(): Promise<void> {
+        while (hasEarlier && !destroyed) {
+            if (!(await loadEarlierMessages({ limit: MESSAGE_JUMP_LIMIT, settle: false, render: false }))) break;
+        }
+        if (destroyed) return;
+        // The walk reached the start, so the opening page is already among the rows held.
+        if (!hasEarlier) dropHeadRows();
+        renderHistory(false, knownExecutionState);
+        await tick();
     }
 
     function turnRowOnScreen(entryId: string): boolean {
@@ -1837,6 +1886,7 @@
         onRetryHistory={() => { void reconcileAfterAbsence(true); }}
         hasEarlier={hasEarlier}
         loadingEarlier={loadingEarlier}
+        gapAboveEntryId={gapAboveEntryId}
         onLoadEarlier={loadEarlierMessages}
         turns={chatTurns}
         turnsHasMore={turnsHasMore}

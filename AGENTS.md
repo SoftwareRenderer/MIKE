@@ -204,6 +204,10 @@ make test-podman-state                                   # the image entrypoint'
 - **Chat autoscroll is judged from the scroll event, never from a gesture listener**, and new content
   re-pins only while the reader is being followed. `frontend/src/lib/composables/use-chat-follow.svelte.ts`,
   `docs/api-contract.md → The conversation is a window, not the thread`.
+- **The go-to-first control reads the conversation's opening page (`?head=1`), and those rows are not the
+  walk's** — the walk's cursor names the oldest row of the newest window. The middle it has not read is
+  named by a notice, never padded by a spacer. `docs/api-contract.md → The conversation is a window, not the
+  thread`.
 - **A Review notification is the client's decision, never the server's** — the choice lives in the browser
   that shows it (`uiStore.notifyOnReview`), never in `/api/config`. `docs/notifications.md`.
 - **A card lists its subtasks as flat rows in run order, never as nested card boxes.** One pure function
