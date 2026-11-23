@@ -16,6 +16,12 @@ export class StreamState {
         unresolvedToolIds: new Set<string>(),
         awaitingResponse: false,
         /**
+         * True once a `status` frame ended the run. That run can still be talking — a cancelled call flushes
+         * what it buffered — and its late frames must not re-open an entry over a task the server just said
+         * was idle. Cleared by any frame meaning *a run is calling the provider again*.
+         */
+        turnEnded: false,
+        /**
          * The last assistant entry the stream closed. A run can close its entry before the `complete` that
          * names its row lands.
          */
@@ -101,6 +107,25 @@ export class StreamState {
     }
 
     /**
+     * The run ended, so nothing of it may stand as still arriving: the wait line, the retry notice and the
+     * count of a collapsed turn go, and so does text no row will ever hold (`abandonInterruptedTurn`, the
+     * rule the Stop button uses too — a stop looks the same whoever asked for it). Called by the `status`
+     * frame's ended states, the set `terminalTurnStates` (backend/stream/app_stream.go) counts.
+     */
+    endOpenTurn() {
+        this.clearAwaiting();
+        this.abandonInterruptedTurn();
+        for (const e of this.state.entries) {
+            if (!e.reasoningPending) continue;
+            e.reasoningPending = undefined;
+            // The count was this screen's only evidence the row holds reasoning to open; the next read of the
+            // row restores the claim.
+            if (!e.reasoningContent) e.hasReasoning = false;
+        }
+        this.state.turnEnded = true;
+    }
+
+    /**
      * Drop the turn the provider abandoned: the entry still streaming, and the tool calls it
      * announced but never ran. Filter on isStreaming before closing anything — closing first clears
      * the flag that identifies the entry.
@@ -146,8 +171,16 @@ export class StreamState {
      * leaving them keeps the tab-return gate open for a turn that no longer exists here. */
     resetForThreadSwitch() {
         this.resetStreaming();
+        this.forgetTurnBoundary();
         this.state.entries = [];
         this.state.currentAssistantId = null;
+    }
+
+    /** Ends the mute `endOpenTurn()` put on a finished run's frames: the `running` status frame, the retry
+     * hint, a thread switch and a full reset. `resetStreaming` deliberately does not call it, or the
+     * reconcile after a stop would let through the frames that stop is still waiting for. */
+    forgetTurnBoundary() {
+        this.state.turnEnded = false;
     }
 
     /** Forgets the streaming ref unless an entry on screen is still streaming under it, so the next `token`
@@ -158,7 +191,7 @@ export class StreamState {
         this.state.currentAssistantId = null;
     }
 
-    /** Reset streaming state (thread switch). */
+    /** Reset streaming state (thread switch). Leaves `turnEnded` alone — see `forgetTurnBoundary`. */
     resetStreaming() {
         this.closeCurrentAssistant();
         this.state.lastClosedAssistantId = null;
@@ -180,6 +213,7 @@ export class StreamState {
     reset() {
         this.state.entries = [];
         this.resetStreaming();
+        this.forgetTurnBoundary();
         this.state.queuePosition = 0;
         this.state.queueEstimatedWait = 0;
         this.state.lockWait = null;

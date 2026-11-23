@@ -67,6 +67,16 @@ function unnamedStreamingEntry(s: typeof StreamState.prototype.state): ChatEntry
     return id ? s.entries.find(e => e.id === id) : undefined;
 }
 
+/** Whether a frame carrying a run's output may be drawn at all — `StreamState.turnEnded` owns that rule. */
+function rejectsRunFrame(s: typeof StreamState.prototype.state, suppressEvents: boolean): boolean {
+    return suppressEvents || s.turnEnded;
+}
+
+/** The `status` states that end a run: the client's mirror of `terminalTurnStates`
+ * (backend/stream/app_stream.go). `cancelled` is absent — a run replaced by a message keeps its own
+ * entries for the frames that answer them. */
+const endedRunStates = ['stopped', 'failed', 'idle', 'completed', 'paused'];
+
 /**
  * External callbacks the component must provide.
  *
@@ -148,7 +158,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
     return function handleEvent(event: StreamEvent, suppressEvents: boolean) {
         switch (event.type) {
             case 'token': {
-                if (suppressEvents) break;
+                if (rejectsRunFrame(s, suppressEvents)) break;
                 stream.clearAwaiting();
                 markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
@@ -162,7 +172,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'reasoning': {
-                if (suppressEvents) break;
+                if (rejectsRunFrame(s, suppressEvents)) break;
                 stream.clearAwaiting();
                 markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
@@ -179,7 +189,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 // A collapsed turn's reasoning: the server counted it and never sent it. `chars` is
                 // cumulative for the call being answered, and a replayed state frame announces the newest
                 // total, never a smaller one.
-                if (suppressEvents) break;
+                if (rejectsRunFrame(s, suppressEvents)) break;
                 stream.clearAwaiting();
                 markStreaming();
                 if (!s.currentAssistantId) s.streamTokenCount = 0;
@@ -206,7 +216,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'tool_call': {
-                if (suppressEvents) break;
+                if (rejectsRunFrame(s, suppressEvents)) break;
                 stream.clearAwaiting();
                 const data = event.data as { tool_id: string; tool_name: string; tool_display_name?: string; args: Record<string, unknown>; raw_args?: string; raw_args_delta?: string; sandbox?: boolean; path?: string; lines_added?: number; lines_removed?: number };
                 if (!data.tool_id || data.tool_id === '') break;
@@ -419,6 +429,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 } else if (data.state === 'starting_container') {
                     s.entries = [...s.entries, { id: genId(), role: 'system', content: t('chat.stream.startingContainer'), isStreaming: false, createdAt: new Date().toISOString() }];
                 } else if (data.state === 'running') {
+                    stream.forgetTurnBoundary();
                     const wasInFlight = s.currentAssistantId !== null || s.activeToolCalls.size > 0;
                     // The sandbox container started — any build/pull box is complete.
                     const buildEntry = s.entries.find(e => e.buildLog && !e.buildLog.done);
@@ -458,10 +469,9 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     markNotStreaming();
                     s.awaitingResponse = false;
                     stream.clearRetry();
-                } else if (['stopped', 'failed', 'idle', 'completed', 'paused'].includes(data.state)) {
+                } else if (endedRunStates.includes(data.state)) {
+                    stream.endOpenTurn();
                     markNotStreaming();
-                    s.awaitingResponse = false;
-                    stream.clearRetry();
                 }
                 break;
             }
@@ -485,6 +495,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     if (data.kind === 'retry') {
                         // The dead call is retried with the same messages, so what it streamed has no
                         // row behind it and the retry streams the answer over it.
+                        stream.forgetTurnBoundary();
                         stream.dropAbandonedTurn();
                         s.retryCount = 1;
                         s.retryError = data.error || '';
@@ -546,10 +557,10 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 break;
             }
             case 'lock_wait': {
-                // Repeated while the wait lasts, acquired=true at the end: a lost frame costs one repeat
-                // instead of a spinner that never stops.
-                const data = event.data as { domain?: string; waited_seconds?: number; acquired?: boolean; phase?: string };
-                s.lockWait = data.acquired
+                // Repeated while the wait lasts, and once at the end. Either ending — the lock taken, or the
+                // caller called off — clears the line; a lost one costs a repeat, not a spinner.
+                const data = event.data as { domain?: string; waited_seconds?: number; acquired?: boolean; withdrawn?: boolean; phase?: string };
+                s.lockWait = data.acquired || data.withdrawn
                     ? null
                     : { domain: data.domain || 'other', seconds: data.waited_seconds || 0, phase: data.phase };
                 break;

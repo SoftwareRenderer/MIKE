@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"mike/backend/types"
+	"mike/pkg/keylock"
 )
 
 func isLockWait(frame map[string]any) bool {
@@ -27,7 +28,7 @@ func TestLockWaitNotifierAnnouncesTheWaitThenTheAcquisition(t *testing.T) {
 	awaitTaskSub(t, asm, client, projectID, taskID)
 
 	notice := asm.LockWaitNotifier(projectID, taskID, "worktree")
-	notice(12*time.Second, false)
+	notice(12*time.Second, keylock.WaitWaiting)
 
 	frame := c.awaitFrame(t, 5*time.Second, isLockWait, "the wait announcement")
 	data, _ := frame["data"].(map[string]any)
@@ -41,7 +42,7 @@ func TestLockWaitNotifierAnnouncesTheWaitThenTheAcquisition(t *testing.T) {
 		t.Errorf("data.acquired = %v, want false while still waiting", data["acquired"])
 	}
 
-	notice(13*time.Second, true)
+	notice(13*time.Second, keylock.WaitAcquired)
 	frame = c.awaitFrame(t, 5*time.Second, func(f map[string]any) bool {
 		if !isLockWait(f) {
 			return false
@@ -52,5 +53,35 @@ func TestLockWaitNotifierAnnouncesTheWaitThenTheAcquisition(t *testing.T) {
 	data, _ = frame["data"].(map[string]any)
 	if data["acquired"] != true {
 		t.Fatal("the acquired frame did not arrive; a browser left without it shows a spinner until reload")
+	}
+	if _, ok := data["withdrawn"]; ok {
+		t.Errorf("a lock that was taken is reported as withdrawn too: %v", data)
+	}
+}
+
+// The other way a wait ends: the caller was called off and never held the lock.
+func TestLockWaitNotifierWithdrawsAWaitTheCallerGaveUp(t *testing.T) {
+	_, s, _, wm, _ := setupDoneSnapshotTest(t)
+	asm := NewAppStreamManager(s, wm)
+	t.Cleanup(asm.Close)
+
+	const projectID, taskID = "proj-given-up", "task-given-up"
+	c := dialStream(t, asm)
+	client := clientAlone(t, asm)
+	c.sendSubscription(t, "subscribe_task", projectID, taskID)
+	awaitTaskSub(t, asm, client, projectID, taskID)
+
+	asm.LockWaitNotifier(projectID, taskID, "stash")(9*time.Second, keylock.WaitAbandoned)
+
+	frame := c.awaitFrame(t, 5*time.Second, isLockWait, "the withdrawal frame")
+	data, _ := frame["data"].(map[string]any)
+	if data["withdrawn"] != true {
+		t.Errorf("data.withdrawn = %v, want true: the wait ended without the lock being taken", data["withdrawn"])
+	}
+	if data["acquired"] != false {
+		t.Errorf("data.acquired = %v, want false: a caller that gave up never held the lock", data["acquired"])
+	}
+	if data["domain"] != "stash" {
+		t.Errorf("data.domain = %v, want stash", data["domain"])
 	}
 }

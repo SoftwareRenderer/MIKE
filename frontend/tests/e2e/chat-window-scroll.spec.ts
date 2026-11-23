@@ -135,7 +135,7 @@ async function settledEntryTop(page: Page, id: string): Promise<number | null> {
   return previous;
 }
 
-async function openConversation(page: Page): Promise<{ projectId: string; taskId: string }> {
+async function openConversation(page: Page, rows = SEED_ROWS): Promise<{ projectId: string; taskId: string }> {
   await gotoProject(page);
   await page.waitForSelector('.project-item', { timeout: 10000 });
   const projectId = await getProjectId(page);
@@ -145,7 +145,7 @@ async function openConversation(page: Page): Promise<{ projectId: string; taskId
   });
   expect(created.ok, `create task: ${JSON.stringify(created.data)}`).toBe(true);
   const taskId: string = created.data.id;
-  await seedChatRows(page, projectId, taskId, SEED_ROWS, 'windowed');
+  await seedChatRows(page, projectId, taskId, rows, 'windowed');
   await navigateToTask(page, taskId, projectId);
   await waitForChatFormReady(page);
   await expect(page.locator('.chat-messages [data-entry-id]').first()).toBeVisible({ timeout: 15000 });
@@ -209,4 +209,67 @@ test.describe('Chat history window', () => {
     const afterIds = await renderedIds(page);
     expect(new Set(afterIds).size, 'a row on two pages is rendered twice').toBe(afterIds.length);
   });
+
+  /** The control's whole job — the conversation's first message, on screen and readable — answered before a
+   * single older page has arrived. */
+  test('the first message is landed while the rows under it are still being read', async ({ page }) => {
+    test.setTimeout(120000);
+    // 80 rather than the file's 200: the claim needs an opening page and a window that differ, and the
+    // anchoring test beside it measures a 60 px slide on one shared server.
+    await openConversation(page, 80);
+
+    let holdFirst = true;
+    let release = () => { };
+    const headReads: string[] = [];
+    page.on('request', req => { if (req.url().includes('head=1')) headReads.push(req.url()); });
+    await page.route(url => url.searchParams.has('before'), async route => {
+        if (!holdFirst) { await route.continue(); return; }
+        holdFirst = false;
+        await new Promise<void>(resolve => { release = resolve; });
+        await route.continue();
+    });
+
+    const oldestHeld = (await renderedIds(page))[0];
+    expect(oldestHeld, 'the chat opened with nothing rendered').toBeTruthy();
+
+    await page.locator('.chat-sticky-first').click();
+
+    /** Where the oldest prompt sits, or null while the list has not drawn one. */
+    const measureLanding = () => page.evaluate(() => {
+        const list = document.querySelector('.chat-messages') as HTMLElement;
+        const row = list.querySelector<HTMLElement>('.sticky-user-message');
+        const header = document.querySelector('.chat-sticky-header') as HTMLElement;
+        if (!row || !header) return null;
+        return {
+            top: row.getBoundingClientRect().top - list.getBoundingClientRect().top,
+            line: header.getBoundingClientRect().bottom - list.getBoundingClientRect().top,
+        };
+    });
+
+    // Something older than the window arrived and came to rest where it can be read, with the fill still
+    // held. Polling the position rather than the rows waits for the landing instead of racing it.
+    await expect
+        .poll(async () => {
+            const landed = await measureLanding();
+            // At the line, or at the content top when nothing exists above it to scroll past.
+            return !!landed && landed.top >= -1 && landed.top <= landed.line + 4;
+        }, { timeout: 15000, message: 'the first message never landed readable' })
+        .toBe(true);
+    const landedIds = await renderedIds(page);
+    expect(landedIds[0], 'what landed was not older than the window').not.toBe(oldestHeld);
+
+    // The reader is told the transcript is not whole, rather than handed rows that look like neighbours.
+    await expect(page.locator('.chat-messages .history-notice')).toBeVisible();
+
+    release();
+
+    await expect(page.locator('.chat-messages .history-notice'), 'the gap outlived the fill')
+        .toHaveCount(0, { timeout: 15000 });
+    const afterIds = await renderedIds(page);
+    expect(headReads.length, 'the control reached the start some other way').toBeGreaterThan(0);
+    expect(new Set(afterIds).size, 'the opening page and the fill drew one row twice').toBe(afterIds.length);
+    expect(afterIds.length, 'the fill never came').toBeGreaterThan(landedIds.length);
+    expect(afterIds[0], 'the fill took the reader off the first message').toBe(landedIds[0]);
+  });
+
 });

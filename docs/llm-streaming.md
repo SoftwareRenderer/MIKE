@@ -69,10 +69,17 @@ sends is contracted in `docs/api-contract.md → A collapsed turn's reasoning ri
 - **The rule lives in `types.ShouldHideReasoning`** (`backend/types/reasoning.go`), shared with the message
   window's redaction pass. Reasoning that is the call's whole answer is still owed to the reader: `sendHeldReasoning`
   says it once, after the final flush, and only for a call the provider finished — an errored call's rows are
-  never written, so nothing is owed its reasoning. `announceHeldReasoning` names the stored row for the
-  reasoning the rule hides, and the agent path asks the same pair of the `PersistEntry` rows it is writing.
+  never written, so nothing is owed its reasoning. `announceClosingReasoning` ends the count every collapsed
+  call announced and names the stored row behind it, and the agent path asks the same pair of the
+  `PersistEntry` rows it is writing.
 - **Nothing here touches what the model sees.** The conversation history keeps the full reasoning either way;
   only the wire is thinner.
+- **The run's ending closes what the call's ending did not.** A `status` frame naming one of the terminal states
+  tells the client to stop drawing a count. The frames of a run it was told ended stay undrawn until a `running`
+  frame or a retry hint says a call is being made again. The rule, and why it belongs to `StreamState` rather
+  than to the Stop button, is in
+  `docs/api-contract.md → A collapsed turn's reasoning rides as a count, never as text`.
+  Tests: `stream-handler.unit.ts`, `frontend/tests/e2e/stop-thinking-notice.spec.ts`.
 
 ## Tests
 

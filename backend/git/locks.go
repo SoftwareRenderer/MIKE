@@ -1,6 +1,7 @@
 package git
 
 import (
+	"context"
 	"time"
 
 	"mike/pkg/keylock"
@@ -25,7 +26,8 @@ func (wm *WorktreeManager) LockProjectStash(projectID string) func() {
 	return wm.stash.Lock(projectID)
 }
 
-// LockProjectStashWatched is LockProjectStash with reported wait for user-facing operations.
-func (wm *WorktreeManager) LockProjectStashWatched(projectID string, every time.Duration, notice keylock.WaitNotice) func() {
-	return wm.stash.LockWatched(projectID, every, notice)
+// LockProjectStashWatched is LockProjectStash with the wait reported for user-facing operations and the
+// wait ended by the caller's context; see keylock.Table.LockWatchedCtx.
+func (wm *WorktreeManager) LockProjectStashWatched(ctx context.Context, projectID string, every time.Duration, notice keylock.WaitNotice) (func(), bool) {
+	return wm.stash.LockWatchedCtx(ctx, projectID, every, notice)
 }

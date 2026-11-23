@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -43,10 +44,13 @@ func (s *Server) messageInTask(w http.ResponseWriter, projectID, taskID, message
 //
 // if regenerate is true, the thread is about to be answered again, so the
 // executor re-syncs and fork cleanup is skipped.
-func (s *Server) truncateMessagesFrom(projectID, taskID string, msg *types.TaskMessage, regenerate bool) error {
+func (s *Server) truncateMessagesFrom(ctx context.Context, projectID, taskID string, msg *types.TaskMessage, regenerate bool) error {
 	// Deleting the conversation rewinds the files, which is the same rewrite a thread switch performs, so this
 	// holds the worktree lock for all of it. The diff broadcast at the end goes out under the same lock.
-	unlockWorktree := s.lockWorktreeWatched(projectID, taskID)
+	unlockWorktree, ok := s.lockWorktreeWatched(ctx, projectID, taskID)
+	if !ok {
+		return ctx.Err()
+	}
 	defer unlockWorktree()
 
 	msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(msg.ID)
@@ -84,7 +88,11 @@ func (s *Server) rewindConversationForRow(projectID, taskID, messageID string) e
 	if msg.TaskID != taskID {
 		return fmt.Errorf("message %s belongs to task %s, not %s", messageID, msg.TaskID, taskID)
 	}
-	return s.truncateMessagesFrom(projectID, taskID, msg, false)
+	// Truncating a conversation rewinds the files, and a stop must not leave that half done: `Detached`
+	// bounds this by the server rather than by the turn that asked for it.
+	ctx, cancel := s.Detached()
+	defer cancel()
+	return s.truncateMessagesFrom(ctx, projectID, taskID, msg, false)
 }
 
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +143,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		if err := s.truncateMessagesFrom(projectID, taskID, msg, req.Regenerate); err != nil {
+		if err := s.truncateMessagesFrom(r.Context(), projectID, taskID, msg, req.Regenerate); err != nil {
 			Fail(w, err, "delete messages", "message not found")
 			return
 		}
@@ -197,27 +205,53 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	floor, err := messageFloor(r)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	page, err := s.store.GetTaskMessagePage(taskID, threadID, limit, r.URL.Query().Get("before"), floor)
-	if err != nil {
-		if errors.Is(err, store.ErrMessageCursor) {
-			JSONError(w, http.StatusBadRequest, "before is not a cursor this endpoint issued")
+	// head=1 is the other direction from a window, not a window with a floor: the two cut from opposite
+	// ends, so a request naming both answers rows the reader holds and skips the ones between.
+	// (docs/api-contract.md → The conversation is a window, not the thread)
+	q := r.URL.Query()
+	var messages []types.TaskMessage
+	if q.Get("head") == "1" {
+		for _, cut := range []string{"before", "from"} {
+			if q.Get(cut) != "" {
+				JSONError(w, http.StatusBadRequest, fmt.Sprintf("head reads from the conversation's first row; %s names where a window stops", cut))
+				return
+			}
+		}
+		// No paging header: a head answer is not a step of a walk, and a client that read a cursor out of it
+		// would page in the wrong direction.
+		head, err := s.store.GetTaskMessageHeadPage(taskID, threadID, limit)
+		if err != nil {
+			Fail(w, err, "get messages", "task not found")
 			return
 		}
-		if errors.Is(err, store.ErrMessageFloor) {
-			JSONError(w, http.StatusBadRequest, "from is not a cursor this endpoint issued")
+		messages = head.Messages
+	} else {
+		floor, err := messageFloor(r)
+		if err != nil {
+			JSONError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		Fail(w, err, "get messages", "task not found")
-		return
+		page, err := s.store.GetTaskMessagePage(taskID, threadID, limit, q.Get("before"), floor)
+		if err != nil {
+			if errors.Is(err, store.ErrMessageCursor) {
+				JSONError(w, http.StatusBadRequest, "before is not a cursor this endpoint issued")
+				return
+			}
+			if errors.Is(err, store.ErrMessageFloor) {
+				JSONError(w, http.StatusBadRequest, "from is not a cursor this endpoint issued")
+				return
+			}
+			Fail(w, err, "get messages", "task not found")
+			return
+		}
+		messages = page.Messages
+		w.Header().Set("X-Messages-More", strconv.FormatBool(page.HasMore))
+		if page.Before != "" {
+			w.Header().Set("X-Messages-Before", page.Before)
+		}
 	}
-	messages := page.Messages
 	// Suppress write_file content args, reasoning_content, and bash tool results unless full=1
-	if r.URL.Query().Get("full") != "1" {
+	if q.Get("full") != "1" {
 		for i := range messages {
 			if messages[i].ToolCalls != "" {
 				messages[i].ToolCalls = redactWriteFileContent(messages[i].ToolCalls)
@@ -240,13 +274,10 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	w.Header().Set("X-Messages-More", strconv.FormatBool(page.HasMore))
-	if page.Before != "" {
-		w.Header().Set("X-Messages-Before", page.Before)
-	}
 	// A thread that has not moved answers as the same bytes, so a reopened task revalidates instead of
 	// refetching. CompressMiddleware computes the ETag, so this handler sets none of its own
-	// (docs/api-contract.md → Response headers).
+	// (docs/api-contract.md → Response headers). The revision describes the newest window, which a head
+	// answer is not — a head read sends no If-None-Match.
 	w.Header().Set("Cache-Control", "no-cache")
 	JSONResponse(w, http.StatusOK, messages)
 }

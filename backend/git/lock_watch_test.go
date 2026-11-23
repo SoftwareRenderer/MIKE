@@ -4,8 +4,11 @@ package git
 // entries through a stack they both think they own.
 
 import (
+	"context"
 	"testing"
 	"time"
+
+	"mike/pkg/keylock"
 )
 
 func TestLockProjectStashWatchedQueuesOnTheSameTableAsLockProjectStash(t *testing.T) {
@@ -15,7 +18,8 @@ func TestLockProjectStashWatchedQueuesOnTheSameTableAsLockProjectStash(t *testin
 	holder := wm.LockProjectStash(projectID)
 	got := make(chan struct{})
 	go func() {
-		release := wm.LockProjectStashWatched(projectID, 5*time.Millisecond, func(time.Duration, bool) {})
+		release, _ := wm.LockProjectStashWatched(context.Background(), projectID, 5*time.Millisecond,
+			func(time.Duration, keylock.WaitOutcome) {})
 		close(got)
 		release()
 	}()

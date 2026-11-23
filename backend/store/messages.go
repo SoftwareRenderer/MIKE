@@ -54,6 +54,13 @@ const (
 	TurnLabelChars    = 200
 )
 
+// MessageHead is the conversation's opening page: its oldest rows, oldest first. It carries no cursor and no
+// "more" flag because it is not a step of a walk — those two answer what lies below a page, and a head page
+// has nothing below it.
+type MessageHead struct {
+	Messages []types.TaskMessage
+}
+
 // MessagePage is one window of a conversation: its newest rows, oldest first.
 type MessagePage struct {
 	Messages []types.TaskMessage
@@ -159,9 +166,12 @@ func conversationWhere(taskID, threadID string, cursor, floor *messageKey) (stri
 // fetch below is keyed by.
 const messageKeyCols = `SELECT id, created_at, rowid, role FROM task_messages WHERE `
 
-func (s *Store) messageKeys(taskID, threadID string, cursor, floor *messageKey, n int) ([]messageKey, error) {
+// messageKeys reads the conversation's positions in `order` — `newestFirstOrder` from the end of the thread,
+// which is how a window is cut, or `messageOrder` from its beginning, which is how the head read is — so the
+// cut and the sort run over index entries rather than rows.
+func (s *Store) messageKeys(taskID, threadID string, cursor, floor *messageKey, order string, n int) ([]messageKey, error) {
 	where, args := conversationWhere(taskID, threadID, cursor, floor)
-	rows, err := s.db.Query(messageKeyCols+where+` `+newestFirstOrder+` LIMIT ?`,
+	rows, err := s.db.Query(messageKeyCols+where+` `+order+` LIMIT ?`,
 		append(append([]any{}, args...), n)...)
 	if err != nil {
 		return nil, err
@@ -190,6 +200,35 @@ func newestUnits(keys []messageKey, units int) []messageKey {
 	return keys
 }
 
+// oldestUnits keeps the oldest `units` answers of an oldest-first list of positions, cutting before the row
+// that opens the answer past the count: a page that stopped inside an answer would hand the rows below it to
+// a read that never saw the row that opened them.
+//
+// The thread's own first rows are always kept — a fork can leave a leading tool_call without the row that
+// announced it, and nothing below it exists to deliver it.
+func oldestUnits(keys []messageKey, units int) []messageKey {
+	seen := 0
+	for i, k := range keys {
+		if !startsUnit(k.role) {
+			continue
+		}
+		seen++
+		if seen > units {
+			return keys[:i]
+		}
+	}
+	return keys
+}
+
+// windowLimit falls back to the default for a limit outside 1..MessageWindowMax. The route refuses one; this
+// covers a caller that is not a request.
+func windowLimit(limit int) int {
+	if limit <= 0 || limit > MessageWindowMax {
+		return MessageWindowDefault
+	}
+	return limit
+}
+
 // GetTaskMessagePage answers one window: the newest `limit` answers, oldest first, with before naming a
 // cursor an earlier call returned and `from` an optional floor — the oldest row this page may answer.
 // Positions are read before rows, so the cut and the sort run over index entries rather than the
@@ -198,10 +237,7 @@ func newestUnits(keys []messageKey, units int) []messageKey {
 // Together the pages hand over every row of the thread exactly once, which is why the cursor names the
 // oldest row this page holds. A floor stops a page there; the rows below it come on a later page.
 func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before, from string) (*MessagePage, error) {
-	// The route refuses a window outside 1..MessageWindowMax; this covers a caller that is not a request.
-	if limit <= 0 || limit > MessageWindowMax {
-		limit = MessageWindowDefault
-	}
+	limit = windowLimit(limit)
 	cursor, err := messageCursor(before, ErrMessageCursor)
 	if err != nil {
 		return nil, err
@@ -214,7 +250,7 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before, f
 	defer s.mu.RUnlock()
 
 	page := &MessagePage{}
-	keys, err := s.messageKeys(taskID, threadID, cursor, floor, MessageRowCeiling)
+	keys, err := s.messageKeys(taskID, threadID, cursor, floor, newestFirstOrder, MessageRowCeiling)
 	if err != nil {
 		return nil, err
 	}
@@ -234,6 +270,48 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before, f
 		page.Before = encodeMessageCursor(oldest)
 	}
 
+	messages, err := s.messagesByKeys(reverseKeys(keys))
+	if err != nil {
+		return nil, err
+	}
+	page.Messages = messages
+	return page, nil
+}
+
+// GetTaskMessageHeadPage answers the conversation's opening page: the oldest `limit` answers, oldest first.
+// The page is cut at an answer boundary, so the rows below it reach a later read whole, and no cursor rides
+// back: the walk's cursor keeps naming the oldest row of the newest window.
+func (s *Store) GetTaskMessageHeadPage(taskID, threadID string, limit int) (*MessageHead, error) {
+	limit = windowLimit(limit)
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	keys, err := s.messageKeys(taskID, threadID, nil, nil, messageOrder, MessageRowCeiling)
+	if err != nil {
+		return nil, err
+	}
+	messages, err := s.messagesByKeys(oldestUnits(keys, limit))
+	if err != nil {
+		return nil, err
+	}
+	return &MessageHead{Messages: messages}, nil
+}
+
+// reverseKeys turns a newest-first walk of positions into the oldest-first order a page is handed over in.
+func reverseKeys(keys []messageKey) []messageKey {
+	ordered := make([]messageKey, len(keys))
+	for i, k := range keys {
+		ordered[len(keys)-1-i] = k
+	}
+	return ordered
+}
+
+// messagesByKeys fetches the rows at these positions in one statement and returns them in the order the
+// keys were given, so the order a read walked is the order its caller receives.
+func (s *Store) messagesByKeys(keys []messageKey) ([]types.TaskMessage, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
 	placeholders := make([]string, len(keys))
 	rowids := make([]any, len(keys))
 	for i, k := range keys {
@@ -252,13 +330,13 @@ func (s *Store) GetTaskMessagePage(taskID, threadID string, limit int, before, f
 	for _, m := range found {
 		byID[m.ID] = m
 	}
-	page.Messages = make([]types.TaskMessage, 0, len(keys))
-	for i := len(keys) - 1; i >= 0; i-- {
-		if m, ok := byID[keys[i].id]; ok {
-			page.Messages = append(page.Messages, m)
+	messages := make([]types.TaskMessage, 0, len(keys))
+	for _, k := range keys {
+		if m, ok := byID[k.id]; ok {
+			messages = append(messages, m)
 		}
 	}
-	return page, nil
+	return messages, nil
 }
 
 // messageCursor decodes a page cursor; an empty one means "from this end of the conversation". `bad` is

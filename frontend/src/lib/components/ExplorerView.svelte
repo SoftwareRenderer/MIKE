@@ -7,6 +7,7 @@
     import { dialogStore } from '$lib/stores';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { fromPersistedTabs, mergeRestoredTabs } from '$lib/utils/editor-tabs';
+    import { explorerRecordKey } from '$lib/storage';
     import { ExplorerCore, type ExplorerProps } from '$lib/services/explorer-core.svelte';
     import { ExplorerLayout } from '$lib/services/explorer-layout.svelte';
     import { t } from '$lib/i18n';
@@ -38,7 +39,7 @@
     let navigatedFolder = $state('');
 
     const core = new ExplorerCore({
-        storageKey: () => projectId,
+        storageKey: () => explorerRecordKey(projectId),
         // Project root and, when sandboxed, the mount the same directory appears under.
         pathRoots: () => (sandboxEnabled ? [projectPath, mountPath] : [projectPath]),
         isMobile: isMobileCtx,
@@ -148,8 +149,7 @@
         core.resetTabs(projectId);
         core.loadSavedTabs().then((saved) => {
             if (!saved) return;
-            core.scrollTops = saved.scrollTops ?? {};
-            core.fileListScroll = saved.fileListScroll ?? 0;
+            core.adoptScroll(saved);
             if (saved.openFiles.length === 0) return;
             const openWas = core.activeFilePath;
             const restored = mergeRestoredTabs(core.openFiles, fromPersistedTabs(saved.openFiles));
@@ -179,41 +179,6 @@
             navigatedFolder = '';
         }
     });
-
-    // File-list scroll: capture it on every scroll, restore it once the listing has something to scroll.
-    // svelte-ignore non_reactive_update — only the first listing after mount is restored
-    let fileListScrollArmed = true;
-    $effect(() => {
-        const el = core.fileBrowserEl;
-        if (!el) return;
-        el.addEventListener('scroll', handleFileListScrollEvent, true);
-        if (!fileListScrollArmed) {
-            return () => el.removeEventListener('scroll', handleFileListScrollEvent, true);
-        }
-        fileListScrollArmed = false;
-        let attempts = 0;
-        const timer = setInterval(() => {
-            attempts++;
-            const list = el.querySelector<HTMLElement>('.file-browser-list');
-            if (list && core.fileListScroll > 0 && list.scrollHeight > list.clientHeight) {
-                clearInterval(timer);
-                list.scrollTop = Math.min(core.fileListScroll, list.scrollHeight - list.clientHeight);
-            } else if (attempts >= 20) {
-                clearInterval(timer);
-            }
-        }, 100);
-        return () => {
-            clearInterval(timer);
-            el.removeEventListener('scroll', handleFileListScrollEvent, true);
-        };
-    });
-
-    function handleFileListScrollEvent() {
-        const list = core.fileBrowserEl?.querySelector<HTMLElement>('.file-browser-list');
-        if (!list) return;
-        core.fileListScroll = list.scrollTop;
-        core.queueTabSave();
-    }
 
     onMount(() => {
         void core.loadCommits();
@@ -277,8 +242,6 @@
         changesOpen={changesOpen}
         onChangesOpen={onChangesOpen}
         onReviewUpdated={() => { void core.loadCommits(); void loadBranches(); }}
-        scrollTops={core.scrollTops}
-        onScrollTop={core.handleEditorScrollTop}
     >
         {#snippet browser()}
             <BranchFileBrowser

@@ -302,6 +302,21 @@ export async function getTaskMessages(
     }
 }
 
+/** The conversation's opening page: its oldest answers, oldest first. The other direction from a window, so
+ * it carries none of the window's contract — no `If-None-Match`, no `X-Messages-*`, no cache write and no
+ * cached fallback: a page that is not the newest window is never mirrored, which is what keeps a transcript
+ * with a hole in the middle out of IndexedDB. */
+export async function getTaskMessageHead(
+    projectId: string,
+    taskId: string,
+    limit = MESSAGE_JUMP_LIMIT,
+): Promise<TaskMessage[]> {
+    const params = new URLSearchParams({ head: '1', limit: String(limit) });
+    const res = await apiFetch(`${API_BASE}/projects/${projectId}/tasks/${taskId}/messages?${params}`);
+    if (!res.ok) throw await apiError(res, t('api.fetchMessages'));
+    return res.json();
+}
+
 /** Cache a fresh window together with the rows the cache already held directly above it, so an offline
  * reload opens on the larger of the two reads. */
 async function widenCache(projectId: string, taskId: string, window: MessageWindow): Promise<void> {

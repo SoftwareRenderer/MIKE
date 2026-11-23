@@ -228,17 +228,57 @@ so a reconnect replays the newest count and rebuilds the rate from one frame rat
 When the call ends the reader is shown what the rules say they must see. `types.ShouldHideReasoning`
 (`backend/types/reasoning.go`) is that rule, the same predicate the message window's redaction pass applies, so
 a row cannot be readable by one path and withheld by the other. Reasoning that is the call's whole answer
-comes once, as one `reasoning` frame holding the complete text. Reasoning that stays hidden costs one more
-field: the last count of that call carries `message_id`, naming the row that stores what was never sent. That is
-what "Show reasoning" reads through `?full=1`. `complete` names only the run's last row, so without that field
-every earlier call of a multi-call turn would stay unopenable until the thread was read again. That last count
-keeps its `chars`: it is the call's full total, and the client counts it into the context donut because stored
-reasoning costs the next call's context. A call that reasoned nothing sends no such frame, because a row named
-over an empty reasoning is a toggle over nothing.
-Tests: `backend/exec/loop_reasoning_test.go`, `stream-handler.unit.ts`,
-`chat-entries-collapsed-reasoning.unit.svelte.ts` (the notice survives whichever branch draws the entry),
-`reasoning-rate.unit.ts` and `reasoning-block.unit.svelte.ts` (the figure's floor, and its clock),
-`frontend/tests/e2e/collapsed-reasoning.spec.ts`.
+comes once, as one `reasoning` frame holding the complete text.
+
+Every collapsed call that reasoned ends with one more count frame, whichever way that rule went. Its `chars` is
+the call's full total, which the client counts into the context donut because stored reasoning costs the next
+call's context. It carries `message_id` too, naming the row that stores the reasoning: what "Show reasoning"
+reads through `?full=1`, and — since `complete` names only the run's last row — the only way an earlier call of
+a multi-call turn stays openable. The count half is what that rule decides nothing about. The buffer holds the
+newest count frame for whoever subscribes next, so a call that left no closer reads to a view arriving later as
+reasoning still arriving. The client draws its thinking notice from any count never closed while the run is in
+flight. A call that reasoned nothing sends no frame: nothing was announced to close, and a row named over an
+empty reasoning is a toggle over nothing.
+
+The client also closes the counts the buffer never closed, once it is told the **run** is over. A `status` frame
+naming one of the five `terminalTurnStates` (`backend/stream/app_stream.go`) is that instruction.
+`StreamState.endOpenTurn()` (`frontend/src/lib/services/stream-state.svelte.ts`) is its one implementation: the
+open `reasoningPending` counts go, the wait line and the retry notice go with them, and an entry left with
+nothing to render goes too. That last rule is `withoutStalePendingCards`'s (`rendersAnything`) in
+`frontend/src/lib/utils/chat-entries.ts`. The client owns this cleanup rather than each button doing its own, so
+a stopped task reads the same whoever asked for the stop.
+
+A run can still be talking after that frame: a cancelled call flushes what it buffered. Until the next `running`
+`status` frame, or the `hint` that announces a retry, `token`, `reasoning`, `reasoning_progress` and `tool_call`
+are not drawn and cannot re-mark the task streaming. A count out of that flush would otherwise open a thinking
+notice over a paused task, and re-marking the task puts the card's `Running` badge and the Stop button back.
+Both rules are `StreamState`'s; the handler only asks it.
+Tests: `backend/exec/loop_reasoning_test.go` for what the run sends, and `stream-handler.unit.ts` for each
+terminal state closing the count, a late count after `paused` drawing nothing and marking nothing streaming,
+and a resumed turn never being muted. The notice's own drawing is
+`chat-entries-collapsed-reasoning.unit.svelte.ts` (it survives whichever branch draws the entry, stays down
+while the call's own tool runs, and stays down over a stopped turn), and its figure is `reasoning-rate.unit.ts`
+and `reasoning-block.unit.svelte.ts`. Both lanes are clicked through in
+`frontend/tests/e2e/collapsed-reasoning.spec.ts` and `frontend/tests/e2e/stop-thinking-notice.spec.ts`.
+That the buffer's newest count is always a closed one is
+`go test ./backend/exec -run 'TestAFreshSubscriberOverARunningToolCall'`.
+
+### A lock wait says how it ended
+
+`lock_wait` is a task event with one shape for every domain. `domain` names the wait: `worktree`, `stash`,
+`model`, or `other` for a name this app does not know — an unknown one draws a wait rather than nothing.
+`waited_seconds` is the elapsed wait as an integer. `phase` rides only where the caller has a finer answer (a
+model wait says `first_token`). The frame repeats every `stream.LockWaitNoticeEvery`
+(`backend/stream/app_stream.go`) while the wait lasts, and comes once more when it ends. That ending is named:
+`acquired: true` when the lock was taken, `withdrawn: true` when the caller was called off before it held the
+lock. The client clears the line on either ending and reads nothing else from them. Only the caller knows which
+happened, and a spinner left over a wait nobody is making any more is what this frame exists to prevent. A free
+lock sends nothing at all.
+
+Which waits are abandonable is the server's decision, not the frame's: a request's context calls a person off,
+and a path no request owns (the executor's own rewind) passes one no browser can cancel. `docs/locking.md → Watched Waits` owns that side.
+Tests: `backend/stream/lock_wait_test.go` (both endings on the wire), `stream-handler.unit.ts` (either ending
+clears the line; a lost ending costs a repeat, not a spinner).
 
 ### A broken failure loop adds no frame shape
 
@@ -532,9 +572,25 @@ rows held cannot be joined: another thread's read, or a truncation that cut the 
 **Paging has two starters**, and each names what it wants. The list edge is the passive one: it fires a
 request a viewport and a half before the reader gets there (`atTopOfList` and its `EARLIER_EDGE_VIEWPORTS`,
 in `frontend/src/lib/utils/chat-window.ts`), so the page lands while they are still reading toward it. The
-bubble floors one page at the prompt it names. The go-to-first control walks `before` until
-`X-Messages-More` runs out, so it lands the conversation's first message rather than the top of the window
-loaded so far.
+bubble floors one page at the prompt it names. The go-to-first control reads the conversation's opening page
+(`?head=1`) and lands that, then fills the rows between it and the window with the ordinary `before` walk.
+
+**The head read is the other direction, not a window with a floor.** `?head=1` answers the oldest `limit`
+answers, oldest first, cut at an answer boundary like any page — `store.GetTaskMessageHeadPage` reads it and
+`oldestUnits` cuts it. It refuses `before` and `from` with a 400 naming the parameter: the two directions cut
+from opposite ends, and honouring both would return rows the reader holds while skipping the ones between.
+It carries neither `X-Messages-Before` nor `X-Messages-More`, because it is not a step of a walk and a client
+that read a cursor out of it would page the wrong way. A client asks it with `getTaskMessageHead`, which
+sends no `If-None-Match`: the revision describes the newest window, which this response is not.
+
+**The gap a head read leaves is the client's to name, never to fake.** It is never cached — a page fetched by
+cursor or by head is not a window, and `widenCache` writes the newest window alone. It is never drawn as
+though it were real: `TaskChat` keeps the head rows in their own list, and `ChatEntries` sets a notice
+between the two halves while the fill runs, rather than a spacer guessing at the height of rows nobody has
+read. The head rows join the transcript through `prependRows`, so the walk reaching the start drops them on
+its own, and a newest-window read that cannot be joined clears them with the conversation it replaced.
+Tests: `backend/store/messages_head_test.go`, `backend/server/handler_message_head_test.go`, and
+`frontend/tests/e2e/chat-window-scroll.spec.ts` for the landing while the fill is still out.
 
 The scroll
 position is preserved by re-finding the entry under the top edge of the viewport (`data-entry-id`), never

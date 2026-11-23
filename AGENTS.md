@@ -204,6 +204,10 @@ make test-podman-state                                   # the image entrypoint'
 - **Chat autoscroll is judged from the scroll event, never from a gesture listener**, and new content
   re-pins only while the reader is being followed. `frontend/src/lib/composables/use-chat-follow.svelte.ts`,
   `docs/api-contract.md → The conversation is a window, not the thread`.
+- **The go-to-first control reads the conversation's opening page (`?head=1`), and those rows are not the
+  walk's** — the walk's cursor names the oldest row of the newest window. The middle it has not read is
+  named by a notice, never padded by a spacer. `docs/api-contract.md → The conversation is a window, not the
+  thread`.
 - **A Review notification is the client's decision, never the server's** — the choice lives in the browser
   that shows it (`uiStore.notifyOnReview`), never in `/api/config`. `docs/notifications.md`.
 - **A card lists its subtasks as flat rows in run order, never as nested card boxes.** One pure function
@@ -345,6 +349,8 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   its caller timed out must release it.
 - **Do not add a seconds-scale bound to a git-family lock** — the wait is usually legitimate; wedged sections
   announce themselves through a slow-wait report.
+- **A wait the person walked away from ends with their request** — the watched form takes its caller's context
+  and reports the wait abandoned; only the wait is abandonable, never a hold. `docs/locking.md → Watched Waits`.
 - `executionState.sandboxMu` is a **leaf lock**: taken under `taskMu`, never the reverse.
 - Domain names, timeouts and watched-wait wiring: **`docs/locking.md`**.
 
@@ -487,6 +493,9 @@ never marks the app offline, and nothing in the product puts a deadline on a wai
 - **An unsaved file draft carries the bytes it diverged from**, so a file that moved under it is merged on the
   way back in. A region both sides changed is painted into the buffer for the person to resolve, never
   dropped. `docs/reconnection.md → The Editor Buffer Across a Browser Being Away`.
+- **Each explorer screen — a project's, or one task's — keeps its own record**, keyed by `explorerRecordKey`,
+  and a task's goes when the task moves to Done or off the board, its files' buffers with it.
+  `docs/reconnection.md → What an Explorer Remembers`.
 - **A task's status is never the answer to "is it still running"** — `taskIsInFlight` is, and the
   server-side mirror `terminalTurnStates` must agree with it.
 - **A screen that cannot order its own reading of a task against the board's copy asks the server** — a turn

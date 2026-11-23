@@ -49,6 +49,27 @@ func sseToolCall(w http.ResponseWriter, id, path string) {
 	}
 }
 
+// sseReasoningThenBashCall reasons in two chunks and then asks for a bash call, saying nothing else — the
+// shape whose reasoning the reader is shown rather than withheld.
+func sseReasoningThenBashCall(w http.ResponseWriter, command string) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	fmt.Fprintf(w, `data: {"choices":[{"delta":{"reasoning_content":%q},"finish_reason":null}]}`+"\n\n", "Let me look at what is here before I say anything at all. ")
+	fmt.Fprint(w, `data: {"choices":[{"delta":{"reasoning_content":"I will ask for the listing."},"finish_reason":null}]}`+"\n\n")
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	quotedArgs, err := json.Marshal(fmt.Sprintf(`{"command":%q}`, command))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fmt.Fprintf(w, `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"bash","arguments":%s}}]},"finish_reason":"tool_calls"}]}`+"\n\n", quotedArgs)
+	fmt.Fprint(w, sseDone)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 // sseStreamedThenAbort streams text, then ends the body with no [DONE] and no finish_reason.
 func sseStreamedThenAbort(w http.ResponseWriter, content string) {
 	w.Header().Set("Content-Type", "text/event-stream")

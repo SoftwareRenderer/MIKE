@@ -1361,6 +1361,16 @@ describe('lock_wait — a click queued behind work it cannot see', () => {
         handleEvent({ type: 'lock_wait', data: { waited_seconds: 4, acquired: false } }, false);
         expect(stream.state.lockWait).toEqual({ domain: 'other', seconds: 4 });
     });
+
+    // The other ending: called off before the lock, which only the caller knows.
+    it('ends the wait when the caller is called off', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'lock_wait', data: { domain: 'stash', waited_seconds: 9, phase: 'first_token' } }, false);
+
+        handleEvent({ type: 'lock_wait', data: { domain: 'stash', waited_seconds: 9, acquired: false, withdrawn: true } }, false);
+
+        expect(stream.state.lockWait).toBeNull();
+    });
 });
 
 describe('unresolvedToolIds — what this screen owes a card for', () => {
@@ -1592,6 +1602,19 @@ describe('a collapsed turn announces its reasoning size, never its text', () => 
         expect(stream.state.entries.map(e => e.id)).toEqual(['row-7']);
     });
 
+    // What the buffer hands a view arriving mid-tool-call, in order: the counts the call announced while it
+    // reasoned, then the frame that closed the count. The last one decides.
+    it('leaves nothing standing as thinking when the replay ends on a closed count', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 400 } }, false);
+        handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-7' } }, false);
+
+        const entry = stream.state.entries[0]!;
+        expect(entry.id).toBe('row-7');
+        expect(entry.reasoningPending).toBeUndefined();
+        expect(entry.isStreaming).toBe(false);
+    });
+
     it('opens a fresh entry for the next call, whose row the count has not named', () => {
         const { stream, handleEvent } = setup();
         handleEvent({ type: 'reasoning_progress', data: { chars: 900, message_id: 'row-7' } }, false);
@@ -1676,4 +1699,112 @@ describe('the entry complete names', () => {
         expect(earlierId).not.toBe('row-9');
         expect(stream.state.entries.map(e => e.id)).toEqual([earlierId, 'row-0']);
     });
+});
+
+// The five states `terminalTurnStates` (backend/stream/app_stream.go) counts as ending the run. Nothing on
+// screen may keep claiming work is in flight once one of them lands.
+const ENDED_STATES = ['paused', 'stopped', 'failed', 'idle', 'completed'];
+
+describe('the status frame that ends a run', () => {
+    function setup() {
+        const stream = new StreamState();
+        const cb = makeCallbacks();
+        const handleEvent = createStreamHandler(stream, cb);
+        return { stream, handleEvent, markStreaming: cb.markStreaming as ReturnType<typeof vi.fn> };
+    }
+
+    // A count left open over a run that ended turns the ring forever beside a row that says `paused`.
+    it.each(ENDED_STATES)('leaves nothing drawn as still thinking after %s', (state) => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'reasoning_progress', data: { chars: 400 } }, false);
+        handleEvent({ type: 'reasoning_progress', data: { chars: 900 } }, false);
+
+        handleEvent({ type: 'status', data: { state, activity: 'Task stopped' } }, false);
+
+        expect(stream.state.entries).toEqual([]);
+        for (const e of stream.state.entries) {
+            expect(e.isStreaming).toBe(false);
+            expect(e.reasoningPending).toBeUndefined();
+        }
+    });
+
+    // What the run already said stays said: only text no row will ever hold is dropped.
+    it('keeps the cards of calls whose rows exist, and draws none of them as arriving', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'token', data: { text: 'I will run that' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: { command: 'ls' } } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-2', tool_name: 'bash', args: { command: 'pwd' } } }, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc-1', success: true, output: 'ok', duration: 1, message_id: 'row-3' } }, false);
+        handleEvent({ type: 'reasoning_progress', data: { chars: 300 } }, false);
+
+        handleEvent({ type: 'status', data: { state: 'paused', activity: 'Task paused by user' } }, false);
+
+        const answered = stream.state.entries.find(e => e.toolCalls?.some(tc => tc.toolId === 'tc-1'));
+        expect(answered).toBeDefined();
+        expect(answered!.content).toBe('I will run that');
+        expect(answered!.isStreaming).toBe(false);
+        expect(answered!.reasoningPending).toBeUndefined();
+        // Its count was never closed by the server, so the screen never learned a row holds that reasoning.
+        expect(answered!.hasReasoning).toBe(false);
+    });
+
+    // The wait line is drawn from `lockWait` alone, so the frame that ended the run ends the wait too.
+    it.each(ENDED_STATES)('ends the wait line beside %s', (state) => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'lock_wait', data: { domain: 'model', waited_seconds: 12, phase: 'first_token' } }, false);
+        handleEvent({ type: 'queue', data: { position: 3, estimated_wait_seconds: 20 } }, false);
+        handleEvent({ type: 'prompt_progress', data: { total: 100, cache: 0, processed: 40, time_ms: 10 } }, false);
+
+        handleEvent({ type: 'status', data: { state } }, false);
+
+        expect(stream.state.lockWait).toBeNull();
+        expect(stream.state.queuePosition).toBe(0);
+        expect(stream.state.promptProgress).toBe(0);
+    });
+
+    // A cancelled call flushes what it buffered after the transition lands, and a late count is not a new
+    // turn: re-opening an entry puts the notice, the cursor and the card's Running badge back.
+    it.each(ENDED_STATES)('mutes the late run frames of the turn that ended with %s', (state) => {
+        const { stream, handleEvent, markStreaming } = setup();
+        handleEvent({ type: 'status', data: { state } }, false);
+
+        handleEvent({ type: 'reasoning_progress', data: { chars: 800 } }, false);
+        handleEvent({ type: 'token', data: { text: 'half a sentence' } }, false);
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-late', tool_name: 'bash', args: {} } }, false);
+
+        expect(stream.state.entries).toEqual([]);
+        expect(markStreaming).not.toHaveBeenCalled();
+    });
+
+    // The mute covers a run's output, nothing wider: a reader's own words still land after the ending.
+    it('still shows what the reader and a settled card say', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent({ type: 'tool_call', data: { tool_id: 'tc-1', tool_name: 'bash', args: {} } }, false);
+        // The row names the call, so the card is a row's and survives the ending.
+        handleEvent({ type: 'tool_progress', data: { tool_id: 'tc-1', message_id: 'row-5' } }, false);
+        handleEvent({ type: 'status', data: { state: 'paused' } }, false);
+
+        handleEvent({ type: 'user_message', data: { id: 'row-9', role: 'user', content: 'why did it stop?' } }, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc-1', success: false, interrupted: true, output: 'Stopped', duration: 1 } }, false);
+
+        expect(stream.state.entries.map(e => [e.role, e.content])).toEqual([['assistant', ''], ['user', 'why did it stop?']]);
+        expect(stream.state.entries[0]!.toolCalls![0].isPending).toBe(false);
+        expect(stream.state.entries[0]!.toolCalls![0].interrupted).toBe(true);
+    });
+
+    // A resumed task must never be muted: the frame that starts a run is what lifts the mute.
+    it.each([['the running status frame', 'running'], ['the hint that announces a retry', 'retry']] as const)(
+        'honours the frames again after %s', (_label, kind) => {
+            const { stream, handleEvent } = setup();
+            handleEvent({ type: 'status', data: { state: 'paused' } }, false);
+
+            if (kind === 'running') {
+                handleEvent({ type: 'status', data: { state: 'running' } }, false);
+            } else {
+                handleEvent({ type: 'hint', data: { id: 'h-1', role: 'system', kind: 'retry', content: 'Retrying', created_at: '2026-01-01T00:00:00Z' } }, false);
+            }
+            handleEvent({ type: 'reasoning_progress', data: { chars: 800 } }, false);
+
+            expect(stream.state.entries[stream.state.entries.length - 1]?.reasoningPending?.chars).toBe(800);
+        });
 });
