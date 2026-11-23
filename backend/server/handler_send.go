@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"encoding/json/v2"
 	"errors"
@@ -49,7 +50,7 @@ func (s *Server) handleTaskSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if peek.ReplaceMessageID != "" && !s.truncateForReplace(w, projectID, taskID, peek.ReplaceMessageID) {
+	if peek.ReplaceMessageID != "" && !s.truncateForReplace(r.Context(), w, projectID, taskID, peek.ReplaceMessageID) {
 		return
 	}
 
@@ -78,7 +79,7 @@ func (s *Server) answerClaimedSend(w http.ResponseWriter, messageID string) bool
 // truncateForReplace takes the thread back to the message the client is editing, answering the failure itself
 // and reporting false. The named row must be the active thread's last user row: a newer user row means the
 // conversation moved somewhere this click cannot speak for.
-func (s *Server) truncateForReplace(w http.ResponseWriter, projectID, taskID, messageID string) bool {
+func (s *Server) truncateForReplace(ctx context.Context, w http.ResponseWriter, projectID, taskID, messageID string) bool {
 	msg, ok := s.messageInTask(w, projectID, taskID, messageID)
 	if !ok {
 		return false
@@ -99,7 +100,7 @@ func (s *Server) truncateForReplace(w http.ResponseWriter, projectID, taskID, me
 	}
 	// Not a regenerate: a new message is arriving, so the executor is woken and the forks whose checkpoint
 	// rows are being deleted are cleaned up.
-	if err := s.truncateMessagesFrom(projectID, taskID, msg, false); err != nil {
+	if err := s.truncateMessagesFrom(ctx, projectID, taskID, msg, false); err != nil {
 		Fail(w, err, "delete messages", "message not found")
 		return false
 	}

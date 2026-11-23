@@ -345,6 +345,8 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   its caller timed out must release it.
 - **Do not add a seconds-scale bound to a git-family lock** — the wait is usually legitimate; wedged sections
   announce themselves through a slow-wait report.
+- **A wait the person walked away from ends with their request** — the watched form takes its caller's context
+  and reports the wait abandoned; only the wait is abandonable, never a hold. `docs/locking.md → Watched Waits`.
 - `executionState.sandboxMu` is a **leaf lock**: taken under `taskMu`, never the reverse.
 - Domain names, timeouts and watched-wait wiring: **`docs/locking.md`**.
 

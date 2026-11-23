@@ -162,6 +162,10 @@ const FIXTURES_BY_NAME = {
     // A collapsed turn is only observable while its count stream is in flight, and at 1ms the whole turn is
     // over before a screen can be read. Same chunks, one chunk per 100ms.
     text_response_reasoning_slow: [textResponseReasoning, 100],
+    // The same chunks again, slowed until a click can land inside the reasoning phase: at 100ms the three
+    // reasoning chunks are done before a spec's locator round trip returns, and a stop issued then stops a
+    // turn that had nothing left to reason about.
+    text_response_reasoning_very_slow: [textResponseReasoning, 900],
     // Title routing streams the selected fixture's content, so a spec that needs a long title, and so a long
     // branch name, pins this one instead of hoping the keyword route answers something long.
     title_long: [titleLong, 1],

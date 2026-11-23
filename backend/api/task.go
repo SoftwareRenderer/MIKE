@@ -814,9 +814,16 @@ func (h *TaskHandler) HandleCommitAndDone(w http.ResponseWriter, r *http.Request
 	h.boardStreamMgr.BroadcastCommitStatus(projectID, taskID, "processing")
 
 	// Commit worktree changes, serialized against tool execution. The wait is announced because one that
-	// lands behind a long tool call looks like a click that went nowhere.
-	unlockWorktree := h.executor.LockWorktreeWatched(taskID, stream.LockWaitNoticeEvery,
+	// lands behind a long tool call looks like a click that went nowhere, and it ends with the click: a
+	// click that gave up commits nothing, and its defer releases the commit slot above.
+	unlockWorktree, held := h.executor.LockWorktreeWatched(r.Context(), taskID, stream.LockWaitNoticeEvery,
 		h.boardStreamMgr.LockWaitNotifier(projectID, taskID, "worktree"))
+	if !held {
+		httputil.Fail(w, r.Context().Err(), "commit and done", "task not found")
+		return
+	}
+	// Released by hand below: the merge takes the project's merge lock, and the git-family order lets it go
+	// only after this one.
 	_, wtErr := h.worktreeMgr.GitRunInWorktreeOutput(taskID, "diff", "--stat")
 	worktreeExists := wtErr == nil
 	if !worktreeExists {

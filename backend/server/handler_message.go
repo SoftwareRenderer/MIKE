@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -43,10 +44,13 @@ func (s *Server) messageInTask(w http.ResponseWriter, projectID, taskID, message
 //
 // if regenerate is true, the thread is about to be answered again, so the
 // executor re-syncs and fork cleanup is skipped.
-func (s *Server) truncateMessagesFrom(projectID, taskID string, msg *types.TaskMessage, regenerate bool) error {
+func (s *Server) truncateMessagesFrom(ctx context.Context, projectID, taskID string, msg *types.TaskMessage, regenerate bool) error {
 	// Deleting the conversation rewinds the files, which is the same rewrite a thread switch performs, so this
 	// holds the worktree lock for all of it. The diff broadcast at the end goes out under the same lock.
-	unlockWorktree := s.lockWorktreeWatched(projectID, taskID)
+	unlockWorktree, ok := s.lockWorktreeWatched(ctx, projectID, taskID)
+	if !ok {
+		return ctx.Err()
+	}
 	defer unlockWorktree()
 
 	msgCreatedAt, msgTimeErr := s.store.GetMessageCreatedAt(msg.ID)
@@ -84,7 +88,11 @@ func (s *Server) rewindConversationForRow(projectID, taskID, messageID string) e
 	if msg.TaskID != taskID {
 		return fmt.Errorf("message %s belongs to task %s, not %s", messageID, msg.TaskID, taskID)
 	}
-	return s.truncateMessagesFrom(projectID, taskID, msg, false)
+	// Truncating a conversation rewinds the files, and a stop must not leave that half done: `Detached`
+	// bounds this by the server rather than by the turn that asked for it.
+	ctx, cancel := s.Detached()
+	defer cancel()
+	return s.truncateMessagesFrom(ctx, projectID, taskID, msg, false)
 }
 
 func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
@@ -135,7 +143,7 @@ func (s *Server) handleTaskMessages(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
-		if err := s.truncateMessagesFrom(projectID, taskID, msg, req.Regenerate); err != nil {
+		if err := s.truncateMessagesFrom(r.Context(), projectID, taskID, msg, req.Regenerate); err != nil {
 			Fail(w, err, "delete messages", "message not found")
 			return
 		}

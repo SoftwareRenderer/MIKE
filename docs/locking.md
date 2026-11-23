@@ -11,6 +11,7 @@ The system uses keyed locks to manage concurrency across shared resources.
 - **Wait Strategies**: 
   - `Lock(key)`: Waits indefinitely.
   - `TryLock(key, timeout)`: Gives up after the timeout.
+  - `LockWatchedCtx(ctx, key, every, notice)`: Waits indefinitely and reports the wait; the wait ends with the caller's context. See *Watched Waits*.
 - **Cleanup**: If a `TryLock` times out but the goroutine eventually acquires the lock, that goroutine **must** release it immediately. Failure to do so "steals" the lock and may block other operations until restart.
 
 ## Accessor Pattern
@@ -53,11 +54,15 @@ Returning a mutex would allow callers to store or copy it, potentially leading t
 
 ## Watched Waits (User Notifications)
 
-`keylock.Table.LockWatched` provides a way to notify the user when they are waiting for a lock.
+`keylock.Table.LockWatchedCtx` provides a way to notify the user when they are waiting for a lock.
 
 - **Behavior**: It sends a notice periodically while waiting and one final notice when the lock is acquired. It remains silent if the lock is acquired immediately.
+- **The ending is part of the notice**: a `keylock.WaitNotice` takes a `WaitOutcome` — `WaitWaiting` on each tick, then `WaitAcquired` once the lock is held or `WaitAbandoned` when the caller was called off before it ever held it. A notice cannot guess which ending it is reporting and a screen cannot either, so the caller says. Both endings take the wait line down; the wire shape is `docs/api-contract.md → A lock wait says how it ended`.
+- **A wait a person is watching is abandonable**: `LockWatchedCtx(ctx, key, every, notice)` ends the wait with the caller's context, reports `WaitAbandoned` and answers `false` with a nil release. The reference this waiter took goes with it, or the key outlives everyone who can release it. It is for a wait someone waits on from a request: Commit & Done, a thread switch, a fork, a conversation rewind. A browser that went away then stops having its wait announced to every other viewer of that task while a tool call holds the lock. A path no request owns — the executor's own rewind — asks for none of that: it passes `Server.Detached()`, which no browser can cancel and shutdown can. See `docs/lifecycle.md`.
+- **Only the wait is abandonable**: a holder is never interrupted, and a waiter that never took the token modified nothing, which is why giving up is safe. The context bounds nothing on the clock — a legitimate git-family wait is minutes long (*Git-Family Timeouts* above), so a caller that wants a bound asks for one with its own deadline.
 - **UI Integration**: Notifications are shaped via `stream.LockWaitNotifier` and rendered in the `QueueIndicator` (e.g., "Awaiting LLM provider...").
 - **Usage**: Watched locks are used for user-facing actions (e.g., Commit & Done, thread switches) but not for background processes (e.g., GC or turn-based merges).
+- **One form, one loop**: there is one watched entry point, so the reported wait and the reported ending cannot drift apart. Tests: `pkg/keylock/lockwatch_test.go` (each ending, and the reference count), `backend/stream/lock_wait_test.go` (the frame), and `backend/exec/lock_watch_test.go` plus `backend/git/lock_watch_test.go` for the accessors that keep one table.
 
 ## Sandbox Lock (`sandboxMu`)
 

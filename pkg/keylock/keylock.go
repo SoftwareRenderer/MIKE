@@ -16,6 +16,7 @@
 package keylock
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -38,6 +39,21 @@ type Table struct {
 // would fail the merges it is meant to protect. Reporting the wait keeps the signal a bound was bought
 // for, and cannot break anything.
 type WaitReport func(key string, waited time.Duration)
+
+// WaitOutcome is why a wait was reported. A wait ends two ways, and only the caller knows which.
+type WaitOutcome int
+
+const (
+	// WaitWaiting: the wait is still going, repeated on the notice interval.
+	WaitWaiting WaitOutcome = iota
+	// WaitAcquired: the wait is over and the lock is held.
+	WaitAcquired
+	// WaitAbandoned: the wait is over and the lock was never taken — the caller was called off.
+	WaitAbandoned
+)
+
+// WaitNotice reports a wait that is still going, and once more when it ends, with how it ended.
+type WaitNotice func(waited time.Duration, outcome WaitOutcome)
 
 // entry is one key's lock plus the goroutines holding a reference to it: whoever holds the lock, and
 // every waiter that has not given up. The key becomes deletable only when that count reaches zero,
@@ -180,13 +196,15 @@ func (e *entry) drop() {
 	}
 }
 
-// WaitNotice reports a wait that is still going. acquired is true on the final call, once the lock is held.
-type WaitNotice func(waited time.Duration, acquired bool)
-
-// LockWatched reports the wait every `every`, then once with acquired=true. A free lock never calls notice.
-func (t *Table) LockWatched(key string, every time.Duration, notice WaitNotice) func() {
+// LockWatchedCtx takes the lock, reporting the wait every `every` and once at the end with how it ended; a
+// free lock is silent. The wait ends with ctx: a caller called off gets false and a nil release and holds
+// nothing, because abandoning a wait that never took the token changes no state.
+//
+// The context bounds nothing on the clock (see WaitReport) — a legitimate wait is minutes long — so a caller
+// that wants a bound brings its own deadline.
+func (t *Table) LockWatchedCtx(ctx context.Context, key string, every time.Duration, notice WaitNotice) (func(), bool) {
 	if notice == nil {
-		return t.Lock(key)
+		notice = func(time.Duration, WaitOutcome) {}
 	}
 	e := t.acquire(key)
 	if every <= 0 {
@@ -200,15 +218,20 @@ func (t *Table) LockWatched(key string, every time.Duration, notice WaitNotice) 
 		select {
 		case <-tick.C:
 			reported = true
-			notice(time.Since(start), false)
+			notice(time.Since(start), WaitWaiting)
+		case <-ctx.Done():
+			// The reference this waiter took goes with it, or the key outlives everyone who can release it.
+			e.drop()
+			notice(time.Since(start), WaitAbandoned)
+			return nil, false
 		case e.sem <- struct{}{}:
 			e.setTaken(true)
 			waited := time.Since(start)
 			if reported {
-				notice(waited, true)
+				notice(waited, WaitAcquired)
 			}
 			t.report(e.key, waited)
-			return e.held
+			return e.held, true
 		}
 	}
 }

@@ -413,9 +413,10 @@ func (te *TaskExecutor) LockWorktree(taskID string) func() {
 	return te.worktreeMu.Lock(taskID)
 }
 
-// LockWorktreeWatched is LockWorktree with the wait reported, for a caller a person is waiting on.
-func (te *TaskExecutor) LockWorktreeWatched(taskID string, every time.Duration, notice keylock.WaitNotice) func() {
-	return te.worktreeMu.LockWatched(taskID, every, notice)
+// LockWorktreeWatched is LockWorktree with the wait reported and the wait ended by the caller's context;
+// see keylock.Table.LockWatchedCtx for what its two results mean.
+func (te *TaskExecutor) LockWorktreeWatched(ctx context.Context, taskID string, every time.Duration, notice keylock.WaitNotice) (func(), bool) {
+	return te.worktreeMu.LockWatchedCtx(ctx, taskID, every, notice)
 }
 
 // WorktreeHeld reports whether someone holds this task's worktree lock right now. Only the worktree watcher
