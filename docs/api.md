@@ -73,6 +73,10 @@ Not on it, among others: `/api/config`, `/api/sessions`, `/api/tokens`, the file
 `/resume`, `/summarize`, `/compact`, `…/move`, `DELETE …/tasks/done`, and creating or deleting a project.
 Extensions, previews, terminals and both WebSocket upgrades (`/api/stream`, `/api/lsp`) are outside it too.
 
+`GET /api/fs/read?kind=bytes` is outside it for the plainest reason on that list: it hands back a repository
+file's bytes with no text check, and it exists because an installed extension declared the suffix. A
+headless credential installs nothing, so a token is refused where a session is served.
+
 `…/move` is unnecessary because `PUT …/tasks/{id}` can update the `status` to move a card between
 columns. WebSockets are not supported for bearer tokens because standard WebSocket clients cannot
 easily set custom headers.

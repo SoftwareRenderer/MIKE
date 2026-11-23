@@ -41,10 +41,14 @@ handlers serve them. Verified by `TestIsolationHeaders` (the header is sent) and
 `index.html` to avoid 301 redirects that would bypass the per-mount `?extch=` cache-busting token.
 Match mounted frames by **directory** path, never by `index.html`.
 
-**The frame mounts when the file is open, not before.** If an extension is registered at `fileEditor`,
-its channel is armed only after `GET /api/fs/read` succeeds. This avoids booting frames for files
-that don't exist or are too large, and avoids arming capabilities (like `editor.getContent`)
-before the host knows the file is openable.
+**The frame mounts when there is something to render, not before.** A `fileEditor` frame is armed only
+after `GET /api/fs/read` succeeds. A file that does not exist, is too large or is not text has nothing
+for `editor.getContent` to return, and booting a frame for it would arm capabilities against a file that
+has no content. A `binaryPreview` frame is built when that preview opens, so a byte-capable channel
+exists only while someone is looking at the file. Both mountings honour `ui.file_suffixes`: an extension
+that declared suffixes is mounted only for a file whose suffix it declared, so an install with no viewer
+for a format builds no frame, grants no capability and reaches no byte route for it. A mount naming no
+file (a card, a sidebar) is not a file mount and is never refused that way.
 
 **Cross-Origin-Resource-Policy:** The mounted frame is `sandbox="allow-scripts"` without
 `allow-same-origin`, so it has an opaque origin. CORP `same-origin` would block it from fetching
@@ -83,6 +87,18 @@ with `editor.addFooterButton`. `frontend/src/lib/extensions/__tests__/capability
 what fails when a new capability is neither described in `permissionDescriptions()` / classified in
 `DANGEROUS_PERMISSIONS` (the two lists the install dialog reads) nor listed in the test's own
 `HOST_INTERNAL_CAPABILITIES`, so a capability has to be classified before it can be granted quietly.
+
+## Bytes Across the Channel
+
+**Bytes are posted outside the JSON.** `post()` round-trips through JSON to strip Svelte `$state`
+proxies, and a `Blob` run through it arrives as `{}` — the extension would render an empty file and be
+told nothing went wrong. A capability whose handler returns a `Blob` (`fs.getBytes`) is answered on its
+own frame, `{ type: 'bytes', id, byteLength, blob }`, which `frontend/public/host-client.js` resolves the
+way it resolves a `response`; structured clone carries it by reference, so nothing encodes the file in
+either direction. Arming, the grant check and the sliding-window budget gate that path as they gate every
+other post. Which file is answered is the mount's decision: the frame chooses only `working` or `base`.
+`frontend/src/lib/extensions/__tests__/bytes.unit.ts` is what fails when bytes are routed back
+through the stringify.
 
 ## Install Model
 

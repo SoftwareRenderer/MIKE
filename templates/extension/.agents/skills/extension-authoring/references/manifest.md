@@ -46,8 +46,15 @@ genuinely two things, write two folders.
 ```
 
 `injection_points` is chosen from: `taskCard`, `fileEditor`, `projectBoard`, `taskChat`,
-`projectSidebar`, `fileBrowser`, `createTask`. An unknown name is ignored — the frame is simply
-never mounted there.
+`projectSidebar`, `fileBrowser`, `createTask`, `binaryPreview`. An unknown name is ignored — the frame is
+simply never mounted there.
+
+`file_suffixes` names the file types this extension renders — lowercase, no leading dot (`["stl"]`). It
+is one declaration with two effects: the host mounts the frame for a matching file, and
+`GET /api/fs/read?kind=bytes` answers a file only when an enabled extension declares its suffix. An extension
+that declares none is mounted wherever its points are and can read no file's bytes. Because that list
+is what the operator agrees to at install, a broad one (`"env"`, `"json"`) says so on the dialog —
+declare what the extension draws, not what it might like to read.
 
 The entry page is always `index.html` in this folder — there is no module URL to declare. Its
 `<script>` tags are external files (the CSP blocks an inline script) and it loads `/host-client.js`
@@ -58,7 +65,7 @@ before its own script.
 `config.get`, `createTask.description.insertText`, `createTask.events.paste`,
 `editor.addFooterButton`, `editor.contentChange`, `editor.footerButtonClick`, `editor.getContent`,
 `editor.jumpToLine`, `editor.removeFooterButton`, `editor.save`, `editor.setContent`,
-`editor.setOverlay`, `log.write`, `network.proxy`, `preview.navState`, `preview.release`,
+`editor.setOverlay`, `fs.getBytes`, `log.write`, `network.proxy`, `preview.navState`, `preview.release`,
 `preview.serve`, `preview.serveNetwork`, `preview.serveScripts`, `storage.delete`, `storage.get`,
 `storage.list`, `storage.set`, `theme.get`, `theme.update`, `ui.modal`, `ui.setSize`, `ui.status`.
 
@@ -81,6 +88,12 @@ named beside it:
 - `extHost.editor.addFooterButton(id, label, active)`, `.removeFooterButton(id)`, `.getContent()`,
   `.setContent(content)`, `.setOverlay(visible)`, `.save()`.
 - `extHost.preview.serve(content, scripts, network)`, `.release(token)`, `.navState(token)`.
+- `extHost.fs.getBytes(side)` — the file this frame was mounted on, as the bytes on disk: resolves to
+  `{ blob, byteLength }`, with `side` `'working'` or `'base'` (a diff's old side). The project, the task
+  and the path come from the mount, never from the call, so the extension reads the file the person
+  opened and no other. Read it with `await blob.arrayBuffer()` — off the main thread if the format is
+  heavy — and check the header against `byteLength` before allocating anything from it: the core names no
+  file format and validates no file's contents.
 - `extHost.createTask.description.insertText(text)`.
 - `extHost.proxy(url, method, body)` — the `network` capability's egress path.
 - `extHost.theme.get()` — the host's CSS custom properties.

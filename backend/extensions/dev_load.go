@@ -353,6 +353,10 @@ func (h *ExtensionHandler) validateLoadedManifest(name string, manifest *Extensi
 	if err := manifest.Capabilities.GetCSS().Validate(); err != nil {
 		return sandboxCfg, fmt.Errorf("extension %s declares an unusable stylesheet: %w", name, err)
 	}
+	// The suffix list is a read grant, and a load applies a manifest no person installed.
+	if err := manifest.Capabilities.GetUI().Validate(); err != nil {
+		return sandboxCfg, fmt.Errorf("extension %s declares unusable file suffixes: %w", name, err)
+	}
 	// The declaration is text from the browser, so it is vetted before it is stored.
 	if err := validateTools(manifest.Capabilities, manifest.ConfigSchema); err != nil {
 		return sandboxCfg, fmt.Errorf("extension %s declares an unusable tool: %w", name, err)

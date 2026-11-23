@@ -1,5 +1,5 @@
 /**
- * The one parser for the suffix a file type is matched on — mirrors `extensions.fileSuffix` on the
+ * The one parser for the suffix a file type is matched on — mirrors `extensions.FileSuffix` on the
  * Go side, including `dot <= 0`: `.gitignore` is a dotfile, not a `.gitignore` file.
  */
 

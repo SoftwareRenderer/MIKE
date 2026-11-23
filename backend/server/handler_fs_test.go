@@ -40,7 +40,13 @@ func fsReadRefRepo(t *testing.T, s *Server, projectID string) (string, string, s
 	if err := os.WriteFile(file, []byte(fsReadRefContent), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	testgit.Git(t, repo, "add", "f.txt")
+	if err := os.Mkdir(filepath.Join(repo, "dir"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "dir", "inner.txt"), []byte("inner\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testgit.Git(t, repo, "add", "f.txt", "dir/inner.txt")
 	testgit.Git(t, repo, "commit", "-m", "init")
 	sha := testgit.GitOutput(t, repo, "rev-parse", "HEAD")
 	testgit.Git(t, repo, "branch", "feature/ref-check")
@@ -113,7 +119,7 @@ func fsListing(t *testing.T, s *Server, projectID, dir string) (bool, map[string
 func TestFSReadRefRejectsGitOptions(t *testing.T) {
 	s := testServer(t)
 	cookie, csrfToken := loginTestCSRF(t, s)
-	file, _, _ := fsReadRefRepo(t, s, "fs-ref-inject")
+	fsReadRefRepo(t, s, "fs-ref-inject")
 
 	// Payload: ref="--output=/tmp/pwn" + ":" + <relPath> -> writes /tmp/pwn:f.txt.
 	// Remove any leftover from an earlier (vulnerable) run so the assertions below
@@ -125,7 +131,7 @@ func TestFSReadRefRejectsGitOptions(t *testing.T) {
 		t.Cleanup(func() { _ = os.Remove(p) })
 	}
 
-	rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-inject", file, "--output=/tmp/pwn")
+	rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-inject", "f.txt", "--output=/tmp/pwn")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for an option-shaped ref, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -151,7 +157,7 @@ func TestFSReadRefRejectsGitOptions(t *testing.T) {
 		"feat branch", // whitespace
 		"feat$(touch /tmp/pwn)",
 	} {
-		rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-inject", file, ref)
+		rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-inject", "f.txt", ref)
 		if rr.Code != http.StatusBadRequest {
 			t.Errorf("ref %q: expected 400, got %d: %s", ref, rr.Code, rr.Body.String())
 		}
@@ -177,7 +183,7 @@ func TestFSReadRefValidRefsStillWork(t *testing.T) {
 	}
 
 	for _, ref := range []string{"HEAD", sha, branch, "refs/heads/" + branch} {
-		rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-valid", file, ref)
+		rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-valid", "f.txt", ref)
 		if rr.Code != http.StatusOK {
 			t.Fatalf("ref %q: expected 200, got %d: %s", ref, rr.Code, rr.Body.String())
 		}
@@ -193,12 +199,13 @@ func TestFSReadRefValidRefsStillWork(t *testing.T) {
 		}
 	}
 
-	// A well-formed ref whose blob does not exist is still a 404, not a 400.
-	rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-valid", filepath.Dir(file), "HEAD")
+	// A directory is not a blob: a well-formed ref over a name git holds as a tree is refused, not
+	// answered, and a name missing at that ref is a 404 rather than a 400.
+	rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-valid", "dir", "HEAD")
 	if rr.Code == http.StatusOK {
 		t.Fatal("expected the directory read at a ref to fail")
 	}
-	missing := filepath.Join(filepath.Dir(file), "nope.txt")
+	missing := "nope.txt"
 	if rr := fsReadAt(t, s, cookie, csrfToken, "fs-ref-valid", missing, "HEAD"); rr.Code != http.StatusNotFound {
 		t.Fatalf("expected 404 for a file missing at the ref, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -239,7 +246,7 @@ func TestFSReadRefInTaskWorktree(t *testing.T) {
 
 	read := func(ref string) *httptest.ResponseRecorder {
 		q := url.Values{
-			"path":    {filepath.Join(worktreePath, "f.txt")},
+			"path":    {"f.txt"},
 			"project": {projID},
 			"task":    {taskID},
 		}
@@ -319,9 +326,9 @@ func fsSymlinkProject(t *testing.T, s *Server, id string) (repo, outside, secret
 func TestFSReadRejectsSymlinkEscape(t *testing.T) {
 	s := testServer(t)
 	cookie, csrf := loginTestCSRF(t, s)
-	repo, _, secret, link := fsSymlinkProject(t, s, "fs-link-read")
+	_, _, secret, _ := fsSymlinkProject(t, s, "fs-link-read")
 
-	rr := fsReadAt(t, s, cookie, csrf, "fs-link-read", filepath.Join(link, "secret.txt"), "")
+	rr := fsReadAt(t, s, cookie, csrf, "fs-link-read", "link/secret.txt", "")
 	if rr.Code != http.StatusBadRequest {
 		t.Fatalf("read through a symlink: expected 400, got %d: %s", rr.Code, rr.Body.String())
 	}
@@ -330,7 +337,7 @@ func TestFSReadRejectsSymlinkEscape(t *testing.T) {
 	}
 
 	// The containment check must not break ordinary in-project reads.
-	rr = fsReadAt(t, s, cookie, csrf, "fs-link-read", filepath.Join(repo, "ok.txt"), "")
+	rr = fsReadAt(t, s, cookie, csrf, "fs-link-read", "ok.txt", "")
 	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), "inside content") {
 		t.Fatalf("ordinary in-project read broken: %d %s", rr.Code, rr.Body.String())
 	}

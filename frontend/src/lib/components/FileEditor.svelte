@@ -2,7 +2,7 @@
     import { onMount, onDestroy } from 'svelte';
     import { t } from '$lib/i18n';
     import { baseName, sandboxMountFromPath } from '$lib/utils/path';
-    import { readFsFile, writeFsFile, rawFileURL, FsReadRefused, isTransientError } from '$lib/api';
+    import { readFsFile, writeFsFile, imageFileURL, FsReadRefused, isTransientError, statFsPaths } from '$lib/api';
     import { isDisplayableImage } from '$lib/utils/diff-image';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { EditorState, Transaction, Compartment, StateField, StateEffect, RangeSet, Range, type Extension } from '@codemirror/state';
@@ -23,6 +23,9 @@
     import { extensionManager } from '$lib/services/extension-manager.svelte';
     import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import { isExtensionContentSet } from '$lib/extensions/handlers/editor';
+    import BinaryPreviewModal from './BinaryPreviewModal.svelte';
+    import { previewableBinary } from '$lib/utils/binary-preview';
+    import { formatBytes } from '$lib/utils/format';
     let extAnchorEl = $state<HTMLDivElement | null>(null);
     $effect(() => {
         const _v = uiInjector.getPointVersion(INJECTION_POINTS.FILE_EDITOR);
@@ -143,17 +146,42 @@
     /** The read refused the bytes as text (415); the suffix decides what is shown instead. */
     let fileBinary = $state(false);
     let imageFailed = $state(false);
+    /** Bytes the read refused as text, from GET /api/fs/stat — the notice states a size beside the button. */
+    let fileBytes = $state<number | undefined>();
+    let binaryPreviewOpen = $state(false);
     /** The states in which this editor holds no text: no CodeMirror, no draft, no save. Bytes the browser
      *  never held cannot be written back, so the save path closes on the same test. */
     const noBuffer = $derived(fileTooLarge || fileNotFound || fileBinary);
-    /** What this file's tree calls it: the name the raw route reads and a line selection names. */
+    /** What this file's tree calls it: the name the read route takes and a line selection names. */
     const treeRelative = $derived(toProjectRelative(filePath || '', projectPath || '', containerPath || ''));
-    /** A refused image still has its bytes: the raw route reads them from disk. */
+    /** A refused image still has its bytes: the read route's image kind serves them from disk. */
     const imageSrc = $derived(
         fileBinary && !imageFailed && isDisplayableImage(filePath || '')
-            ? rawFileURL({ project: projectId, task: taskId, path: treeRelative })
+            ? imageFileURL({ project: projectId, task: taskId, path: treeRelative })
             : ''
     );
+    /** Whether an installed extension renders this file; without one this stays the plain notice. */
+    const binaryPreviewable = $derived(
+        fileBinary && !imageSrc
+        && previewableBinary(filePath || '', uiInjector.getRegistrations(INJECTION_POINTS.BINARY_PREVIEW, {
+            component: 'FileEditor',
+            projectId,
+            taskId,
+            repoPath: treeRelative,
+            filePath: filePath || '',
+        }))
+    );
+    /** The size of a file the read refused as text — one stat, asked only once a file is known binary. */
+    async function measureRefusedBytes() {
+        if (!filePath) return;
+        try {
+            const rows = await statFsPaths({ project: projectId, task: taskId || undefined, paths: [filePath] });
+            fileBytes = rows[0]?.bytes;
+        } catch {
+            // A notice without a size still says what it needs to: the file is not text.
+        }
+    }
+
     let baselineContent = $state('');       // disk content at load time (for gutter delta tracking)
     let gutterMarkers = $state<Map<number, string[]> | null>(null); // pre-computed markers from server
     let savedContent = $state('');          // disk content for unsaved-changes tracking
@@ -246,8 +274,11 @@
      */
     async function checkExternalChange() {
         const readPath = filePath;
+        // The request names the file the way the repository does; the identity this component keys its
+        // drafts and its "did the file switch under me" check by stays the path the explorer handed over.
+        const relPath = treeRelative;
         try {
-            const disk = await readFsFile({ path: readPath, project: projectId, task: taskId });
+            const disk = await readFsFile({ path: relPath, project: projectId, task: taskId });
             // A file switch during that read: this buffer belongs to whoever is open now.
             if (filePath !== readPath) return;
             // A reload blanks `content` for the length of its read, and merging against that would file
@@ -799,6 +830,8 @@
         fileNotFound = false;
         fileBinary = false;
         imageFailed = false;
+        fileBytes = undefined;
+        binaryPreviewOpen = false;
         cancelSaveRetry();
 
         // Destroy old editor and LSP client
@@ -825,8 +858,11 @@
         // The file is about to change
         if (view) dispatchLineSel(view, null);
 
+        // The wire carries the repository-relative name; `filePath` stays this editor's identity, which
+        // is what the draft, the undo chain and the tabs are keyed by.
+        const relPath = treeRelative;
         try {
-            const data = await readFsFile({ path: filePath, project: projectId, task: taskId });
+            const data = await readFsFile({ path: relPath, project: projectId, task: taskId });
             const fileContent = data.content || '';
 
             if (mode === 'diff') {
@@ -844,7 +880,7 @@
                 // stays empty — all lines shown as added.
                 const refToUse = baseRef || 'HEAD';
                 try {
-                    const head = await readFsFile({ path: filePath, project: projectId, task: taskId, ref: refToUse });
+                    const head = await readFsFile({ path: relPath, project: projectId, task: taskId, ref: refToUse });
                     baselineContent = head.content || '';
                 } catch {
                     baselineContent = '';
@@ -889,7 +925,7 @@
             // it is gone, or its bytes are not text. Anything else is said with the server's own sentence.
             if (e instanceof FsReadRefused && e.status === 413) fileTooLarge = true;
             else if (e instanceof FsReadRefused && e.status === 404) fileNotFound = true;
-            else if (e instanceof FsReadRefused && e.status === 415) fileBinary = true;
+            else if (e instanceof FsReadRefused && e.status === 415) { fileBinary = true; void measureRefusedBytes(); }
             else error = errorText(e, t('editor.readFailed'));
         } finally {
             loadedPath = requestPath;
@@ -1801,8 +1837,19 @@
                     </div>
                 {:else}
                     <div class="editor-placeholder">
-                        <p style="margin:0 0 8px">{imageFailed ? t('editor.imageFailed') : t('editor.binaryFile')}</p>
-                        <p style="margin:0;font-size:var(--text-xs);color:var(--color-text-tertiary)">{filePath}</p>
+                        <p style="margin:0 0 8px">
+                            {imageFailed
+                                ? t('editor.imageFailed')
+                                : fileBytes !== undefined
+                                    ? t('editor.binaryWithSize', { size: formatBytes(fileBytes) })
+                                    : t('editor.binaryFile')}
+                        </p>
+                        {#if binaryPreviewable}
+                            <button type="button" class="editor-preview-binary" onclick={() => { binaryPreviewOpen = true; }}>
+                                {t('editor.previewBinary')}
+                            </button>
+                        {/if}
+                        <p style="margin:8px 0 0;font-size:var(--text-xs);color:var(--color-text-tertiary)">{filePath}</p>
                     </div>
                 {/if}
             {:else}
@@ -1865,9 +1912,25 @@
         </div>
     {/if}
 
+{#if binaryPreviewOpen}
+    <BinaryPreviewModal
+        project={projectId}
+        task={taskId || ''}
+        path={treeRelative || filePath}
+        displayPath={displayPath || filePath}
+        baseRef={mode === 'diff' ? (baseRef || '') : ''}
+        onClose={() => { binaryPreviewOpen = false; }}
+    />
+{/if}
+
 </div>
 
 <style>
+    /* The byte viewer's way in, beside the size the notice states. */
+    .editor-preview-binary {
+        margin: 0 0 4px;
+    }
+
     /* The palette's own red, so an installed `css` extension that retints the app moves this with it. */
     .conflict-banner {
         display: flex;

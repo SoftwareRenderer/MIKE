@@ -10,7 +10,7 @@ import {
 // ============================================================
 //
 // The wire between the Go refusal and the browser's picture, which neither unit test reaches: a real PNG in
-// a real checkout, refused as text by the server and painted from the raw route. The halves are in
+// a real checkout, refused as text by the server and painted from the read route. The halves are in
 // `backend/server/handler_fs_read_text_test.go` and `__tests__/file-editor-binary.unit.svelte.ts`. A console
 // error fails this spec even when the picture decodes — an empty JSON body reached the browser as one.
 //
@@ -93,7 +93,7 @@ test.describe('a non-text file in the Explorer', () => {
     await row.click();
   }
 
-  test('a picture is painted from the raw route', async ({ page }) => {
+  test('a picture is painted from the read route', async ({ page }) => {
     written.push(IMAGE);
     write(IMAGE, PNG);
     await gotoProject(page);

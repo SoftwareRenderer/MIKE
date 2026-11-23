@@ -745,14 +745,17 @@ hash folds the blob git named in the patch's `index` line, so replacing a pictur
 is a change someone is told about. `$lib/utils/diff-base.ts` owns the two questions on this side
 (`hasWorkingChanges`, `hasCommittedChanges`), and `toDiffFiles` shares its display filter. Tests:
 `backend/git/diff_committed_half_test.go`,
-`backend/api/git_diff_committed_image_test.go`, `backend/server/handler_fs_raw_test.go`,
+`backend/api/git_diff_committed_image_test.go`, `backend/server/handler_fs_image_test.go`,
 `frontend/src/lib/utils/__tests__/diff-base.unit.ts`.
 
 **A binary row's notice does not wait for a size.** A file git called binary in a comparison with no
 annotations arrives as one marker row and no `file_size`. `DiffViewer.svelte` renders the notice from
 `isBinary` alone and drops git's line: the row would print the notice as prose under a size the server
-never priced. Without a size the row says "Binary file", not "Binary file — 0 B". Tests:
-`frontend/src/lib/components/__tests__/binary-file-affordances.unit.svelte.ts`.
+never priced. Without a size the row says "Binary file", not "Binary file — 0 B". A row whose suffix an
+enabled extension declared gains the Preview control the editor's binary state has, so the size and the
+preview are drawn by the same decision; see *The bytes an extension previews*. Tests:
+`frontend/src/lib/components/__tests__/binary-file-affordances.unit.svelte.ts` and
+`frontend/src/lib/components/__tests__/binary-preview-diff.unit.svelte.ts`.
 
 **A ref comparison never reads the file cache.** `GET /api/projects/{id}/tasks/{taskID}/diff/file` answers one
 of two questions, and which one the request says. Without refs it answers the task's worktree against HEAD at
@@ -800,8 +803,8 @@ copy of every byte. A file route never runs a command inside a container.
   Refusing is what protects the file as much as the response. This route feeds the editor's buffer, and
   bytes repaired on the way in are bytes a save would write back repaired.
 - **The editor turns that refusal into a state rather than a fault.** A displayable image is painted from
-  `/api/fs/raw`, its `path` made repository-relative by `toProjectRelative`; anything else says it is
-  binary. Neither has a buffer, a dirty flag or a save. Tests:
+  `GET /api/fs/read?kind=image`, its `path` made repository-relative by `toProjectRelative`; anything else
+  says it is binary. Neither has a buffer, a dirty flag or a save. Tests:
   `backend/server/handler_fs_read_text_test.go`,
   `frontend/src/lib/components/__tests__/file-editor-binary.unit.svelte.ts`, and
   `frontend/tests/e2e/explorer-binary-read.spec.ts` for the bytes crossing the wire.
@@ -851,48 +854,106 @@ repository, and the absent `.git` row — and
 `frontend/src/lib/components/__tests__/file-browser-lists-everything.unit.svelte.ts` for the rows that
 vanish or stop being dimmed.
 
-## Raw file bytes
+## Reading one file: text, a picture, or bytes
 
-`GET /api/fs/raw?project=&task=&path=&ref=` is the only route that returns a project file's **bytes**.
-`/api/fs/read` answers JSON and refuses a non-text file outright (above), so the picture a diff row or an
-opened file shows is read from here — the browser loads this URL itself as an `<img>` subresource and
-"Open image in new tab" comes with it. Because the response is an `<img>` subresource, what it can carry
-is the whole permission:
+`GET /api/fs/read?project=&task=&path=&ref=&kind=` (`backend/server/handler_fs_read.go`) answers one
+project file in whichever of three shapes the caller needed. `kind` is `text` — the default, so the call
+the editor made before the parameter existed still means what it meant — `image`, or `bytes`. It picks a
+policy and widens none: each kind carries its own permission and its own ceiling, and the half below them
+holds no permission of its own to be widened. One handler answers all three because every kind asks the
+same questions in the same order: the path shape, who may ask for this name at all, which tree, the jail,
+the size, then the bytes.
 
-- `path` is **relative to the repository root** — the shape every diff surface already holds. An
-  absolute path is refused rather than translated, so the route never has to guess whether it was sent a
-  host path or a container path.
-- One map (`rawImageTypes`) is both the allowlist and the `Content-Type`. A name off it is a 415, which
-  is what keeps SVG out: SVG is markup, served inline from the app's own origin it would run, and no CSP
-  header on an image response stops that. `frontend/src/lib/utils/diff-image.ts` holds the same set, and a
-  name the browser offers to ask for and this map refuses is a button that can only ever fail.
-- `Cache-Control: no-store`, because the same URL answers differently after the next edit. `nosniff` and
-  the `img-src 'self'` CSP come from `CORSMiddleware` like everywhere else.
-- **No `Content-Disposition`.** The name comes from the repository, and putting it in a header makes a
-  crafted filename a header writer; `inline` is the default the route wants anyway. A response that
-  *saves* a file instead of showing one is `GET /api/fs/download`, below, which carries the name through
-  an encoder rather than echoing it.
-- **`CompressMiddleware` passes this response through without buffering it.** The middleware keeps a
-  whole GET body to hash an ETag and then compresses it. For an image that costs several times the file
-  in memory plus a brotli pass over bytes a codec already finished with, and the buffer sits outside the
-  route's cap so the cap stops being the bound. The escape is by `image/` content type, beside the SSE
-  one, and it keeps the handler's `Content-Length`. `TestGetImageResponseIsPassedThrough` and
-  `TestFSRawImageIsNotBufferedOrRecompressed` hold the two halves.
-- `ref` reads the committed object instead of the file on disk, with `types.ValidateGitRef` and
-  `--end-of-options` like every other client-supplied ref. The **read** runs in **`project.Path`**, not the
-  task's worktree: worktrees of a project share its object database, so a done task whose worktree
+- **`path` is relative to the repository root for every kind** — the shape every diff surface already
+  holds. An absolute path is refused rather than translated, so the route never guesses whether it was sent
+  a host path or a container path, and one containment rule answers for all three. Which tree the name
+  means comes from `?task=`, never from the path. What the browser keys its own records by — an editor's
+  buffer, say — stays in the browser.
+- **No kind reads a repository's own directory.** `requireNoGitRel` refuses the relative name and
+  `requireNoGitSegment` the resolved target. The committed half touches no filesystem, so the relative name
+  is the only place a `.git` row can be seen at all.
+- **`kind=text` answers JSON** and refuses a non-text file outright (above). It holds the whole file before
+  it chooses a status, because two of its refusals are decided by the bytes: 413 when the read ran past the
+  cap the stat promised, 415 when the bytes say they are not text. A status already sent cannot be
+  retracted.
+- **`kind=image` is the `<img>` URL**, so the browser loads it itself and "Open image in new tab" comes with
+  it. Because the response is a subresource, what it can carry is the whole permission. One map
+  (`imageTypes`) is both the allowlist and the `Content-Type`. A name off it is a 415, which is what keeps
+  SVG out: SVG is markup, served inline from this origin it would run, and no CSP header on an image
+  response stops that. `frontend/src/lib/utils/diff-image.ts` holds the same set, and a name the browser
+  offers to ask for and this map refuses is a button that can only ever fail.
+- **`kind=bytes` is fetched by this server's own JS** for an extension frame to parse. Its grant is the
+  suffix list on an enabled row — see *The bytes an extension previews*.
+- **Neither byte answer waits on the bytes for its status.** The type came from the name, the length from
+  the stat or the object probe, and the refusal for an oversized file from the same probe. So the working
+  tree streams from the opened file and a committed object streams out of git, neither held in memory
+  first.
+- **A working-tree answer is `Cache-Control: no-store`**, because the same URL answers differently after the
+  next edit. A `?ref=` answer carries `ETag: <object id>` with `private, max-age=31536000, immutable`, since
+  an object id never names different bytes, and a matching `If-None-Match` answers 304 before the object is
+  read. Only an object id earns either: a ref no tree names is kept as written, answers with no validator,
+  and is held whole rather than streamed, because its length is not known. `nosniff` and the
+  `img-src 'self'` CSP come from `CORSMiddleware` like everywhere else.
+- **No `Content-Disposition` on a byte answer.** The name comes from the repository, and putting it in a
+  header makes a crafted filename a header writer; `inline` is the default the route wants anyway. A
+  response that *saves* a file instead of showing one is `GET /api/fs/download`, below, which carries the
+  name through an encoder rather than echoing it.
+- **`CompressMiddleware` passes a byte answer through without buffering it.** The middleware keeps a whole
+  GET body to hash an ETag and then compresses it. For a picture that costs several times the file in
+  memory plus a brotli pass over bytes a codec already finished with, and the buffer sits outside the
+  route's cap so the cap stops being the bound. The escape is by `image/` content type and bare
+  `application/octet-stream`, beside the SSE one, and it keeps the handler's `Content-Length`.
+  `TestGetImageResponseIsPassedThrough`, `TestFSImageIsNotBufferedOrRecompressed` and
+  `TestFSBytesIsNotBufferedOrRecompressed` hold the halves.
+- `ref` reads the committed object instead of the file on disk, for every kind, with `types.ValidateGitRef`
+  and `--end-of-options` like every other client-supplied ref. The **read** runs in **`project.Path`**, not
+  the task's worktree: worktrees of a project share its object database, so a done task whose worktree
   commit-and-done deleted still answers — which is when the merged diff panel asks. The **resolution** runs
   in the worktree `?task=` names, because `HEAD` belongs to a worktree and the checkout's `HEAD` is a
-  different commit. `refWhere` (`backend/server/handler_fs_raw.go`) pins the ref to an object id there
+  different commit. `refWhere` (`backend/server/handler_fs_blob.go`) pins the ref to an object id there
   first, and keeps the ref as written when no tree will name it, so a branch or a bare object id still gets
   the checkout's answer. A ref is any rev that database resolves — a branch, a commit, a bare object id —
   so this half is jailed to the **project**, and is not limited to commits reachable from whatever `?task=`
-  says; `?task=` is still bound to `?project=` before the read, so another project's task gets nothing.
-- Its own size cap (`maxRawFileBytes`, the upload cap) is checked before any byte is read — on the stat
-  for a working tree, on `git cat-file -s` for a `ref` — and again by the bound on the read that follows:
-  `io.CopyN` on the file, `io.LimitReader` plus a process kill on the object.
+  says. `?task=` is still bound to `?project=` before the read, so another project's task gets nothing.
+- **Each kind prices its own ceiling before any byte is read**: `maxFSReadBytes` for text,
+  `maxImageBytes` (the upload cap) for a picture, `maxExtensionReadBytes` for bytes. The stat prices a
+  working tree and `git cat-file -s` a `ref`, and the read that follows is bounded too — `io.CopyN` on the
+  file, `io.LimitReader` plus a process kill on the object.
 
-Tests: `backend/server/handler_fs_raw_test.go`.
+Tests: `backend/server/handler_fs_read_text_test.go` (the kind vocabulary and the text half),
+`backend/server/handler_fs_image_test.go`, `backend/server/handler_fs_bytes_test.go`,
+`backend/server/handler_fs_size_test.go`, and `backend/server/server_test.go` for the refusal an absolute or
+escaping `path` earns.
+
+## The bytes an extension previews
+
+`GET /api/fs/read?…&kind=bytes` is the answer one project file's bytes get to **this server's own JS**, not
+to a browser subresource. The picture kind is an `<img>` URL, so its type allowlist is its whole permission.
+These bytes are fetched by the host page and handed to an extension frame that parses them itself. The core
+therefore decides nothing about what they hold and holds no table of formats to keep current. The shared shape
+of the request — path spelling, the tree, the jail, the ref and its validator — is *Reading one file: text, a
+picture, or bytes* above. This section holds only what the byte kind adds.
+
+- **The suffix list on an enabled extension row is the whole authority.** `requireExtensionReadSuffix`
+  refuses a path whose suffix no enabled UI row declared in `ui.file_suffixes`: 403, naming the suffix.
+  "The file endpoints can read it" and "an extension renders it" are different claims. The list is read back
+  from the stored row, so a suffix in a query, a body or a frame message grants nothing.
+- **`application/octet-stream`, whatever the file is named.** Nothing sniffs the response (`nosniff` is
+  global) and no subresource loads it, so a per-file type buys nothing. A map here would be a second list to
+  keep beside `imageTypes`, and every entry in it a claim about a format the core must not know.
+- **The handler owns its validators**, because the middleware's digest of the body is the wrong answer for
+  both halves. Hashing 8 MiB to answer a GET costs memory the route's own cap stops bounding, and brotli over
+  bytes a parser will decode again is a pass nobody asked for.
+- **One ceiling, applied before any byte is read**: `maxExtensionReadBytes`, 8 MiB. It is a render ceiling,
+  deliberately not `maxImageBytes`: a file a person can commit is far larger than a browser tab should
+  hold while it renders one.
+- **The frame chooses only `side`** — `working` or `base` — between two versions of the one file its mount
+  names. Nothing on the host caches a response, so the only cache in the system is the one the response
+  earns from its own validator.
+
+Tests: `backend/server/handler_fs_bytes_test.go` (the served pair, the 403 for an undeclared suffix, the 413
+before the read, the 304, the cache header a moving ref must not earn, `.git`, the jail, another project's
+task, a disabled row) and `frontend/src/lib/extensions/__tests__/fs-bytes.unit.ts` for the host side.
 
 ## Archive listing
 
@@ -916,9 +977,9 @@ disk.
   answers the first — which is why the pane keys its rows by position and not by name.
 - **The member answer is the `/api/fs/read` answer** (`fsReadResponse`), so a member and a file are shown
   in the same words by the same editor.
-- `ref` reads the committed object the way `/api/fs/raw` does: same validation, same `project.Path` object
-  database, same `refWhere` resolution in the worktree `?task=` names. The panel that offers the button
-  shows a side that may not be in the worktree at all.
+- `ref` reads the committed object the way *Reading one file: text, a picture, or bytes* does: same
+  validation, same `project.Path` object database, same `refWhere` resolution in the worktree `?task=`
+  names. The panel that offers the button shows a side that may not be in the worktree at all.
 - **The refusals are the whole vocabulary.** 415 is `not a readable archive` or `not a text file`, 404 is
   `no such file in the archive`, and 413 is a member over `maxFSReadBytes` or a committed archive over
   `archiveCommitBufferBytes`. 504 means the walk ran out of `archiveWalkBudget` before it could say
@@ -944,8 +1005,9 @@ answered:
 
 What holds it up:
 
-- **`path` is repeatable** and takes the shape `/api/fs/read` takes: the host or container path the
-  listing handed the browser. A selection is a list of rows, not one path.
+- **`path` is repeatable** and each one is the host or container path the listing handed the browser — the
+  spelling this route keeps, where `GET /api/fs/read` takes only the repository-relative name. A selection is
+  a list of rows, not one path.
 - **Every path of the request is jailed before anything opens** — `fsRequestScope` then `fsScopeTarget`,
   the batch routes' two halves — so a selection whose last row leaves the project sends no bytes. A
   `.git` row refuses the whole request, as it does on the batch routes.
@@ -964,8 +1026,8 @@ What holds it up:
   `mime.FormatMediaType`, which percent-encodes what RFC 2231 keeps out of a header value, and adds an
   ASCII-folded `filename=` twin for a recipient that reads neither. `sanitizeDownloadName` folds
   separators, control characters, a trailing dot, and a name longer than a file name.
-- **`/api/fs/raw` refuses a name in a header and this route cannot.** That response renders on this
-  origin; this one is saved. The encoder is what makes the difference safe.
+- **A byte answer from `GET /api/fs/read` refuses a name in a header and this route cannot.** That response
+  renders on this origin; this one is saved. The encoder is what makes the difference safe.
 - **`CompressMiddleware` passes an `attachment` response through**, beside the SSE and `image/` escapes.
   The middleware keeps a whole GET body to hash an ETag and then brotli-compresses it. For a download
   that is the entire archive in memory, gzipped twice, with the single file's `Content-Length` deleted.
@@ -1027,17 +1089,17 @@ Tests: `go test ./backend/server/ -run TestFSStat`, `backend/fsutil/treesize_tes
 `handler_fs.go` does not already have, and they share one answer: `{ done: [...], failed: [...] }`, each entry
 `{ from, to?, renamed?, reason? }`.
 
-- **Both lists are always present** — an empty `failed` is the answer the caller reads, not a missing key — and
+- **Both lists are always present.** An empty `failed` is the answer the caller reads, not a missing key.
   `from` is the path *as the caller named it*, so a browser browsing a sandboxed project never has a host path
   handed back to it. `to` is absent when the item went nowhere.
 - **`renamed` is the server admitting it chose a different name.** A destination folder that already holds the
-  name takes `name copy`, `name copy2`, … rather than overwriting or failing, and only the server knows which
+  name takes `name copy`, `name copy2`, … rather than overwriting or failing. Only the server knows which
   items needed one, so the listing lists them in a dialog (`pasteRenamedEntry`) instead of leaving a paste that
   renamed files to be discovered later.
-- **A refusal has two altitudes.** The jail's and the request's — an uncorrelated `?task=`/`?project=`, a path
-  outside the project, a destination that is not a folder, an empty batch or one over
-  `maxFSOpsBatch` (100 paths), a destination folder that no longer exists — fail the **request** before a path
-  is touched, which is what makes a paste atomic. Anything learned while running (a source that vanished, a
+- **A refusal has two altitudes**: the jail's and the request's. An uncorrelated `?task=`/`?project=`, a path
+  outside the project, a destination that is not a folder, a destination folder that no longer exists, an empty
+  batch or one over `maxFSOpsBatch` (100 paths): all of them fail the **request** before a path is touched.
+  That is what makes a paste atomic. Anything learned while running (a source that vanished, a
   `.git` row, a tree over its copy bound) is one entry in `failed` and the rest of the selection still lands,
   because a batch is a person's selection. The vocabulary is `fsOpsReason`. Fsutil's own refusals and
   `os.ErrNotExist` are sentences the requester can act on, so they pass through. Anything else is
@@ -1190,8 +1252,8 @@ Browse can paint from a stored index only after this server agreed it has not mo
 (`HandleList`, `HandleRegistryIndex`, `HandleLocalExtensions`). `handleTaskMessages` decides the same
 lifetime: reopening a task asks the same question, and a thread that has not moved answers `304` with no
 body. `TaskHandler.HandleSync` (`GET …/tasks/{taskID}/sync`) decides it for the same reason in the other
-direction — a returning window asks whether anything moved, and a kept digest *is* the stale answer it called
-to replace — so the route is `no-cache` and its 304 carries the header back. It is a task route, so it lives
+direction: a returning window asks whether anything moved, and a kept digest *is* the stale answer it called
+to replace. The route is therefore `no-cache`, and its 304 carries the header back. It is a task route, so it lives
 in `backend/api`. The handler sits in `task.go`: the `http` archgate rule counts a domain package's files that
 import `net/http` and refuses a new one. `syncDigest` (`task_sync.go`) builds the answer and imports nothing of
 the transport. It reads the hub for the conversation revision, which the one-way
@@ -1199,9 +1261,23 @@ the transport. It reads the hub for the conversation revision, which the one-way
 `backend/server/handler_message_window_test.go` (the 304 round trip and the `no-cache` on both answers),
 `backend/api/task_sync_test.go` (the body). An answer holding arbitrary extension data is not worth storing
 anywhere, so `GET /api/extensions/{id}/storage` declares no lifetime at all.
-SSE and `GET /api/fs/raw` image bytes are passed through unbuffered and carry no ETag.
-Tests: `backend/server/handler_headers_test.go`, `backend/server/compress_test.go`,
-`backend/server/handler_message_window_test.go`.
+SSE and `GET /api/fs/read`'s two byte answers are passed through unbuffered. The byte answers are
+the one GET that sets its **own** `ETag` — the object id of a committed read — which is exactly the case the
+middleware's digest would have stolen the 304 from.
+
+**What compressing a response costs the server, and what it is allowed to cost.** brotli's memory is its
+window, not the body. Past roughly 16 KiB of input the writer asks for megabytes, and at the library's
+default 4 MiB window a 40 KB response costs what a 400 KB one costs. So the window comes from the body
+(`brotliWindowBits`): floored where brotli stops beating gzip on text, and left at the library's default
+once the body can use it. A window longer than the input buys nothing; a shorter one costs bytes. Both
+halves were measured, not assumed. `json.MarshalWrite` encodes into a `sync.Pool` buffer
+(`httputil.jsonBuffers`) for the same reason — v2 keeps an encode buffer of its own beside the caller's, so
+a fresh `bytes.Buffer` costs several times the response. Neither is a standing reservation: a garbage
+collection clears the pools.
+Tests: `backend/server/compress_test.go` (`TestBrotliWindowCoversTheBodyAndNoMore` pins the window to the
+body and its ratio to a wider window's) and the printed figures of
+`backend/server/handler_fs_alloc_baseline_test.go`, warm and cold. A change to any of this is compared
+against those printed figures.
 
 ## WebSocket upgrades
 

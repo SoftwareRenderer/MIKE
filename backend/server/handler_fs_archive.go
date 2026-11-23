@@ -204,11 +204,12 @@ func (s *Server) archiveSource(w http.ResponseWriter, r *http.Request, scope fsS
 	}
 	spec := refWhere(ctx, tree, ref) + ":" + filepath.ToSlash(rel)
 	repo := scope.project.Path
-	if size, ok := gitBlobSize(gitInDir(ctx, repo), spec); ok && size > archiveCommitBufferBytes {
+	size, sized := gitBlobSize(gitInDir(ctx, repo), spec)
+	if sized && size > archiveCommitBufferBytes {
 		JSONError(w, http.StatusRequestEntityTooLarge, archiveCommitTooLargeMessage)
 		return nil, nil, false
 	}
-	data, truncated, err := gitBlobSpool(ctx, repo, spec, archiveCommitBufferBytes)
+	data, truncated, err := gitBlobSpool(ctx, repo, spec, archiveCommitBufferBytes, blobHint(size, sized))
 	switch {
 	case truncated:
 		JSONError(w, http.StatusRequestEntityTooLarge, archiveCommitTooLargeMessage)

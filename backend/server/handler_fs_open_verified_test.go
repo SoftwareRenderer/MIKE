@@ -47,7 +47,7 @@ func TestFSReadRefusesANameThatIsNotARegularFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	q := url.Values{"path": {pipe}, "project": {projectID}}
+	q := url.Values{"path": {filepath.Base(pipe)}, "project": {projectID}}
 	req := testRequest(http.MethodGet, "/api/fs/read?"+q.Encode(), nil)
 	withAuthCSRF(req, cookie, csrf)
 	rr := answeredIn(t, 10*time.Second, "GET /api/fs/read on a FIFO", func() *httptest.ResponseRecorder {
@@ -58,7 +58,7 @@ func TestFSReadRefusesANameThatIsNotARegularFile(t *testing.T) {
 	}
 
 	// The control: an ordinary file still reads, so the refusal above is the FIFO and not a broken route.
-	q = url.Values{"path": {seed}, "project": {projectID}}
+	q = url.Values{"path": {filepath.Base(seed)}, "project": {projectID}}
 	seedReq := testRequest(http.MethodGet, "/api/fs/read?"+q.Encode(), nil)
 	withAuthCSRF(seedReq, cookie, csrf)
 	if rr := testResponse(t, s, seedReq); rr.Code != http.StatusOK {

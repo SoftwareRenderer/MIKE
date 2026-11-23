@@ -2,6 +2,7 @@ import type { Extension } from '$lib/types';
 import { slugifyAuthor } from '$lib/utils/extension-identity';
 import { computeGrants, CAP_THEME_UPDATE } from '$lib/extensions/capabilities';
 import { readThemeVars } from '$lib/extensions/handlers/theme';
+import { fileSuffixOf, registrationClaims } from '$lib/utils/binary-preview';
 import { ExtensionHostChannel, mintChannelToken } from '$lib/extensions/channel';
 import { dropExtensionAssetCache, extensionSetFingerprint } from './sw-cache';
 import {
@@ -151,6 +152,8 @@ export interface InjectionRegistration {
     order: number;
     config: any;
     granted: string[];
+    /** The suffixes this extension declared it renders; empty means it never asked to be a file viewer. */
+    fileSuffixes: string[];
 }
 
 /** @knipignore The injector tests build one instance per case so no test inherits another's registrations or theme link. */
@@ -223,6 +226,7 @@ export class UIInjector {
                     order: ext.manifest.priority ?? 0,
                     config: ext.config,
                     granted,
+                    fileSuffixes: ui.file_suffixes ?? [],
                 });
             }
         }
@@ -285,14 +289,20 @@ export class UIInjector {
         }
     }
 
-    getRegistrations(point: InjectionPoint): InjectionRegistration[] {
+    /**
+     * The registrations to mount at `point`, in load order. Building a frame is what arms its channel
+     * and grants, so when the mount names a file an extension that declared suffixes is mounted only
+     * for one it said it renders (`registrationClaims`).
+     */
+    getRegistrations(point: InjectionPoint, context?: InjectionContext): InjectionRegistration[] {
+        const suffix = fileSuffixOf(context);
         return this.registrations
-            .filter(r => r.point === point)
+            .filter(r => r.point === point && registrationClaims(r, suffix))
             .sort((a, b) => a.order - b.order);
     }
 
     renderSlot(point: InjectionPoint, context: InjectionContext, anchor: HTMLElement | null = null): void {
-        const regs = this.getRegistrations(point);
+        const regs = this.getRegistrations(point, context);
         if (regs.length === 0) return;
 
         if (!anchor) {

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { DiffFile, DiffRow, DiffImageRequest, DiffArchiveRequest, DiffImageSection, DiffImageSource } from '$lib/types/diff';
+    import type { DiffFile, DiffRow, DiffImageRequest, DiffBinaryPreviewRequest, DiffArchiveRequest, DiffImageSection, DiffImageSource } from '$lib/types/diff';
     import type { DiffDisplayItem } from '$lib/utils/diff-parser';
     import { buildDisplayItems, jumpTargets, truncatePath, getStatusBadge } from '$lib/utils/diff-parser';
     import { storeBounded } from '$lib/utils/bounded-map';
@@ -12,6 +12,9 @@
     import Spinner from './Spinner.svelte';
     import StageSign from './StageSign.svelte';
     import ImageDiffModal from './ImageDiffModal.svelte';
+    import BinaryPreviewModal from './BinaryPreviewModal.svelte';
+    import { previewableBinary } from '$lib/utils/binary-preview';
+    import { uiInjector, INJECTION_POINTS } from '$lib/services/ui-injector.svelte';
     import ArchiveModal from './ArchiveModal.svelte';
     import { loadCollapsedDiffFiles, saveCollapsedDiffFiles } from '$lib/storage';
 import { slide } from 'svelte/transition';
@@ -354,6 +357,32 @@ import { slide } from 'svelte/transition';
     let imageModal = $state<DiffImageRequest | null>(null);
 
     /**
+     * What one binary file's "Preview" button asks for, or null when nothing offers it. The refs follow
+     * "View image" exactly: the panel decides which commits the two sides come from, and the extension
+     * is handed one path and one ref and cannot ask for more.
+     */
+    function previewRequest(path: string, file: { isNewFile?: boolean; isDeleted?: boolean; origPath?: string }, section: DiffImageSection): DiffBinaryPreviewRequest | null {
+        if (!imageSource || !imageSource.project) return null;
+        const sides = imageSides(file);
+        if (!sides) return null;
+        if (!previewableBinary(path, uiInjector.getRegistrations(INJECTION_POINTS.BINARY_PREVIEW, {
+            component: 'DiffViewer',
+            projectId: imageSource.project,
+            taskId: imageSource.task ?? '',
+            repoPath: path,
+            filePath: path,
+        }))) return null;
+        const refs = (section === 'committed' ? (imageSource.committed ?? imageSource.working) : imageSource.working) ?? {};
+        return {
+            path,
+            displayPath: file.origPath ? `${file.origPath} → ${path}` : path,
+            baseRef: sides === 'compare' ? (refs.old ?? 'HEAD') : '',
+        };
+    }
+
+    let previewModal = $state<DiffBinaryPreviewRequest | null>(null);
+
+    /**
      * What one archive row's "List contents" reads: the side of the comparison the section shows, the same
      * rule "View image" follows. A removed file has no new side, so nothing is offered for it.
      */
@@ -416,13 +445,16 @@ import { slide } from 'svelte/transition';
 {/snippet}
 
 <!-- A binary file the diff cannot show as text: its size, and the viewer it does have. -->
-{#snippet binaryNotice(image: DiffImageRequest | null, archive: DiffArchiveRequest | null, size: number | undefined)}
+{#snippet binaryNotice(image: DiffImageRequest | null, archive: DiffArchiveRequest | null, size: number | undefined, preview: DiffBinaryPreviewRequest | null = null)}
     <div class="diff-binary-notice">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
             <path d="M4 2h8a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V4a2 2 0 012-2z" stroke="currentColor" stroke-width="1.2"/>
             <path d="M6 6l4 4M10 6l-4 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
         </svg>
         <span>{size === undefined ? t('diff.binaryFile') : t('diff.binaryWithSize', { size: formatBytes(size) })}</span>
+        {#if preview}
+            <button type="button" class="diff-preview-binary-btn" onclick={() => { previewModal = preview }}>{t('diff.previewBinary')}</button>
+        {/if}
         {#if image}
             <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
         {/if}
@@ -518,6 +550,7 @@ import { slide } from 'svelte/transition';
     {@const badge = getStatusBadge(file)}
     {@const image = imageRequest(file.path, file, section)}
     {@const archive = archiveRequest(file.path, file, section)}
+    {@const preview = previewRequest(file.path, file, section)}
     <section class="diff-file-section diff-file-enter" use:registerFileSection={file.path}>
         <div class="diff-file-header-row">
             <button
@@ -565,7 +598,7 @@ import { slide } from 'svelte/transition';
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
                             {#if file.isBinary}
-                                {@render binaryNotice(image, archive, file.fileSize)}
+                                {@render binaryNotice(image, archive, file.fileSize, preview)}
                             {:else if file.fileSize}
                             <div class="diff-large-file-notice">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -609,6 +642,7 @@ import { slide } from 'svelte/transition';
     {@const isBin = !!entry.isBinary}
     {@const image = isBin ? imageRequest(entry.path, { isNewFile: true }, 'working') : null}
     {@const archive = isBin ? archiveRequest(entry.path, {}, 'working') : null}
+    {@const preview = isBin ? previewRequest(entry.path, { isNewFile: true }, 'working') : null}
     <section class="diff-file-section diff-file-section-untracked diff-file-enter" use:registerFileSection={entry.path}>
         <div class="diff-file-header-row">
             <button
@@ -654,7 +688,7 @@ import { slide } from 'svelte/transition';
                     <div class="diff-line-scroll">
                         <div class="diff-line-content-wrapper">
                             {#if isBin}
-                                {@render binaryNotice(image, archive, entry.fileSize)}
+                                {@render binaryNotice(image, archive, entry.fileSize, preview)}
                             {:else}
                             <div class="diff-large-file-notice">
                                 <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -850,6 +884,17 @@ import { slide } from 'svelte/transition';
         oldRef={imageModal.oldRef}
         newRef={imageModal.newRef}
         onClose={() => { imageModal = null; }}
+    />
+{/if}
+
+{#if previewModal && imageSource}
+    <BinaryPreviewModal
+        project={imageSource.project}
+        task={imageSource.task ?? ''}
+        path={previewModal.path}
+        displayPath={previewModal.displayPath}
+        baseRef={previewModal.baseRef}
+        onClose={() => { previewModal = null; }}
     />
 {/if}
 

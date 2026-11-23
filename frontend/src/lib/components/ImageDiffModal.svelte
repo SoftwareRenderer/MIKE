@@ -1,7 +1,7 @@
 <script lang="ts">
     import BaseModal from './BaseModal.svelte';
     import Spinner from './Spinner.svelte';
-    import { rawFileURL } from '$lib/api';
+    import { imageFileURL } from '$lib/api';
     import { t } from '$lib/i18n';
 
     /**
@@ -12,7 +12,7 @@
         project: string;
         /** Task whose worktree holds the file. */
         task?: string;
-        /** Repository-relative path — the shape GET /api/fs/raw reads. */
+        /** Repository-relative path — the shape GET /api/fs/read?kind=image reads. */
         path: string;
         displayPath?: string;
         /** Set only when there is an old side: the ref, and the path it is filed under (a rename). */
@@ -27,8 +27,8 @@
     let state = $state<Record<Pane, 'loading' | 'loaded' | 'error'>>({ old: 'loading', new: 'loading' });
 
     const compare = $derived(!!oldRef);
-    const oldURL = $derived(compare ? rawFileURL({ project, task, path: oldPath || path, ref: oldRef }) : '');
-    const newURL = $derived(rawFileURL({ project, task, path, ref: newRef }));
+    const oldURL = $derived(compare ? imageFileURL({ project, task, path: oldPath || path, ref: oldRef }) : '');
+    const newURL = $derived(imageFileURL({ project, task, path, ref: newRef }));
     const title = $derived(displayPath || path);
 
     function mark(which: Pane, loaded: boolean) {

@@ -13,7 +13,8 @@ const (
 	MaxRelSegmentLen = 255 // NAME_MAX on every supported filesystem
 )
 
-// RelInsideRoot reports whether rel (produced by filepath.Rel) names a target that is the root itself or something under it. It rejects ".." and paths starting with "../". For symlink-resolved checks, use Contained(). For paths using forward slashes on all platforms, see server.repoRelativePath().
+// RelInsideRoot reports whether rel (produced by filepath.Rel) names the root itself or something under
+// it: it rejects ".." and any "../" prefix. For a symlink-resolved check, use Contained().
 func RelInsideRoot(rel string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }

@@ -2325,3 +2325,41 @@ func describeTree(t *testing.T, root string) string {
 	}
 	return strings.TrimSpace(b.String())
 }
+
+// TestHandleStorage_RefusesAnOversizedBodyBeforeReadingIt: the value cap is applied to bytes the store
+// has already decoded, so on its own it lets a request make the server hold whatever it sent before
+// being told no. The transport bound is what stops that, and the refused write leaves nothing behind.
+func TestHandleStorage_RefusesAnOversizedBodyBeforeReadingIt(t *testing.T) {
+	h := testHandler(t)
+	ext := makeTestExt("test-ext", "test-extension", ExtensionTypeUI)
+	if err := h.store.Create(ext); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	body := strings.NewReader(`{"namespace":"ns","key":"huge","value":"` + strings.Repeat("a", storageBodyLimit*2) + `"}`)
+	req := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext/storage", body)
+	w := httptest.NewRecorder()
+	h.HandleStorage(w, req, "test-ext")
+	if w.Code == http.StatusOK {
+		t.Fatal("a body past the transport limit was accepted")
+	}
+	entry, err := h.store.StorageGet("test-ext", "ns", "huge")
+	if err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if entry != nil {
+		t.Error("the refused write left a value behind")
+	}
+
+	// A value inside the limit still round-trips — the bound is not a smaller cap in disguise.
+	small := httptest.NewRequest(http.MethodPut, "/api/extensions/test-ext/storage",
+		strings.NewReader(`{"namespace":"ns","key":"k","value":"kept"}`))
+	smallW := httptest.NewRecorder()
+	h.HandleStorage(smallW, small, "test-ext")
+	if smallW.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", smallW.Code, smallW.Body.String())
+	}
+	if entry, err := h.store.StorageGet("test-ext", "ns", "k"); err != nil || entry == nil {
+		t.Fatalf("a normal value did not round-trip: entry=%v err=%v", entry, err)
+	}
+}

@@ -65,6 +65,9 @@ import FileEditor from '$lib/components/FileEditor.svelte';
 const A = '/repo/first.go';
 const B = '/repo/second.go';
 const DISK: Record<string, string> = { [A]: 'first on disk\n', [B]: 'second on disk\n' };
+// The read route takes only the repository-relative name, so that is the name the disk answers by — a
+// caller that sent a host path would read an empty file and fail every buffer assertion below.
+const DISK_BY_READ: Record<string, string> = { 'first.go': DISK[A], 'second.go': DISK[B] };
 
 async function advance(ms: number) {
     await act(async () => {
@@ -113,7 +116,7 @@ beforeEach(() => {
     historyWrites.length = 0;
     // Every read is slower than both debounces, which is the window a pending wait can fall into.
     readFsFile.mockReset().mockImplementation(({ path }: { path: string }) =>
-        new Promise(resolve => setTimeout(() => resolve({ content: DISK[path] ?? '' }), 800)));
+        new Promise(resolve => setTimeout(() => resolve({ content: DISK_BY_READ[path] ?? '' }), 800)));
     writeFsFile.mockReset().mockResolvedValue(undefined);
 });
 

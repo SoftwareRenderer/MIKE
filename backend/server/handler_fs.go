@@ -28,132 +28,6 @@ import (
 	"mike/pkg/logging"
 )
 
-func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		JSONError(w, http.StatusBadRequest, "path is required")
-		return
-	}
-	project, ok := s.requiredProject(w, r)
-	if !ok {
-		return
-	}
-	taskID := r.URL.Query().Get("task")
-
-	if !s.requireSandboxAvailable(w, project) {
-		return
-	}
-	// Resolve the host worktree path and translate sandbox mount paths
-	// (shared with /api/preview).
-	worktreePath, path, err := s.resolveWorktreeForFile(project, taskID, path)
-	if err != nil {
-		Fail(w, err, "resolve worktree", "task worktree not found")
-		return
-	}
-	// Validate against the project root. The returned path is symlink-resolved and
-	// is the one to open; the git-ref read below keeps the lexical path, which is
-	// safe because `git show ref:relpath` reads the object database, never a link.
-	hostPath, err := s.validateFSPath(project, worktreePath, path)
-	if err != nil {
-		JSONError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	// Read from a git ref (e.g. HEAD) instead of the working tree.
-	ref := r.URL.Query().Get("ref")
-	// The ref is client-supplied and lands inside a `git show <ref>:<path>` argument,
-	// so it must never be usable as an option — "--output=/tmp/pwn" is accepted by
-	// git and writes anywhere the server user can.
-	if ref != "" {
-		if err := types.ValidateGitRef(ref); err != nil {
-			JSONError(w, http.StatusBadRequest, "invalid ref: "+err.Error())
-			return
-		}
-	}
-	var content []byte
-	if ref != "" {
-		// --end-of-options (git >= 2.24) is a second line of defence: everything after
-		// it is parsed as a revision, never as an option.
-		const endOfOptions = "--end-of-options"
-		relBase := project.Path
-		if taskID != "" {
-			// resolveWorktreeForFile resolved this to project.Path when no task was named.
-			relBase = worktreePath
-		}
-		relPath, relErr := filepath.Rel(relBase, path)
-		if relErr != nil {
-			JSONError(w, http.StatusBadRequest, relErr.Error())
-			return
-		}
-		spec := ref + ":" + relPath
-		runGit := s.gitInContext(taskID, worktreePath)
-		// Ask git how big the object is before asking it for the object; a cap applied
-		// afterwards just reports the size of the allocation it already made.
-		if size, ok := gitBlobSize(runGit, spec); ok && size > maxFSReadBytes {
-			JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
-			return
-		}
-		output, readErr := runGit("show", endOfOptions, spec)
-		if readErr != nil {
-			JSONError(w, http.StatusNotFound, "file not found at ref "+ref)
-			return
-		}
-		content = []byte(output)
-	} else {
-		// Host filesystem (worktree is bind-mounted into sandbox): lstat the name, then open the file
-		// that lstat saw — openJailedFile() says why the two differ here.
-		before, statErr := os.Lstat(hostPath)
-		if statErr != nil {
-			if os.IsNotExist(statErr) {
-				JSONError(w, http.StatusNotFound, safeNotFoundError())
-			} else {
-				JSONError(w, http.StatusNotFound, "file not found")
-			}
-			return
-		}
-		if before.IsDir() {
-			JSONError(w, http.StatusBadRequest, "path is a directory")
-			return
-		}
-		// Same rule as the ref branch: refuse on the size stat reports, not the read one.
-		if before.Size() > maxFSReadBytes {
-			JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
-			return
-		}
-		f, _, opened := openJailedFile(w, hostPath, before)
-		if !opened {
-			return
-		}
-		defer f.Close()
-		// One byte past the cap, so a file that grew since the lstat is refused rather than buffered.
-		data, readErr := io.ReadAll(io.LimitReader(f, maxFSReadBytes+1))
-		if readErr != nil {
-			logging.For(logging.HTTP).Errorf("fs read failed: %v", readErr)
-			JSONError(w, http.StatusInternalServerError, "failed to read file")
-			return
-		}
-		content = data
-	}
-	if int64(len(content)) > maxFSReadBytes {
-		JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
-		return
-	}
-	// Unlike the cap above, this cannot run before the read: only the bytes say what they are.
-	// docs/api-contract.md → Raw file bytes.
-	if !fsutil.IsText(content) {
-		JSONError(w, http.StatusUnsupportedMediaType, fsutil.ErrNotText.Error())
-		return
-	}
-	// Compute gutter markers (diff vs HEAD) for non-ref reads
-	var markers map[int][]string
-	if ref == "" {
-		markers = computeGutterMarkers(s, worktreePath, path, taskID)
-	}
-	JSONResponse(w, http.StatusOK, fsReadResponse{
-		Content:       string(content),
-		GutterMarkers: markers,
-	})
-}
-
 // fsReadResponse is the JSON response for GET /api/fs/read.
 type fsReadResponse struct {
 	Content       string           `json:"content"`
@@ -179,21 +53,53 @@ const fsTooLargeMessage = "file too large (max 1MB)"
 // gitInContext answers how to run git for a file request: in the task's worktree when
 // the request named one, in the resolved checkout otherwise. The size probe and the
 // read that follows must ask the same repository, so they share this rather than each
-// picking a GitRunIn* variant.
-func (s *Server) gitInContext(taskID, worktreePath string) func(args ...string) (string, error) {
+// picking a GitRunIn* variant. dir is where a streaming read of the same object runs —
+// a blob cannot come back through a string return — and ok is false when there is no
+// checkout to ask.
+func (s *Server) gitInContext(taskID, worktreePath string) (run func(args ...string) (string, error), dir string, ok bool) {
 	var wm *git.WorktreeManager
 	if s.executor != nil {
 		wm = s.executor.WorktreeMgr()
 	}
 	if wm == nil {
-		return func(args ...string) (string, error) {
-			return "", fmt.Errorf("worktree manager unavailable")
-		}
+		return nil, "", false
 	}
 	if taskID != "" {
-		return func(args ...string) (string, error) { return wm.GitRunInWorktreeOutput(taskID, args...) }
+		root, err := wm.WorktreePath(taskID)
+		if err != nil {
+			return nil, "", false
+		}
+		return func(args ...string) (string, error) { return wm.GitRunInWorktreeOutput(taskID, args...) }, root, true
 	}
-	return func(args ...string) (string, error) { return wm.GitRunInDirOutput(worktreePath, args...) }
+	return func(args ...string) (string, error) { return wm.GitRunInDirOutput(worktreePath, args...) }, worktreePath, true
+}
+
+// readSized reads a body whose length was learned before the read — from a stat, or from `cat-file -s` —
+// into one buffer of that size plus the one byte that catches a source longer than it promised.
+// io.ReadAll cannot do this: it doubles a buffer up from nothing, so the read costs 2.3x the bytes it
+// returns. The contract is that a body longer than size is read to one byte past limit and left to the
+// caller's check: never a short read answered as a whole one, because a truncated file the editor can
+// save back is a corrupted file.
+func readSized(r io.Reader, size, limit int64) ([]byte, error) {
+	if size < 0 || size > limit {
+		// Nothing sized the read; grow, but stop one byte past the ceiling.
+		return io.ReadAll(io.LimitReader(r, limit+1))
+	}
+	buf := make([]byte, size+1)
+	n, err := io.ReadFull(r, buf)
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return buf[:n], nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	// The promised bytes plus one arrived, so the source grew since its size was taken. Read on to the
+	// byte past the ceiling and let the caller's check refuse the whole thing.
+	rest, err := io.ReadAll(io.LimitReader(r, limit-int64(n)+1))
+	if err != nil {
+		return nil, err
+	}
+	return append(buf[:n], rest...), nil
 }
 
 // gitBlobSize asks git for the size of the object a "<ref>:<path>" spec names, which is
@@ -212,15 +118,15 @@ func gitBlobSize(runGit func(args ...string) (string, error), spec string) (int6
 	return size, true
 }
 
-// computeGutterMarkers runs `git diff HEAD -- <path>` and marks the lines of the current working-tree
-// file that diff touched, indexed 1-based. nil when the file is untracked, the repo has no commits, or
+// computeGutterMarkers runs `git diff HEAD -- <path>` for one repository-relative path and marks the
+// lines of the current working-tree file that diff touched, indexed 1-based. nil when the file is untracked, the repo has no commits, or
 // git cannot answer.
-func computeGutterMarkers(s *Server, worktreePath, path, taskID string) map[int][]string {
-	relPath, err := filepath.Rel(worktreePath, path)
-	if err != nil {
+func computeGutterMarkers(s *Server, worktreePath, relPath, taskID string) map[int][]string {
+	runGit, _, ok := s.gitInContext(taskID, worktreePath)
+	if !ok {
 		return nil
 	}
-	patch, err := s.gitInContext(taskID, worktreePath)("diff", "HEAD", "--", relPath)
+	patch, err := runGit("diff", "HEAD", "--", relPath)
 	if err != nil || patch == "" {
 		return nil
 	}
@@ -1028,6 +934,13 @@ func (s *Server) validateFSPath(project *types.Project, worktreeRoot, path strin
 		return "", fsutil.ErrOutside
 	}
 	return resolved, nil
+}
+
+// refusePathJail logs and rejects a path that changed after the containment check,
+// preventing path-swap attacks.
+func refusePathJail(w http.ResponseWriter, hostPath string) {
+	logging.For(logging.HTTP).Warnf("file refused, path changed after containment: %s", hostPath)
+	JSONError(w, http.StatusBadRequest, fsutil.ErrOutside.Error())
 }
 
 // openJailedFile is the second half of validateFSPath(): it opens the path that check returned through

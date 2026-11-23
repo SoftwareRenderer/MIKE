@@ -18,12 +18,12 @@ import {
     dependencyDraft,
 } from '../extension-permissions';
 
-describe('isDangerousPermission (sandbox-escaping permissions only)', () => {
-    it('flags the sandbox-escaping permissions', () => {
-        for (const perm of ['network.proxy', 'preview.serveScripts', 'preview.serveNetwork']) {
+describe('isDangerousPermission (permissions that cross the frame\'s wall)', () => {
+    it('flags the permissions that cross it, in either direction', () => {
+        for (const perm of ['network.proxy', 'preview.serveScripts', 'preview.serveNetwork', 'fs.getBytes']) {
             expect(isDangerousPermission(perm)).toBe(true);
         }
-        expect(DANGEROUS_PERMISSIONS.size).toBe(3);
+        expect(DANGEROUS_PERMISSIONS.size).toBe(4);
     });
 
     it('does not flag sandbox-contained permissions', () => {

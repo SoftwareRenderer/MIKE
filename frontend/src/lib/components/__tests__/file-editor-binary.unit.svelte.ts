@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// What the editor does with bytes refused as text: a picture painted from the raw route, or the sentence that
-// the file is binary; neither has a buffer, a dirty flag or a save. The refusal itself is
+// What the editor does with bytes refused as text: a picture painted from the read route's image kind, or
+// the sentence that the file is binary; neither has a buffer, a dirty flag or a save. The refusal itself is
 // `backend/server/handler_fs_read_text_test.go`.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, cleanup, act, fireEvent } from '@testing-library/svelte';
@@ -80,13 +80,14 @@ afterEach(() => {
 });
 
 describe('a file whose bytes are not text', () => {
-    it('paints a picture the browser can render from the raw route', async () => {
+    it('paints a picture the browser can render from the read route', async () => {
         const el = await openRefused(`${PROJECT}/docs/logo.png`);
 
         const img = picture(el)!;
         expect(img).toBeTruthy();
         const url = new URL(img.getAttribute('src')!, 'http://x');
-        expect(url.pathname).toBe('/api/fs/raw');
+        expect(url.pathname).toBe('/api/fs/read');
+        expect(url.searchParams.get('kind')).toBe('image');
         expect(url.searchParams.get('project')).toBe('p1');
         expect(url.searchParams.get('task')).toBe('t1');
         expect(url.searchParams.get('path')).toBe('docs/logo.png');
@@ -94,14 +95,14 @@ describe('a file whose bytes are not text', () => {
 
     it('asks for the picture of a sandboxed tree by the name its container lists it under', async () => {
         // A sandboxed task's listing opens files under the project's own mount while projectPath is the
-        // worktree directory, so only the container root strips to a path the raw route accepts.
+        // worktree directory, so only the container root strips to a path the read route accepts.
         const el = await openRefused('/home/sandbox/immich-watchface/preview-tie.png', {
             projectPath: '/repo/.worktrees/brave-fox',
             containerPath: '/home/sandbox/immich-watchface',
         });
 
         const url = new URL(picture(el)!.getAttribute('src')!, 'http://x');
-        expect(url.pathname).toBe('/api/fs/raw');
+        expect(url.pathname).toBe('/api/fs/read');
         expect(url.searchParams.get('task')).toBe('t1');
         expect(url.searchParams.get('path')).toBe('preview-tie.png');
     });

@@ -4,7 +4,7 @@
   "longsent": 0
  },
  "_global": {
-  "longsent": 72
+  "longsent": 64
  },
  "docs/adding-a-preference.md": {
   "history": 0,
@@ -18,14 +18,6 @@
   "history": 0,
   "longsent": 0
  },
- "docs/adr/0003-a-task-fetches-a-submodule-only-under-the-projects-two-switches.md": {
-  "history": 0,
-  "longsent": 0
- },
- "docs/adr/0004-a-task-fetches-no-submodule-the-persons-click-does.md": {
-  "history": 0,
-  "longsent": 0
- },
  "docs/adr/README.md": {
   "history": 0,
   "longsent": 0
@@ -36,7 +28,7 @@
  },
  "docs/api-contract.md": {
   "history": 1,
-  "longsent": 12
+  "longsent": 10
  },
  "docs/api.md": {
   "history": 0,
@@ -60,7 +52,7 @@
  },
  "docs/confinement.md": {
   "history": 0,
-  "longsent": 7
+  "longsent": 5
  },
  "docs/context-window.md": {
   "history": 0,
@@ -96,7 +88,7 @@
  },
  "docs/git-operations.md": {
   "history": 1,
-  "longsent": 4
+  "longsent": 0
  },
  "docs/i18n.md": {
   "history": 2,

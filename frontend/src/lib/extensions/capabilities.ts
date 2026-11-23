@@ -12,6 +12,7 @@ import { logCapabilities } from './handlers/log';
 import { uiCapabilities } from './handlers/ui';
 import { storageCapabilities } from './handlers/storage';
 import { editorCapabilities } from './handlers/editor';
+import { fsCapabilities } from './handlers/fs';
 import { themeCapabilities } from './handlers/theme';
 import { previewCapabilities } from './handlers/preview';
 
@@ -46,6 +47,7 @@ export {
     CAP_EDITOR_CONTENT_CHANGE,
     CAP_EDITOR_SAVE,
 } from './handlers/editor';
+export { CAP_FS_GET_BYTES } from './handlers/fs';
 export {
     CAP_THEME_GET,
     CAP_THEME_UPDATE,
@@ -67,6 +69,7 @@ export const SUPPORTED_CAPABILITIES: Record<string, CapabilityDef> = {
     ...uiCapabilities,
     ...storageCapabilities,
     ...editorCapabilities,
+    ...fsCapabilities,
     ...themeCapabilities,
     ...previewCapabilities,
 };

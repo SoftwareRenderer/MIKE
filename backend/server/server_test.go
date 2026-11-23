@@ -390,7 +390,7 @@ func TestHandleFSPathValidation(t *testing.T) {
 	cookie, csrfToken := loginTestCSRF(t, s)
 
 	t.Run("allows file within project root", func(t *testing.T) {
-		req := testRequest(http.MethodGet, "/api/fs/read?path="+filepath.Join(tmpDir, "allowed.txt")+"&project=test-project-fs", nil)
+		req := testRequest(http.MethodGet, "/api/fs/read?path=allowed.txt&project=test-project-fs", nil)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
 		if rr.Code != http.StatusOK {
@@ -408,7 +408,9 @@ func TestHandleFSPathValidation(t *testing.T) {
 	})
 
 	t.Run("rejects path traversal via ..", func(t *testing.T) {
-		req := testRequest(http.MethodGet, "/api/fs/read?path="+tmpDir+"/../../../etc/passwd&project=test-project-fs", nil)
+		// The name is repository-relative, so a walk out of the project is refused by the shape rule
+		// before any tree is named — the same answer as an absolute path, and neither reaches a path.
+		req := testRequest(http.MethodGet, "/api/fs/read?path=../../../etc/passwd&project=test-project-fs", nil)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
 		if rr.Code != http.StatusBadRequest {
@@ -498,7 +500,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		modifiedContent := "line1\nline2-changed\nline3\nline5\nline6-new\n"
 		os.WriteFile(testFile, []byte(modifiedContent), 0644)
 
-		req := testRequest(http.MethodGet, "/api/fs/read?path="+testFile+"&project=test-project-gutter", nil)
+		req := testRequest(http.MethodGet, "/api/fs/read?path=test.txt&project=test-project-gutter", nil)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
 		if rr.Code != http.StatusOK {
@@ -530,7 +532,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 	t.Run("unmodified file returns no markers", func(t *testing.T) {
 		os.WriteFile(testFile, []byte(originalContent), 0644)
 
-		req := testRequest(http.MethodGet, "/api/fs/read?path="+testFile+"&project=test-project-gutter", nil)
+		req := testRequest(http.MethodGet, "/api/fs/read?path=test.txt&project=test-project-gutter", nil)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
 		if rr.Code != http.StatusOK {
@@ -550,7 +552,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 		untrackedFile := filepath.Join(tmpDir, "untracked.txt")
 		os.WriteFile(untrackedFile, []byte("new content\n"), 0644)
 
-		req := testRequest(http.MethodGet, "/api/fs/read?path="+untrackedFile+"&project=test-project-gutter", nil)
+		req := testRequest(http.MethodGet, "/api/fs/read?path=untracked.txt&project=test-project-gutter", nil)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
 		if rr.Code != http.StatusOK {
@@ -567,7 +569,7 @@ func TestHandleFSReadGutterMarkers(t *testing.T) {
 	})
 
 	t.Run("ref parameter returns no gutter markers", func(t *testing.T) {
-		req := testRequest(http.MethodGet, "/api/fs/read?path="+testFile+"&project=test-project-gutter&ref=HEAD", nil)
+		req := testRequest(http.MethodGet, "/api/fs/read?path=test.txt&project=test-project-gutter&ref=HEAD", nil)
 		withAuthCSRF(req, cookie, csrfToken)
 		rr := testResponse(t, s, req)
 		if rr.Code != http.StatusOK {

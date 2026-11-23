@@ -34,6 +34,11 @@ const (
 // maxExtensionValueBytes caps the size of a single storage value (KiB).
 const maxExtensionValueBytes = 64 * 1024
 
+// storageBodyLimit bounds one storage write request. The store refuses a value over
+// maxExtensionValueBytes only after decoding it, so this transport ceiling — with room for the
+// namespace, the key and the envelope — is what stops a request making the server hold what it sent.
+const storageBodyLimit = 4 * maxExtensionValueBytes
+
 // KVEntry is a single key/value pair in an extension's scoped storage.
 type KVEntry struct {
 	Key       string         `json:"key"`
@@ -157,6 +162,14 @@ func (c *Capabilities) GetCSS() *CSSConfig {
 		return nil
 	}
 	return c.CSS
+}
+
+// GetUI returns the UI capability, or nil when the manifest declares none.
+func (c *Capabilities) GetUI() *UIConfig {
+	if c == nil {
+		return nil
+	}
+	return c.UI
 }
 
 // GetTools returns the contributed tool declarations, or nil when the manifest declares none.
@@ -306,8 +319,8 @@ type StringToken struct {
 	Multiline bool   `json:"multiline,omitzero"`
 }
 
-// fileSuffix normalizes a path or file name to the bare lowercase suffix file types match on.
-func fileSuffix(name string) string {
+// FileSuffix normalizes a path or file name to the bare lowercase suffix file types match on.
+func FileSuffix(name string) string {
 	base := name
 	if i := strings.LastIndexByte(base, '/'); i >= 0 {
 		base = base[i+1:]
@@ -324,7 +337,7 @@ func (c *LSPConfig) fileTypeFor(name string) *LSPFileType {
 	if c == nil {
 		return nil
 	}
-	suffix := fileSuffix(name)
+	suffix := FileSuffix(name)
 	for i := range c.FileTypes {
 		if suffix != "" && c.FileTypes[i].Extension == suffix {
 			return &c.FileTypes[i]
@@ -373,6 +386,10 @@ type UIConfig struct {
 	// "createTask.description.insertText") the extension requests. The host
 	// grants only the intersection of these and the supported catalog.
 	Permissions []string `json:"permissions,omitempty"`
+	// FileSuffixes are the file suffixes this extension renders, lowercase and without a leading dot
+	// ("stl"). An enabled row's list is what the byte kind of GET /api/fs/read accepts as its grant; a
+	// suffix in a request is not. See UIConfig.Validate.
+	FileSuffixes []string `json:"file_suffixes,omitempty"`
 }
 
 // CSSConfig defines CSS extension configuration (global stylesheet only).

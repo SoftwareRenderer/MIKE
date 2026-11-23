@@ -189,6 +189,29 @@ sharing a published name is listed as updatable and the update it invites is ref
 - Nothing here reaches the network until a person said yes, at install or at a development load: the same
   three conditions decide both, and `docs/extension-authoring.md → The access question` owns the load half.
 
+## A byte read is consented as a suffix list
+
+`fs.getBytes` is the one capability whose grant is a file format the core has never heard of. It is
+classified dangerous (`DANGEROUS_PERMISSIONS` in `frontend/src/lib/utils/extension-permissions.ts`) and
+described in `permissionDescriptions()`. The install dialog therefore says what it opens before a person
+says yes: the whole bytes of the file the person has open, including one the editor refuses to show as text.
+
+- **What is consented is the list, not the file.** `capabilities.ui.file_suffixes` is validated at install
+  (`UIConfig.Validate`, `backend/extensions/manifest_validate.go`): a bare lowercase suffix — no dot, no
+  slash, no duplicate. A value that could name a path is refused there rather than honoured later, so the
+  list read in the dialog is one the byte route can only answer exactly.
+- **The stored row is the authority in both directions.** The host reads its suffixes to decide whether a
+  preview frame exists, and `GET /api/fs/read?kind=bytes` reads them to decide whether the bytes exist. Disabling the
+  row stops serving; no request field, frame message or client-side list widens either answer.
+- **A broad list is what the person is agreeing to.** An extension that declared `env`, `json` or `md` can
+  have the opened file's bytes read by its own code, because the file it is showing is the file it asked for.
+  The project-plus-task jail and the `.git` refusal still hold; per-file consent does not exist. Neither does
+  a host-side sanity check on a format header — that is the extension's duty, and it is written down in
+  `docs/extension-authoring.md`.
+
+Tests: `frontend/src/lib/extensions/__tests__/capability-consent.unit.ts` for the classification, and
+`backend/server/handler_fs_bytes_test.go` for the refusal a suffix no enabled row declares.
+
 ## LSP capability gates
 
 `manifest.capabilities.lsp` — three gates, each toggled per extension in Settings → Extensions →

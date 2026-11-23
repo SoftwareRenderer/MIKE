@@ -88,7 +88,7 @@ func TestFSReadRefusesOversizedWorkingTreeFile(t *testing.T) {
 	cookie, csrf := loginTestCSRF(t, s)
 	projectID, file := fsSizeProject(t, s, "fs-size-worktree", "big.bin", oversizedMiB)
 
-	if code := fsReadStatus(t, s, cookie, csrf, projectID, file, ""); code != http.StatusRequestEntityTooLarge {
+	if code := fsReadStatus(t, s, cookie, csrf, projectID, filepath.Base(file), ""); code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want %d", code, http.StatusRequestEntityTooLarge)
 	}
 
@@ -98,7 +98,7 @@ func TestFSReadRefusesOversizedWorkingTreeFile(t *testing.T) {
 	if err := os.WriteFile(small, []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	q := url.Values{"path": {small}, "project": {projectID}}
+	q := url.Values{"path": {filepath.Base(small)}, "project": {projectID}}
 	req := testRequest(http.MethodGet, "/api/fs/read?"+q.Encode(), nil)
 	withAuthCSRF(req, cookie, csrf)
 	if rr := testResponse(t, s, req); rr.Code != http.StatusOK {
@@ -119,7 +119,7 @@ func TestFSReadRefusesOversizedBlobAtRef(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if code := fsReadStatus(t, s, cookie, csrf, projectID, file, "HEAD"); code != http.StatusRequestEntityTooLarge {
+	if code := fsReadStatus(t, s, cookie, csrf, projectID, filepath.Base(file), "HEAD"); code != http.StatusRequestEntityTooLarge {
 		t.Errorf("status = %d, want %d", code, http.StatusRequestEntityTooLarge)
 	}
 }
@@ -170,6 +170,8 @@ func TestTooLargeMessagesNameTheirCaps(t *testing.T) {
 		{"fs read", fsTooLargeMessage, maxFSReadBytes},
 		{"fs write", fsTooLargeMessage, maxFSWriteBytes},
 		{"upload", uploadTooLargeMessage, MaxUploadSize},
+		{"picture read", imageTooLargeMessage, maxImageBytes},
+		{"byte read", extensionReadTooLarge, maxExtensionReadBytes},
 	}
 	for _, tc := range cases {
 		var stated int

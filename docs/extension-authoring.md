@@ -167,6 +167,36 @@ refuses; `references/manifest.md` is the grammar and `references/lsp.md`, `refer
 `references/llm.md` carry the fields of the types that cost an image or a module. Every JSON name the
 manifest types declare has to appear in one of them.
 
+## A UI extension that renders a file format the core does not know
+
+The core has no format table: no viewer, no parser, no MIME decision for anything. What an author gets is one
+declaration and one call, and `references/manifest.md` in the authoring skill holds both grammars.
+
+- **Declare the suffix, then ask for the bytes.** `capabilities.ui.file_suffixes` (`["stl"]`, lowercase, no
+  dot) is the whole grant: the host mounts the frame for a file whose suffix it names, and
+  `GET /api/fs/read?kind=bytes` answers a file only when an enabled row declares its suffix. `fs.getBytes` is the
+  capability that calls it, and it is classified dangerous because the bytes are the file as it is on disk.
+- **The mount names the file, not the frame.** `extHost.fs.getBytes(side)` takes `'working'` or `'base'` and
+  nothing else; project, task, path and base ref come from the mount context the person's screen built. A
+  frame that could name a path would not need anyone to open anything.
+- **The bytes arrive as a `Blob`.** The reply is its own frame (`{ type: 'bytes', id, byteLength, blob }`) and
+  skips the JSON round-trip every other reply takes, so nothing encodes the file in either direction. Read it
+  with `await blob.arrayBuffer()`, and parse heavy formats off the main thread — the host's own work is done
+  before the reply and costs it one browser-held response.
+- **The sanity check is the extension's.** A header claiming more content than `byteLength` holds is a
+  request to allocate what cannot arrive, and no host-side rule can judge a format it has never heard of.
+  Validate the header against the length before allocating from it. The host half is
+  `docs/api-contract.md → The bytes an extension previews` and
+  `docs/ui-extensions.md → Bytes Across the Channel`; this half has no test but yours.
+- **What the host refuses, and how it says so.** A suffix no enabled row declared is 403, and a file over
+  `maxExtensionReadBytes` is 413. `.git` and anything outside the project-plus-task jail are refused too.
+  Each refusal reaches the frame as a rejected promise carrying the server's sentence. Nothing in that list
+  is format-aware.
+
+The e2e fixture for the whole round trip is `frontend/tests/e2e/binary-preview.spec.ts`: it authors a manifest
+declaring a made-up suffix, opens such a file, clicks Preview, and asserts the frame received the file's real
+bytes.
+
 ## Tests
 
 `go test ./backend/extensions/ ./backend/api/` is the gate over this whole subsystem:

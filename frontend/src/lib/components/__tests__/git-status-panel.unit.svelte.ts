@@ -479,7 +479,8 @@ describe('the binary row the explorer lists', () => {
 
         await waitFor(() => expect(pictureSources(container).length).toBe(2));
         const [oldSide, newSide] = pictureSources(container);
-        expect(oldSide.pathname).toBe('/api/fs/raw');
+        expect(oldSide.pathname).toBe('/api/fs/read');
+        expect(oldSide.searchParams.get('kind')).toBe('image');
         expect(oldSide.searchParams.get('project')).toBe('p1');
         expect(oldSide.searchParams.get('path')).toBe('docs/logo.png');
         expect(oldSide.searchParams.get('ref')).toBe('HEAD');

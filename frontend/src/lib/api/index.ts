@@ -151,7 +151,7 @@ export { uploadTaskFile } from './task-upload';
 // -- Files: the tree inside a project, or the host directories a picker was declared over --
 export {
     listFsDirectory,
-    rawFileURL,
+    imageFileURL,
     readFsFile,
     readFsArchive,
     readFsArchiveEntry,

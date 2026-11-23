@@ -69,10 +69,11 @@ describe('capability consent catalog', () => {
         expect(stale, `no longer in the catalog: ${stale.join(', ')}`).toEqual([]);
     });
 
-    it('warns about every capability that leaves the sandbox at all', () => {
-        // Names the boundary in both directions: what leaves the sandbox is flagged, and what
+    it('flags every capability that crosses the frame\'s wall in either direction', () => {
+        // Names the boundary in both directions: what crosses it is flagged, and what
         // stops doing so should stop being flagged. `preview.serve` is strict CSP with no egress.
         expect([...DANGEROUS_PERMISSIONS].sort()).toEqual([
+            'fs.getBytes',
             'network.proxy',
             'preview.serveNetwork',
             'preview.serveScripts',

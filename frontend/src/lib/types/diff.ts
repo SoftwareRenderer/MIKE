@@ -48,13 +48,23 @@ export interface DiffImageSource {
     committed?: DiffImageRefs;
 }
 
-/** One "View image" click, in the shape ImageDiffModal and GET /api/fs/raw want it. */
+/** One "View image" click, in the shape ImageDiffModal and GET /api/fs/read?kind=image want it. */
 export interface DiffImageRequest {
     path: string;
     displayPath: string;
     oldPath: string;
     oldRef: string;
     newRef: string;
+}
+
+/**
+ * One "Preview" click on a binary file an installed extension renders, in the shape
+ * BinaryPreviewModal and GET /api/fs/read?kind=bytes want. `baseRef` is empty when the change only created the file.
+ */
+export interface DiffBinaryPreviewRequest {
+    path: string;
+    displayPath: string;
+    baseRef: string;
 }
 
 /** One "List contents" click, in the shape ArchiveModal and GET /api/fs/archive want it. */

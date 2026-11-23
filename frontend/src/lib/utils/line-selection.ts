@@ -37,7 +37,7 @@ export function resolveGutterClickRange(
 }
 
 /**
- * The path this file's tree knows it by — what `GET /api/fs/raw` reads and what a task description header
+ * The path this file's tree knows it by — what `GET /api/fs/read` reads and what a task description header
  * names.
  *
  * The editor holds the path its listing handed over: the host path for a plain project, the container mount

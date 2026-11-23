@@ -131,7 +131,8 @@ describe('the picture the image button opens', () => {
         expect(oldImg.searchParams.get('ref')).toBe('HEAD');
         expect(newImg.searchParams.has('ref')).toBe(false);
         for (const src of [oldImg, newImg]) {
-            expect(src.pathname).toBe('/api/fs/raw');
+            expect(src.pathname).toBe('/api/fs/read');
+            expect(src.searchParams.get('kind')).toBe('image');
             expect(src.searchParams.get('project')).toBe('p1');
             expect(src.searchParams.get('task')).toBe('t1');
             expect(src.searchParams.get('path')).toBe('docs/logo.png');

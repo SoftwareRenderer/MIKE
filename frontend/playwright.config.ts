@@ -10,6 +10,9 @@ const STORAGE_STATE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolated';
 // derived from it, so the two lanes can never drift out of sync.
 const ISOLATED_SPECS = [
   'extension-frame-channel',
+  // Installs the byte-preview fixture, so it cannot share a server whose extension list someone else
+  // is reading.
+  'binary-preview',
   // Installs a translation pack from the registry fixture on the lane server — and
   // the offer it tests only exists in the no-pack state, so it cannot share a
   // server whose extension list someone else is mutating.

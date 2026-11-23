@@ -753,6 +753,8 @@ const catalog = {
     'settings.extensions.perm.createTaskEventsPaste.description': 'Can see text pasted into the task description so it can act on it.',
     'settings.extensions.perm.networkProxy.label': 'Reach external services',
     'settings.extensions.perm.networkProxy.description': 'Can make requests to external services through the server, limited to the allowed domains of its Network capability.',
+    'settings.extensions.perm.fsGetBytes.label': 'Read a file as bytes',
+    'settings.extensions.perm.fsGetBytes.description': 'Can ask for the raw bytes of the file it is showing, in whatever file types it declared when installed — including ones the editor never opens as text. It cannot name a file: only the one the person opened is reachable.',
     'settings.extensions.perm.uiSetSize.label': 'Resize its own panel',
     'settings.extensions.perm.uiSetSize.description': 'Can change the height of the space it occupies on the page.',
     'settings.extensions.perm.uiModal.label': 'Show a modal',
@@ -2048,6 +2050,7 @@ const catalog = {
 
     // ── DiffViewer ──
     'diff.binaryWithSize': 'Binary file — {size}',
+    'diff.previewBinary': 'Preview',
     'diff.largeWithSize': 'Large file — {size} (+{added}/-{removed})',
     'diff.largeFile': 'Large file — {size}',
     'diff.emptyFile': 'Empty file',
@@ -2187,6 +2190,9 @@ const catalog = {
     'editor.fileTooLarge': 'File too large to edit (max 1MB)',
     // The read refused the bytes as text; a paintable image is shown instead of this.
     'editor.binaryFile': 'Binary file — not shown in the editor',
+    'editor.binaryWithSize': 'Binary file — {size}',
+    'preview.noViewer': 'No installed extension renders this file type.',
+    'editor.previewBinary': 'Preview',
     'editor.imageFailed': 'The picture could not be loaded',
     'editor.readFailed': 'Failed to read file',
     'editor.saveFailed': 'Failed to save',

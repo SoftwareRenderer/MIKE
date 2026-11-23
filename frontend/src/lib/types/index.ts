@@ -781,6 +781,9 @@ export interface UIExtensionConfig {
     injection_points: string[];
     /** Fully-qualified capability names the extension requests (e.g. "createTask.description.insertText"). */
     permissions?: string[];
+    /** Lowercase file suffixes, no leading dot (e.g. "stl"), that this extension renders. An enabled
+     * row's list is what `GET /api/fs/read?kind=bytes` accepts a file for. */
+    file_suffixes?: string[];
 }
 
 export interface CSSExtensionConfig {

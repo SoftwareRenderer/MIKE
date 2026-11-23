@@ -39,15 +39,14 @@ export async function listFsDirectory(params: {
 }
 
 /**
- * The URL `GET /api/fs/raw` answers with one image's bytes. It is a URL rather than a fetch because the
- * caller puts it in an `<img>`: the browser then loads it itself and offers "Open image in new tab".
- * `path` is relative to the repository root; `ref` names a commit, omit it for the file on disk.
+ * The URL `GET /api/fs/read?kind=image` answers with one picture's bytes. It is a URL rather than a fetch
+ * because the caller puts it in an `<img>`: the browser then loads it itself and offers "Open image in new
+ * tab". `path` is relative to the repository root; `ref` names a commit, omit it for the file on disk.
  */
-export function rawFileURL(params: { project: string; task?: string; path: string; ref?: string }): string {
-    const query = new URLSearchParams({ project: params.project, path: params.path });
-    if (params.task) query.set('task', params.task);
-    if (params.ref) query.set('ref', params.ref);
-    return `${API_BASE}/fs/raw?${query.toString()}`;
+export function imageFileURL(params: { project: string; task?: string; path: string; ref?: string }): string {
+    const query = fileScopeQuery(params);
+    query.set('kind', 'image');
+    return `${API_BASE}/fs/read?${query.toString()}`;
 }
 
 /** The `project`/`task` pair a scoped file request carries; with neither the host jail decides. */
@@ -139,8 +138,12 @@ export class FsReadRefused extends Error {
 }
 
 /**
- * Read one file. The size cap is the server's (`maxFSReadBytes`) and it answers 413 from the stat, so a
- * 4 GB file costs one probe rather than a read; a caller that shows files has to treat that as a state.
+ * Read one file as text. `path` is relative to the repository root — the name git and the diff panels use
+ * — and the tree it is read from comes from `task`, never from the path. What a caller keys its own
+ * records by (an editor buffer, say) is the caller's business and stays out of this request.
+ *
+ * The size cap is the server's (`maxFSReadBytes`) and it answers 413 from the stat, so a 4 GB file costs
+ * one probe rather than a read; a caller that shows files has to treat that as a state.
  */
 export async function readFsFile(params: {
     path: string;

@@ -56,10 +56,41 @@ type compressEncoder interface {
 	Flush() error
 }
 
-func encodingWriter(encoding string, w io.Writer) (compressEncoder, bool) {
+// brotli's own footprint is set by its window, not by the body: at any window above ~16 KiB the writer
+// asks for ~2 MB, and at the 4 MiB default for ~18 MB whether the response is 40 KB or 400 KB. So the
+// rule is that a response never gets a window longer than its own bytes — brotli cannot look back further
+// than it has been given, and measured on real minified JS, Go outside this repo, package JSON,
+// package-lock.json, a system log, base64 of real PNGs and man-page prose, narrowing a 900 KB body from
+// the 22-bit default to a 20-bit one changed the compressed size by 0.0% on all seven.
+//
+// The ceiling is left at the library's own default rather than lowered further on purpose: above 1 MiB the
+// reach a wider window gives *is* used — prose at 4 MB came out 9.9% larger at 20 bits than at 22 — so
+// cutting it there would trade real bytes for memory the body is paying for. What is left above 1 MiB is
+// brotli's own cost, named in docs and left alone.
+const (
+	brotliMinWindowBits = 10
+	brotliMaxWindowBits = 22
+)
+
+// brotliWindowBits is the lgwin for a body of n bytes: reach enough to cover it, and no more.
+func brotliWindowBits(n int64) int {
+	bits := brotliMinWindowBits
+	for bits < brotliMaxWindowBits && (1<<bits) < n {
+		bits++
+	}
+	return bits
+}
+
+// encodingWriter makes the encoder for one response. sizeHint is how many bytes are about to go through
+// it, which is what bounds the window -- see brotliWindowBits.
+func encodingWriter(encoding string, w io.Writer, sizeHint int64) (compressEncoder, bool) {
 	switch encoding {
 	case "br":
-		return brotli.NewWriter(w), true
+		// Quality is named because WriterOptions' zero value is BestSpeed, not the default.
+		return brotli.NewWriterOptions(w, brotli.WriterOptions{
+			Quality: brotli.DefaultCompression,
+			LGWin:   brotliWindowBits(sizeHint),
+		}), true
 	case "gzip":
 		return gzip.NewWriter(w), true
 	}
@@ -194,8 +225,10 @@ func (c *compressWriter) Write(p []byte) (int, error) {
 	// flushes; an image is bytes the browser already compressed, so the GET buffer below
 	// would hold several times the file to hash an ETag, then brotli it for nothing. An
 	// `attachment` disposition is the same case: it is how a handler says the response is a
-	// file to save, not a document to render.
+	// file to save, not a document to render. Bare octet-stream says it too — the handler
+	// names no type for bytes it already validated, and answers its own revalidation.
 	if ct := c.headers.Get("Content-Type"); ct == "text/event-stream" || strings.HasPrefix(ct, "image/") ||
+		ct == "application/octet-stream" ||
 		strings.HasPrefix(c.headers.Get("Content-Disposition"), "attachment") {
 		c.passThrough()
 		return c.ResponseWriter.Write(p)
@@ -248,7 +281,12 @@ func (c *compressWriter) commit() {
 	c.committed = true
 	c.headers.Del("Content-Length")
 
-	enc, ok := encodingWriter(c.encoding, c.ResponseWriter)
+	// What is buffered plus what Content-Length promised is the best guess at the size still to come.
+	hint := int64(c.body.Len())
+	if c.contentLength > hint {
+		hint = c.contentLength
+	}
+	enc, ok := encodingWriter(c.encoding, c.ResponseWriter, hint)
 	if ok {
 		c.enc = enc
 		c.headers.Set("Content-Encoding", c.encoding)
@@ -320,7 +358,7 @@ func (c *compressWriter) writeBody(body []byte) {
 	var enc compressEncoder
 	compress := false
 	if len(body) >= minCompressSize {
-		enc, compress = encodingWriter(c.encoding, c.ResponseWriter)
+		enc, compress = encodingWriter(c.encoding, c.ResponseWriter, int64(len(body)))
 	}
 	if compress {
 		c.headers.Set("Content-Encoding", c.encoding)

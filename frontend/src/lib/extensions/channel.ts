@@ -4,6 +4,7 @@
  * Validates source, grant, args schema, then dispatches to a catalog handler.
  */
 import type {
+    HostBytesResponse,
     HostContext,
     HostHello,
     HostMessage,
@@ -352,6 +353,18 @@ export class ExtensionHostChannel {
         this.iframe.contentWindow?.postMessage(plain, '*');
     }
 
+    /**
+     * Answer a capability call with a file's bytes. Deliberately not `post()`: the stringify there is
+     * what strips `$state` proxies, and run over a Blob it posts `{}` — the extension would render an
+     * empty file and be told nothing went wrong. Structured clone carries a Blob by reference. Arming
+     * gates this payload as it gates every other host→frame send.
+     */
+    private postBytes(id: string, blob: Blob): void {
+        if (this.destroyed || !this.armed) return;
+        const msg: HostBytesResponse = { type: 'bytes', id, ok: true, byteLength: blob.size, blob };
+        this.iframe.contentWindow?.postMessage(msg, '*');
+    }
+
     private async onMessage(ev: MessageEvent) {
         if (this.destroyed) return;
         // Only accept messages from OUR sandboxed iframe: the exact window AND
@@ -418,6 +431,10 @@ export class ExtensionHostChannel {
         // Dispatch.
         try {
             const result = await def.handler(this.ctx(), args);
+            if (result instanceof Blob) {
+                this.postBytes(id, result);
+                return;
+            }
             this.post({ type: 'response', id, ok: true, data: result });
         } catch (e: any) {
             this.post({ type: 'response', id, ok: false, error: e?.message || String(e) });

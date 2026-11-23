@@ -443,6 +443,10 @@ Types: `lsp`, `ui`, `css`, `i18n`, `agent`, `llm`, `tool`.
   unacknowledged load enables nothing and copies nothing into the served tree. `docs/extension-authoring.md → Loading`.
 - **Language knowledge lives in extensions** — the core holds no language names, keyword lists or bracket
   tables, in either language. `docs/languages.md`.
+- **File-format knowledge lives in extensions too** — the core holds no format table and parses nothing. A
+  byte read is granted only by the suffix list an enabled extension row carries, a frame never names a file,
+  and the bytes travel as a `Blob` rather than as text. `docs/api-contract.md → The bytes an extension
+  previews`.
 - **The UI language is whichever `i18n` extension is enabled**; any load failure means whole-catalog English
   plus a report. `docs/i18n.md`.
 - **Agent extensions:** the backend knows nothing about agent protocols, and `EventTypePersist` is the only

@@ -76,7 +76,7 @@
     let toCommit = $state('');
     let compareDiff = $state<DiffFile[]>([]);
     // Each of the panel's two comparisons names the refs the viewer reads its sides from; a side with no ref
-    // is the file on disk, which is what `new: ''` means to GET /api/fs/raw.
+    // is the file on disk, which is what `new: ''` means to GET /api/fs/read.
     let workingImageSource = $derived<DiffImageSource>({ project: projectId, working: { old: 'HEAD' } });
     let compareImageSource = $derived<DiffImageSource>({ project: projectId, committed: { old: fromCommit, new: toCommit } });
     let compareLoading = $state(false);

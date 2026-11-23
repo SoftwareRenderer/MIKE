@@ -224,7 +224,7 @@ func TestFileSuffix(t *testing.T) {
 		{"dir.d/main.go", "go"},
 	}
 	for _, tt := range tests {
-		if got := fileSuffix(tt.name); got != tt.want {
+		if got := FileSuffix(tt.name); got != tt.want {
 			t.Errorf("fileSuffix(%q) = %q, want %q", tt.name, got, tt.want)
 		}
 	}
@@ -787,5 +787,61 @@ func TestSyntaxSpecNameRulesRoundTrip(t *testing.T) {
 	}
 	if spec.CapitalizedTypes != nil {
 		t.Errorf("CapitalizedTypes = %v, want it untouched by the other field's refusal", *spec.CapitalizedTypes)
+	}
+}
+
+func TestUIConfigValidate(t *testing.T) {
+	tests := []struct {
+		name     string
+		suffixes []string
+		wantErr  string
+	}{
+		{name: "no suffix declared is a UI extension with no byte grant", suffixes: nil, wantErr: ""},
+		{name: "a declared suffix is valid", suffixes: []string{"stl", "zbin"}, wantErr: ""},
+		{
+			name:     "empty suffix would match any name",
+			suffixes: []string{""},
+			wantErr:  "capabilities.ui.file_suffixes[0] is empty",
+		},
+		{
+			name:     "leading dot is how a path starts",
+			suffixes: []string{".env"},
+			wantErr:  "capabilities.ui.file_suffixes[0] \".env\" must be a bare suffix",
+		},
+		{
+			name:     "a slash is a path, not a suffix",
+			suffixes: []string{"git/config"},
+			wantErr:  "capabilities.ui.file_suffixes[0] \"git/config\" must be a bare suffix",
+		},
+		{
+			name:     "uppercase never matches",
+			suffixes: []string{"STL"},
+			wantErr:  "capabilities.ui.file_suffixes[0] \"STL\" must be lowercase",
+		},
+		{
+			name:     "the same suffix twice",
+			suffixes: []string{"stl", "stl"},
+			wantErr:  "capabilities.ui.file_suffixes[1] \"stl\" is declared twice",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &UIConfig{InjectionPoints: []string{"fileEditor"}, FileSuffixes: tt.suffixes}
+			err := c.Validate()
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("valid declaration refused: %v", err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want one naming %q", err, tt.wantErr)
+			}
+		})
+	}
+
+	// A manifest with no ui block is not a bad manifest; every caller of GetUI() may hold nil.
+	if err := ((*Capabilities)(nil)).GetUI().Validate(); err != nil {
+		t.Errorf("nil UI capability refused: %v", err)
 	}
 }

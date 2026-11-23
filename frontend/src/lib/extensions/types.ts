@@ -10,6 +10,11 @@ export const INJECTION_POINTS = {
     PROJECT_SIDEBAR: 'projectSidebar',
     FILE_BROWSER: 'fileBrowser',
     CREATE_TASK: 'createTask',
+    /**
+     * The body of the Preview a binary file gets when an extension declared it renders that file, the
+     * affordance beside an image's "View image". The mount context names the file the frame may read.
+     */
+    BINARY_PREVIEW: 'binaryPreview',
 } as const;
 
 export type InjectionPoint = (typeof INJECTION_POINTS)[keyof typeof INJECTION_POINTS];
@@ -79,3 +84,17 @@ export type HostMessage =
     | { type: 'event'; cap: string; data: any }
     | HostHello
     | { type: 'exthello-request' };
+
+/**
+ * One file's bytes, answered outside `HostMessage` because it cannot survive it: the JSON round-trip
+ * that strips Svelte proxies turns a `Blob` into `{}`. Structured clone carries it by reference instead.
+ * The byte direction that matters is this one — a frame reads a file, it cannot post one back.
+ */
+export interface HostBytesResponse {
+    type: 'bytes';
+    id: string;
+    ok: true;
+    /** What the host read, which the extension checks before it parses. */
+    byteLength: number;
+    blob: Blob;
+}

@@ -60,6 +60,14 @@
             pending.delete(msg.id);
             if (msg.ok) p.resolve(msg.data);
             else p.reject(new Error(msg.error || 'host call failed'));
+        } else if (msg.type === 'bytes') {
+            // A file's bytes arrive on their own frame: the host's stringify would have left `{}` where
+            // they were. `call()` resolves to the Blob itself, for the extension to read as it likes.
+            const p = pending.get(msg.id);
+            if (!p) return;
+            pending.delete(msg.id);
+            if (msg.ok) p.resolve({ blob: msg.blob, byteLength: msg.byteLength });
+            else p.reject(new Error(msg.error || 'host call failed'));
         } else if (msg.type === 'event') {
             const set = handlers.get(msg.cap);
             if (!set) return;
@@ -170,6 +178,16 @@
         },
 
         log: (level, message) => call('log.write', { level: level || 'info', message: String(message || '') }),
+
+        fs: {
+            /**
+             * The file this frame was mounted on, as the bytes on disk — resolves to
+             * { blob, byteLength }. `side` is 'working' (the tree) or 'base' (what the diff compares
+             * against); which file is the host's decision, taken from the mount context, so an
+             * extension cannot ask for a file the person never opened.
+             */
+            getBytes: (side) => call('fs.getBytes', { side: String(side || 'working') }),
+        },
 
         loading: (message) => call('ui.status', { state: 'loading', message: String(message || '') }),
 

@@ -441,6 +441,12 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	// PUT replaces the whole capabilities object, so the read grant is vetted here too.
+	if err := ext.Manifest.Capabilities.GetUI().Validate(); err != nil {
+		http.Error(w, "extension declares unusable file suffixes: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
 	// The stored declaration decides what the model may call and where, so an update is vetted too.
 	if err := validateTools(ext.Manifest.Capabilities, ext.Manifest.ConfigSchema); err != nil {
 		http.Error(w, "extension declares an unusable tool: "+err.Error(), http.StatusBadRequest)
@@ -1534,6 +1540,11 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, ackNewD
 				fail(fmt.Errorf("extension %s declares an unusable stylesheet: %w", entry.Name, err))
 				return
 			}
+			// The new commit's read grant is vetted before it replaces the stored one.
+			if err := m.Capabilities.GetUI().Validate(); err != nil {
+				fail(fmt.Errorf("extension %s declares unusable file suffixes: %w", entry.Name, err))
+				return
+			}
 			if err := validateTools(m.Capabilities, m.ConfigSchema); err != nil {
 				fail(fmt.Errorf("extension %s declares an unusable tool: %w", entry.Name, err))
 				return
@@ -1755,6 +1766,8 @@ func (h *ExtensionHandler) HandleStorage(w http.ResponseWriter, r *http.Request,
 		}
 		httputil.JSONResponse(w, http.StatusOK, entries)
 	case http.MethodPut:
+		// Bounded before it is read; see storageBodyLimit.
+		r.Body = http.MaxBytesReader(w, r.Body, storageBodyLimit)
 		var req struct {
 			Namespace string         `json:"namespace"`
 			Key       string         `json:"key"`

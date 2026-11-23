@@ -141,7 +141,7 @@ func TestFSForeignTaskIsRejected(t *testing.T) {
 	// The foreign task id alone reaches nothing, whichever fs endpoint asks.
 	for _, target := range []string{
 		"/api/fs?" + url.Values{"path": {b.Path}, "project": {a.ID}, "task": {foreign}}.Encode(),
-		"/api/fs/read?" + url.Values{"path": {filepath.Join(b.Path, "x.go")}, "project": {a.ID}, "task": {foreign}}.Encode(),
+		"/api/fs/read?" + url.Values{"path": {"x.go"}, "project": {a.ID}, "task": {foreign}}.Encode(),
 	} {
 		req := testRequest(http.MethodGet, target, nil)
 		withAuthCSRF(req, cookie, csrf)

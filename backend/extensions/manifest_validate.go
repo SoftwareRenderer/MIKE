@@ -293,6 +293,33 @@ func (c *CSSConfig) Validate() error {
 	return validateAssetRelPath("capabilities.css.css_url", c.CSSURL, true)
 }
 
+// Validate checks a UI extension's declaration shape. file_suffixes is the one manifest field that
+// grants a read, so a value that could name a path or escape the lowercase comparison is refused here
+// rather than honoured later.
+func (c *UIConfig) Validate() error {
+	if c == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	for i, suffix := range c.FileSuffixes {
+		where := fmt.Sprintf("capabilities.ui.file_suffixes[%d]", i)
+		if suffix == "" {
+			return fmt.Errorf("%s is empty", where)
+		}
+		if strings.ContainsAny(suffix, "./\\ ") {
+			return fmt.Errorf("%s %q must be a bare suffix (no dot, slash or space)", where, suffix)
+		}
+		if suffix != strings.ToLower(suffix) {
+			return fmt.Errorf("%s %q must be lowercase — a suffix is matched against the lowercased file extension", where, suffix)
+		}
+		if seen[suffix] {
+			return fmt.Errorf("%s %q is declared twice", where, suffix)
+		}
+		seen[suffix] = true
+	}
+	return nil
+}
+
 // validateLocale accepts one bare language subtag.
 //
 // Strict on purpose, and the error says so: "zh-CN" and "zh-TW" are not the same language, and a

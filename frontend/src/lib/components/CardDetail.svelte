@@ -217,7 +217,7 @@
         chatMaximize = chatManualToggleState(chatMaximize);
     }
 
-    /** The container root this task's tree is listed by — the name the raw route and the explorer both
+    /** The container root this task's tree is listed by — the name the read route and the explorer both
      *  address it by; '' when the task runs on the host. */
     let containerPath = $derived(sandboxEnabled && projectName ? sandboxMountPath(projectName) : '');
 

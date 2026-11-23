@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 
 	"mike/backend/errs"
 	"mike/backend/types"
@@ -29,16 +30,26 @@ func JSONError(w http.ResponseWriter, status int, message string) {
 // value it replaces did.
 var internalErrorBody = []byte(`{"error":"internal error"}`)
 
+// jsonBuffers recycles the encode buffer. Encoding into a fresh bytes.Buffer costs 5.3x the body — v2
+// keeps an encode buffer of its own beside the caller's, so a 900 KB file read asks for 4.8 MB — and a
+// buffer that has been that large before asks for nothing. sync.Pool gives the memory back at the next
+// GC, so an idle server does not hold the largest response it ever sent.
+var jsonBuffers = sync.Pool{New: func() any { return new(bytes.Buffer) }}
+
 // writeJSON encodes the whole value before any of the answer is on the wire, because a status already sent
 // cannot be retracted: marshalling straight to the ResponseWriter leaves a success code with a short body
 // behind it whenever the encoder refuses the value. The one class it refuses here is a string holding bytes
 // that are not valid UTF-8 — what a file's contents are when a route reads one as text — and such a value
 // describes no body, so the answer is Fail's default arm with the cause in the log. Every body here comes
 // from a read already capped, so the buffer costs nothing the route did not already allow.
-// docs/api-contract.md → Raw file bytes.
+// docs/api-contract.md → Reading one file: text, a picture, or bytes.
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	var body bytes.Buffer
-	if err := json.MarshalWrite(&body, v); err != nil {
+	body := jsonBuffers.Get().(*bytes.Buffer)
+	defer func() {
+		body.Reset()
+		jsonBuffers.Put(body)
+	}()
+	if err := json.MarshalWrite(body, v); err != nil {
 		logging.For(logging.HTTP).Errorf("response body could not be encoded: %v", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)

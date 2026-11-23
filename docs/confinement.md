@@ -60,8 +60,8 @@ projects too because the server process enforces them.
   the same race one level up: `os.MkdirAll` resolves the path it is handed, so `POST /api/fs/mkdir`
   creates through the contained `Lstat`+`Mkdir` walk over the request's own roots (`projectFSRoots`),
   which is what the no-project jail already does — `TestFSMkdirProjectScoped`.
-  `openJailedFile` is the same rule with the response mapping on top, which `/api/fs/raw`,
-  `/api/fs/download` and the archive listing already used. A tree walked a name at a time is the same race at every entry: the
+  `openJailedFile` is the same rule with the response mapping on top, which both byte kinds of
+  `GET /api/fs/read`, `/api/fs/download` and the archive listing use. A tree walked a name at a time is the same race at every entry: the
   folder download's archive (`writeTarOne`, whose header comes from the walk's own lstat) and the host
   paste (`copyFile`), both in `backend/fsutil/`. A swapped name there is how a file outside the project
   reaches the browser, or lands inside it where the task can read it. No `/api/fs` route has a container
@@ -74,6 +74,12 @@ projects too because the server process enforces them.
   `TestOpenCheckedCallsALinkAtTheNameASwapNotAnIrregularFile`,
   `TestWriteTarOneRefusesANameTheWalkNoLongerRecognises`,
   `TestCopyEntryRefusesANameTheWalkNoLongerRecognises`.
+- **The byte kind of `GET /api/fs/read` is a host read like every other file route.** It asks the same
+  questions in the same order. `fsRequestScope` jails the request, `requireNoGitSegment` refuses before the
+  open, `openJailedFile` opens the working tree, and a `?ref=` reads the project checkout's object database.
+  What it adds is a gate in front of all of them: a suffix no enabled extension row declared is refused before
+  the jail is asked anything, so a file every file route can read is still not a file anything may preview. The
+  refusal reads the stored row, never the request. Tests: `backend/server/handler_fs_bytes_test.go`.
 - **A container spelling is translated before the jail looks at it.** `validateFSPath` turns
   `/home/sandbox/<project>/…` into the host file it stands for — `sandbox.ContainerToHost` against the tree
   the request names, `project.Path` when it named no task — and jails *that*. The spelling is not a host
@@ -99,15 +105,17 @@ projects too because the server process enforces them.
   `fsWorktreeRoot` → `requireSandboxAvailable` → `ContainerToHost` → `validateFSPath` are each the jail
   for the next, so a handler that drops one — or passes `""` where the worktree root belongs — writes
   outside the project and still compiles.
-- **`GET /api/fs/raw` takes a repository-relative path, so it jails the join.** The diff surfaces hold
-  paths relative to the repository root and pass those. The handler refuses an absolute or `..`-stepping
-  path, joins what is left to `fsWorktreeRoot`'s tree, and hands the result to the same `validateFSPath`.
-  Its own rule is what a response may *be* — one map of image extensions, which is the permission and the
-  `Content-Type` at once — so a request cannot aim the route at a file that would run in the browser.
-  Two things follow from reading a file a task is alive next to: the name is `lstat`ed and compared with
-  the opened file, because the task owns the directory the check just resolved, and `ref` reads from
-  **`project.Path`** — the tree the request names is the project's, not the task's, since worktrees share
-  one object database and a done task has no worktree left to name. `docs/api-contract.md → Raw file bytes`.
+- **`GET /api/fs/read` takes a repository-relative path for every kind, so it jails the join.** The diff
+  surfaces hold paths relative to the repository root and pass those. The handler refuses an absolute or
+  `..`-stepping path, joins what is left to `fsWorktreeRoot`'s tree, and hands the result to the same
+  `validateFSPath`. Each kind adds its own rule about what a response may *be*: one map of image
+  extensions, which is the permission and the `Content-Type` at once, or one suffix list from an enabled row.
+  A request therefore cannot aim the route at a file that would run in the browser.
+  Two things follow from reading a file a task is alive next to. The name is `lstat`ed and compared with
+  the opened file, because the task owns the directory the check just resolved. And `ref` reads from
+  **`project.Path`**: the tree the request names is the project's, not the task's, since worktrees share
+  one object database and a done task has no worktree left to name.
+  `docs/api-contract.md → Reading one file: text, a picture, or bytes`.
 - **A download jails every path of the batch it names.** `GET /api/fs/download` takes a repeated
   `?path=`: the host or container paths the listing handed the browser. Each one is settled through
   `fsRequestScope` then `fsScopeTarget` before any of them opens, so a selection whose last row leaves
@@ -133,10 +141,10 @@ projects too because the server process enforces them.
   outside the project moves nothing, and no path can be checked against a tree other than the one the request
   named. These four run on the host filesystem for a sandboxed project too — the bind mount's bytes are there,
   exactly as `POST /api/fs/write` — which is why the translation, not the request body, decides the host path.
-- **Two refusals live inside the jail and are still refused**: any `.git` component
-  (`fsutil.ErrGitPath` — including a worktree's `.git` *file*, whose removal no in-worktree command can undo)
-  and a tree root or its ancestor (`fsutil.ErrProtectedPath`: the project's checkout and the task's own
-  worktree, directories this server created and tears down elsewhere — `docs/commit-and-done.md`). Both are
+- **Two refusals live inside the jail and are still refused.** One is any `.git` component
+  (`fsutil.ErrGitPath` — including a worktree's `.git` *file*, whose removal no in-worktree command can undo).
+  The other is a tree root or its ancestor (`fsutil.ErrProtectedPath`: the project's checkout and the task's
+  own worktree, directories this server created and tears down elsewhere — `docs/commit-and-done.md`). Both are
   answered **per item**, beside the path they happened to, because a batch is a person's selection and one
   wrong row should not cost the rest of it. Only a containment failure, which is the jail rather than one
   row's bad luck, fails the whole request. A nested `.git` directory is skipped by both the size walk and the
@@ -150,10 +158,10 @@ projects too because the server process enforces them.
   `docs/api-contract.md → The directory listing's ignored rows`.
   `go test ./backend/server/ -run 'TestFSWriteRefusesAGitPath|TestFSMkdirRejectsAPathInsideTheRepository'`
   holds those routes.
-- **Every bound runs before the bytes** (`backend/fsutil/ops.go`): a copy walks its tree and refuses past
-  `CopyMaxBytes` (64 MiB), `CopyMaxEntries` (5000) or `CopyMaxDepth` (32), the copy loop re-counts as it writes
-  (the walk is the refusal, the running total is the bound against a tree a task is still writing into), and a
-  copy that fails removes what it wrote, so a refused copy leaves no half-tree behind. The request's own bound
+- **Every bound runs before the bytes** (`backend/fsutil/ops.go`). A copy walks its tree and refuses past
+  `CopyMaxBytes` (64 MiB), `CopyMaxEntries` (5000) or `CopyMaxDepth` (32). The copy loop re-counts as it
+  writes: the walk is the refusal, and the running total is the bound against a tree a task is still writing
+  into. A copy that fails removes what it wrote, so a refused copy leaves no half-tree behind. The request's own bound
   sits beside it: at most `maxFSOpsBatch` (100) paths, and the `name copy`, `name copy2` search stops at
   `UniqueNameMaxTries` (200). Without them a paste of `node_modules` is unbounded work inside one HTTP request.
 - **The one file route with no size refusal is the one that captures nothing.** `GET /api/fs/download`
@@ -197,7 +205,7 @@ path with `MIKE_ALLOW_ROOT_FS=1`.
 
 - `ensureDocSync` (`backend/lsp/extension_manager.go`) reads the file it is about to
   `didOpen`/`didChange` **with the server's own privileges** — the one host read left after `hostGuard`
-  refused the tool's own — and its `filePath` is a tool argument joined to the workspace, so
+  refused the tool's own. Its `filePath` is a tool argument joined to the workspace, so
   `readDocForSync` runs it through `fsutil.Contained` and then opens the file that check named. Without
   the first half a `..`-escaping `path` on an LSP tool call or a diagnostics pass reads any file the
   server user can open. Without the second half, the text sent to a language server inside the task's own
@@ -250,9 +258,12 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   bounds the process; this bounds the conversation. This cut lands past the capture's own trailing marker,
   so where the capture dropped bytes, its count is reported to the log at this cut instead of reaching the
   model. `backend/exec/output_limits_test.go` is what fails when a path skips it.
-- `GET /api/fs/read` checks size **before** reading — `os.Lstat` for the working tree,
-  `git cat-file -s` (`gitBlobSize`) for `?ref=` — so a request for a 4 GB file costs one subprocess
-  instead of 4 GB.
+- **Each kind of `GET /api/fs/read` prices its own ceiling before the open.** Text and a picture answer
+  413 from `os.Lstat` for a working tree and `gitBlobSize` for `?ref=`, so a request for a 4 GB file costs
+  one subprocess instead of 4 GB. The byte kind asks at `maxExtensionReadBytes`: the copy is `io.CopyN` to
+  that same number, so a file that grew between the stat and the read cannot stream past it — the preview is
+  a render, and a tab holds what it renders. Tests:
+  `backend/server/handler_fs_bytes_test.go`.
 - What crosses the sandbox bridge is bounded the same way: `protocol.MaxFramePayload` is checked before
   `ReadFrame` allocates from the declared length, `protocol.MaxReadBytes` is enforced in the guest *and*
   on the host's chunk collector (a stale bridge must not be able to stream past it), and a sandboxed

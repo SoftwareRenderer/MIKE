@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -52,7 +53,7 @@ func TestSelectEncoding(t *testing.T) {
 
 func TestEverySelectableEncodingHasAWriter(t *testing.T) {
 	for encoding := range encodingPriority {
-		if _, ok := encodingWriter(encoding, io.Discard); !ok {
+		if _, ok := encodingWriter(encoding, io.Discard, 1); !ok {
 			t.Errorf("selectEncoding can answer %q, which encodingWriter cannot produce", encoding)
 		}
 	}
@@ -594,4 +595,51 @@ func TestEtagMatches(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The compressor's window is what its memory costs, so the two claims worth pinning are that it never
+// outreaches the body and that narrowing it costs no bytes on the bodies this server serves.
+func TestBrotliWindowCoversTheBodyAndNoMore(t *testing.T) {
+	for _, tc := range []struct {
+		body int64
+		want int
+	}{
+		{0, brotliMinWindowBits},
+		{1 << 10, 10},
+		{1<<10 + 1, 11},
+		{900_000, 20},
+		{1 << 20, 20},
+		{1<<20 + 1, 21},
+		{1 << 22, 22},
+		{64 << 20, brotliMaxWindowBits},
+	} {
+		if got := brotliWindowBits(tc.body); got != tc.want {
+			t.Errorf("brotliWindowBits(%d) = %d, want %d", tc.body, got, tc.want)
+		}
+	}
+
+	body := compressibleBody(200_000)
+	for _, size := range []int{4_000, 200_000} {
+		windowed := brotliCompress(t, body[:size], brotliWindowBits(int64(size)))
+		full := brotliCompress(t, body[:size], brotliMaxWindowBits)
+		// The window is worth its memory only if it buys bytes back. Measured on the repository's own
+		// files, narrowing it to the body costs under 1%; a larger gap here means the ceiling is wrong.
+		if drift := math.Abs(float64(windowed-full)) / float64(full); drift > 0.05 {
+			t.Errorf("body %d B: window %d compressed %d B against %d B at a wider window, %.1f%% apart",
+				size, brotliWindowBits(int64(size)), windowed, full, drift*100)
+		}
+	}
+}
+
+func brotliCompress(t *testing.T, body []byte, lgwin int) int {
+	t.Helper()
+	var out bytes.Buffer
+	e := brotli.NewWriterOptions(&out, brotli.WriterOptions{Quality: brotli.DefaultCompression, LGWin: lgwin})
+	if _, err := e.Write(body); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return out.Len()
 }

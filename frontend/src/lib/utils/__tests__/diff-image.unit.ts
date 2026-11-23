@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { isDisplayableImage, imageSides } from '$lib/utils/diff-image';
-import { rawFileURL } from '$lib/api/fs';
+import { imageFileURL } from '$lib/api/fs';
 
 // Which files get a "View image" button, and what clicking one asks for.
 
@@ -35,20 +35,20 @@ describe('how many sides a changed image has', () => {
 });
 
 describe('the URL a pane loads', () => {
-    it('names the project, the path and nothing else by default', () => {
-        expect(rawFileURL({ project: 'p1', path: 'docs/logo.png' }))
-            .toBe('/api/fs/raw?project=p1&path=docs%2Flogo.png');
+    it('names the project, the path and the picture kind and nothing else by default', () => {
+        expect(imageFileURL({ project: 'p1', path: 'docs/logo.png' }))
+            .toBe('/api/fs/read?path=docs%2Flogo.png&project=p1&kind=image');
     });
 
     it('carries the task whose worktree holds the file, and the commit to read it from', () => {
-        const url = new URL(rawFileURL({ project: 'p1', task: 't 1', path: 'a b.png', ref: 'deadbeef' }), 'http://x');
+        const url = new URL(imageFileURL({ project: 'p1', task: 't 1', path: 'a b.png', ref: 'deadbeef' }), 'http://x');
         expect(url.searchParams.get('task')).toBe('t 1');
         expect(url.searchParams.get('path')).toBe('a b.png');
         expect(url.searchParams.get('ref')).toBe('deadbeef');
     });
 
     it('omits an empty task or ref rather than asking for the root of the tree', () => {
-        const url = new URL(rawFileURL({ project: 'p1', task: '', path: 'x.png', ref: '' }), 'http://x');
+        const url = new URL(imageFileURL({ project: 'p1', task: '', path: 'x.png', ref: '' }), 'http://x');
         expect(url.searchParams.has('task')).toBe(false);
         expect(url.searchParams.has('ref')).toBe(false);
     });

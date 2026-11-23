@@ -18,7 +18,7 @@ import (
 )
 
 // One pixel of PNG: the bytes that come back are then recognisable as the file, not as padding.
-var rawPNG = []byte{
+var pngFixture = []byte{
 	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
 	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
 	0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
@@ -26,8 +26,8 @@ var rawPNG = []byte{
 	0x42, 0x60, 0x82,
 }
 
-// rawImageProject registers a project whose checkout holds the named files, all committed.
-func rawImageProject(t *testing.T, s *Server, projectID string, files map[string][]byte) (string, string) {
+// committedProject registers a project whose checkout holds the named files, all committed.
+func committedProject(t *testing.T, s *Server, projectID string, files map[string][]byte) (string, string) {
 	t.Helper()
 	repo := t.TempDir()
 	if err := s.store.CreateProject(&types.Project{ID: projectID, Name: projectID, Path: repo}); err != nil {
@@ -54,14 +54,15 @@ func rawImageProject(t *testing.T, s *Server, projectID string, files map[string
 	return projectID, repo
 }
 
-// rawImageGet asks for one file, optionally from a ref and optionally under a task.
-func rawImageGet(t *testing.T, s *Server, query url.Values) *httptest.ResponseRecorder {
+// imageGet asks GET /api/fs/read for one file's bytes as the picture kind.
+func imageGet(t *testing.T, s *Server, query url.Values) *httptest.ResponseRecorder {
 	t.Helper()
-	req := testRequest(http.MethodGet, "/api/fs/raw?"+query.Encode(), nil)
-	return testResponseAuth(t, s, req)
+	return readKindGet(t, s, fsKindImage, query)
 }
 
-func rawQuery(projectID, path, ref, task string) url.Values {
+// readQuery is the scope every file read carries: which project, which name in it, and which tree —
+// the working one or a commit's — the name is read from.
+func readQuery(projectID, path, ref, task string) url.Values {
 	q := url.Values{"project": {projectID}, "path": {path}}
 	if ref != "" {
 		q.Set("ref", ref)
@@ -72,20 +73,20 @@ func rawQuery(projectID, path, ref, task string) url.Values {
 	return q
 }
 
-// TestFSRawServesAnImageFromTheWorktree: the bytes of a binary file, intact, with the Content-Type a
+// TestFSImageServesAnImageFromTheWorktree: the bytes of a binary file, intact, with the Content-Type a
 // browser paints. /api/fs/read cannot answer this — its JSON string replaces invalid bytes.
-func TestFSRawServesAnImageFromTheWorktree(t *testing.T) {
+func TestFSImageServesAnImageFromTheWorktree(t *testing.T) {
 	s := testServer(t)
-	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"docs/logo.png": rawPNG})
+	id, _ := committedProject(t, s, "p1", map[string][]byte{"docs/logo.png": pngFixture})
 
-	rr := rawImageGet(t, s, rawQuery(id, "docs/logo.png", "", ""))
+	rr := imageGet(t, s, readQuery(id, "docs/logo.png", "", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
 	if got := rr.Header().Get("Content-Type"); got != "image/png" {
 		t.Errorf("Content-Type = %q, want image/png", got)
 	}
-	if got := rr.Body.Bytes(); !bytes.Equal(got, rawPNG) {
+	if got := rr.Body.Bytes(); !bytes.Equal(got, pngFixture) {
 		t.Errorf("body = %d bytes starting %x, want the file's own bytes", len(got), got[:min(8, len(got))])
 	}
 	if got := rr.Header().Get("Cache-Control"); got != "no-store" {
@@ -96,17 +97,17 @@ func TestFSRawServesAnImageFromTheWorktree(t *testing.T) {
 	}
 }
 
-// TestFSRawRefusesWhatItCannotPaint: the extension table is the permission, so a format that could run
+// TestFSImageRefusesWhatItCannotPaint: the extension table is the permission, so a format that could run
 // is refused by name. SVG is the row that matters — markup, a common repo asset, loaded by an <img>.
-func TestFSRawRefusesWhatItCannotPaint(t *testing.T) {
+func TestFSImageRefusesWhatItCannotPaint(t *testing.T) {
 	body := []byte("<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'></svg>")
 	s := testServer(t)
-	id, _ := rawImageProject(t, s, "p1", map[string][]byte{
+	id, _ := committedProject(t, s, "p1", map[string][]byte{
 		"icon.svg": body, "notes.txt": body, "README": body, "page.html": body, "script.png.sh": body,
 	})
 
 	for _, name := range []string{"icon.svg", "notes.txt", "README", "page.html", "script.png.sh"} {
-		rr := rawImageGet(t, s, rawQuery(id, name, "", ""))
+		rr := imageGet(t, s, readQuery(id, name, "", ""))
 		if rr.Code != http.StatusUnsupportedMediaType {
 			t.Errorf("%s: status = %d, want 415", name, rr.Code)
 		}
@@ -116,17 +117,17 @@ func TestFSRawRefusesWhatItCannotPaint(t *testing.T) {
 	}
 }
 
-// TestFSRawRefusesAPathAboveTheProject covers an absolute path, a step above the root, a Windows drive
+// TestFSImageRefusesAPathAboveTheProject covers an absolute path, a step above the root, a Windows drive
 // path, and a symlink planted inside the repository — the last one because a lexical check reads right
 // through it.
-func TestFSRawRefusesAPathAboveTheProject(t *testing.T) {
+func TestFSImageRefusesAPathAboveTheProject(t *testing.T) {
 	s := testServer(t)
 	secretDir := t.TempDir()
 	secret := filepath.Join(secretDir, "key.png")
 	if err := os.WriteFile(secret, []byte("SECRET"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"link.png": rawPNG})
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"link.png": pngFixture})
 	full := filepath.Join(repo, "link.png")
 	if err := os.Remove(full); err != nil {
 		t.Fatal(err)
@@ -142,7 +143,7 @@ func TestFSRawRefusesAPathAboveTheProject(t *testing.T) {
 		"drive path":      "C:/Windows/win.ini",
 	}
 	for name, path := range rows {
-		rr := rawImageGet(t, s, rawQuery(id, path, "", ""))
+		rr := imageGet(t, s, readQuery(id, path, "", ""))
 		if rr.Code >= 200 && rr.Code < 300 {
 			t.Errorf("%s: status = %d, want a refusal", name, rr.Code)
 		}
@@ -152,39 +153,39 @@ func TestFSRawRefusesAPathAboveTheProject(t *testing.T) {
 	}
 }
 
-// TestFSRawServesANameCarryingAColon: the refusal above is for a drive path, not for any name with a
+// TestFSImageServesANameCarryingAColon: the refusal above is for a drive path, not for any name with a
 // colon in it.
-func TestFSRawServesANameCarryingAColon(t *testing.T) {
+func TestFSImageServesANameCarryingAColon(t *testing.T) {
 	s := testServer(t)
-	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"shots/a:b.png": rawPNG})
+	id, _ := committedProject(t, s, "p1", map[string][]byte{"shots/a:b.png": pngFixture})
 
-	rr := rawImageGet(t, s, rawQuery(id, "shots/a:b.png", "", ""))
+	rr := imageGet(t, s, readQuery(id, "shots/a:b.png", "", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
 }
 
-// TestFSRawRefusesATaskOfAnotherProject: ?project and ?task arrive uncorrelated.
-func TestFSRawRefusesATaskOfAnotherProject(t *testing.T) {
+// TestFSImageRefusesATaskOfAnotherProject: ?project and ?task arrive uncorrelated.
+func TestFSImageRefusesATaskOfAnotherProject(t *testing.T) {
 	s := testServer(t)
-	a, _ := rawImageProject(t, s, "pa", map[string][]byte{"logo.png": rawPNG})
-	b, _ := rawImageProject(t, s, "pb", map[string][]byte{"logo.png": rawPNG})
+	a, _ := committedProject(t, s, "pa", map[string][]byte{"logo.png": pngFixture})
+	b, _ := committedProject(t, s, "pb", map[string][]byte{"logo.png": pngFixture})
 	if err := s.store.CreateTask(&types.Task{ID: "tb", ProjectID: b, Title: "tb", Status: types.StatusDone}); err != nil {
 		t.Fatal(err)
 	}
 
-	rr := rawImageGet(t, s, rawQuery(a, "logo.png", "", "tb"))
+	rr := imageGet(t, s, readQuery(a, "logo.png", "", "tb"))
 	if rr.Code == http.StatusOK {
 		t.Fatal("a task of another project was honoured")
 	}
 }
 
-// TestFSRawServesAnImageReachedThroughAProjectSymlink: containment resolves the path before
+// TestFSImageServesAnImageReachedThroughAProjectSymlink: containment resolves the path before
 // opening it, so a symlink filed inside the repository still answers — the swap detector reads the
 // resolved name, not the link.
-func TestFSRawServesAnImageReachedThroughAProjectSymlink(t *testing.T) {
+func TestFSImageServesAnImageReachedThroughAProjectSymlink(t *testing.T) {
 	s := testServer(t)
-	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"vendor/logo.png": rawPNG, "link.png": rawPNG})
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"vendor/logo.png": pngFixture, "link.png": pngFixture})
 	full := filepath.Join(repo, "link.png")
 	if err := os.Remove(full); err != nil {
 		t.Fatal(err)
@@ -193,25 +194,25 @@ func TestFSRawServesAnImageReachedThroughAProjectSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rr := rawImageGet(t, s, rawQuery(id, "link.png", "", ""))
+	rr := imageGet(t, s, readQuery(id, "link.png", "", ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
-	if !bytes.Equal(rr.Body.Bytes(), rawPNG) {
+	if !bytes.Equal(rr.Body.Bytes(), pngFixture) {
 		t.Error("the symlink served something other than the linked image")
 	}
 }
 
-// TestFSRawRefusesADirectoryNamedLikeAnImage: the extension check runs on the name, so a directory only
+// TestFSImageRefusesADirectoryNamedLikeAnImage: the extension check runs on the name, so a directory only
 // meets the regular-file rule after the jail.
-func TestFSRawRefusesADirectoryNamedLikeAnImage(t *testing.T) {
+func TestFSImageRefusesADirectoryNamedLikeAnImage(t *testing.T) {
 	s := testServer(t)
-	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"logo.png": pngFixture})
 	if err := os.Mkdir(filepath.Join(repo, "traps.png"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	rr := rawImageGet(t, s, rawQuery(id, "traps.png", "", ""))
+	rr := imageGet(t, s, readQuery(id, "traps.png", "", ""))
 	if rr.Code != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400: %s", rr.Code, rr.Body.String())
 	}
@@ -220,17 +221,17 @@ func TestFSRawRefusesADirectoryNamedLikeAnImage(t *testing.T) {
 	}
 }
 
-// TestFSRawRefusalNamesNoHostPath: every caller answers a containment refusal with err.Error(), so
+// TestFSImageRefusalNamesNoHostPath: every caller answers a containment refusal with err.Error(), so
 // the resolved target of a symlink committed into a repository must never reach that error — it
 // would let a crafted repository read the server's directory layout back out.
-func TestFSRawRefusalNamesNoHostPath(t *testing.T) {
+func TestFSImageRefusalNamesNoHostPath(t *testing.T) {
 	s := testServer(t)
 	hidden := t.TempDir()
 	target := filepath.Join(hidden, "id_ed25519.png")
 	if err := os.WriteFile(target, []byte("SECRET"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"link.png": rawPNG})
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"link.png": pngFixture})
 	full := filepath.Join(repo, "link.png")
 	if err := os.Remove(full); err != nil {
 		t.Fatal(err)
@@ -239,7 +240,7 @@ func TestFSRawRefusalNamesNoHostPath(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	rr := rawImageGet(t, s, rawQuery(id, "link.png", "", ""))
+	rr := imageGet(t, s, readQuery(id, "link.png", "", ""))
 	if rr.Code == http.StatusOK {
 		t.Fatal("a symlink out of the project was served")
 	}
@@ -250,11 +251,11 @@ func TestFSRawRefusalNamesNoHostPath(t *testing.T) {
 	}
 }
 
-// TestFSRawRefBranchRefusesAnOversizedBlob: the ref branch caps on `git cat-file -s` and again in
+// TestFSImageRefBranchRefusesAnOversizedBlob: the ref branch caps on `git cat-file -s` and again in
 // the read, so a refusal must not cost the 20MB it refused.
-func TestFSRawRefBranchRefusesAnOversizedBlob(t *testing.T) {
+func TestFSImageRefBranchRefusesAnOversizedBlob(t *testing.T) {
 	s := testServer(t)
-	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"logo.png": pngFixture})
 	big := bytes.Repeat([]byte{0x5a}, (exec.MaxUploadBytes)+(1<<20))
 	if err := os.WriteFile(filepath.Join(repo, "big.png"), big, 0o644); err != nil {
 		t.Fatal(err)
@@ -265,7 +266,7 @@ func TestFSRawRefBranchRefusesAnOversizedBlob(t *testing.T) {
 	var before, after runtime.MemStats
 	runtime.GC()
 	runtime.ReadMemStats(&before)
-	rr := rawImageGet(t, s, rawQuery(id, "big.png", "HEAD", ""))
+	rr := imageGet(t, s, readQuery(id, "big.png", "HEAD", ""))
 	runtime.ReadMemStats(&after)
 
 	if rr.Code != http.StatusRequestEntityTooLarge {
@@ -276,12 +277,12 @@ func TestFSRawRefBranchRefusesAnOversizedBlob(t *testing.T) {
 	}
 }
 
-// TestFSRawImageIsNotBufferedOrRecompressed: a browser asks with Accept-Encoding, and CompressMiddleware
+// TestFSImageImageIsNotBufferedOrRecompressed: a browser asks with Accept-Encoding, and CompressMiddleware
 // buffers every GET body to hash an ETag. For an image that costs several times the file in memory and
 // brotli-compresses bytes a codec already compressed, so the route's own cap stops being the bound.
-func TestFSRawImageIsNotBufferedOrRecompressed(t *testing.T) {
+func TestFSImageImageIsNotBufferedOrRecompressed(t *testing.T) {
 	s := testServer(t)
-	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"logo.png": pngFixture})
 	const size = 6 << 20
 	payload := make([]byte, size) // incompressible, like a real image
 	for i := range payload {
@@ -291,7 +292,7 @@ func TestFSRawImageIsNotBufferedOrRecompressed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	req := testRequest(http.MethodGet, "/api/fs/raw?"+rawQuery(id, "shot.png", "", "").Encode(), nil)
+	req := readKindRequest(fsKindImage, readQuery(id, "shot.png", "", ""))
 	req.Header.Set("Accept-Encoding", "gzip, deflate, br")
 	rr := testResponseAuth(t, s, req)
 
@@ -309,104 +310,104 @@ func TestFSRawImageIsNotBufferedOrRecompressed(t *testing.T) {
 	}
 }
 
-// TestFSRawPutsNoFileNameInAHeader: the file's name comes from the repository, so echoing it into
+// TestFSImagePutsNoFileNameInAHeader: the file's name comes from the repository, so echoing it into
 // Content-Disposition would make a crafted name a header writer.
-func TestFSRawPutsNoFileNameInAHeader(t *testing.T) {
+func TestFSImagePutsNoFileNameInAHeader(t *testing.T) {
 	s := testServer(t)
-	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
+	id, _ := committedProject(t, s, "p1", map[string][]byte{"logo.png": pngFixture})
 
-	rr := rawImageGet(t, s, rawQuery(id, "logo.png", "", ""))
+	rr := imageGet(t, s, readQuery(id, "logo.png", "", ""))
 	if got := rr.Header().Get("Content-Disposition"); got != "" {
 		t.Errorf("Content-Disposition = %q, want unset", got)
 	}
 }
 
-// TestFSRawReadsACommittedObject: the diff panel shows two sides of a changed image, and the old side
+// TestFSImageReadsACommittedObject: the diff panel shows two sides of a changed image, and the old side
 // is no longer on disk.
-func TestFSRawReadsACommittedObject(t *testing.T) {
+func TestFSImageReadsACommittedObject(t *testing.T) {
 	s := testServer(t)
-	id, repo := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"logo.png": pngFixture})
 	head := strings.TrimSpace(testgit.GitOutput(t, repo, "rev-parse", "HEAD"))
 	if err := os.WriteFile(filepath.Join(repo, "logo.png"), []byte("REPLACED"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	rr := rawImageGet(t, s, rawQuery(id, "logo.png", head, ""))
+	rr := imageGet(t, s, readQuery(id, "logo.png", head, ""))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
-	if !bytes.Equal(rr.Body.Bytes(), rawPNG) {
+	if !bytes.Equal(rr.Body.Bytes(), pngFixture) {
 		t.Errorf("body = %q, want the committed bytes, not the working tree's", rr.Body.String())
 	}
 
 	// The same file spelled as a branch name, and an unknown object id.
-	if got := rawImageGet(t, s, rawQuery(id, "logo.png", "HEAD", "")).Code; got != http.StatusOK {
+	if got := imageGet(t, s, readQuery(id, "logo.png", "HEAD", "")).Code; got != http.StatusOK {
 		t.Errorf("HEAD: status = %d, want 200", got)
 	}
-	if got := rawImageGet(t, s, rawQuery(id, "logo.png", "0000000000000000000000000000000000000000", "")).Code; got == http.StatusOK {
+	if got := imageGet(t, s, readQuery(id, "logo.png", "0000000000000000000000000000000000000000", "")).Code; got == http.StatusOK {
 		t.Errorf("unknown ref: status = %d, want a refusal", got)
 	}
-	if got := rawImageGet(t, s, rawQuery(id, "absent.png", "HEAD", "")).Code; got != http.StatusNotFound {
+	if got := imageGet(t, s, readQuery(id, "absent.png", "HEAD", "")).Code; got != http.StatusNotFound {
 		t.Errorf("absent path: status = %d, want 404", got)
 	}
 	// An option-shaped ref is refused before it reaches git.
-	if got := rawImageGet(t, s, rawQuery(id, "logo.png", "--output=/tmp/pwn", "")).Code; got != http.StatusBadRequest {
+	if got := imageGet(t, s, readQuery(id, "logo.png", "--output=/tmp/pwn", "")).Code; got != http.StatusBadRequest {
 		t.Errorf("option ref: status = %d, want 400", got)
 	}
 }
 
-// TestFSRawRefReadsATaskWhoseWorktreeIsGone: worktrees of a project share its object database, so a
+// TestFSImageRefReadsATaskWhoseWorktreeIsGone: worktrees of a project share its object database, so a
 // committed image is readable after commit-and-done deleted the worktree.
-func TestFSRawRefReadsATaskWhoseWorktreeIsGone(t *testing.T) {
+func TestFSImageRefReadsATaskWhoseWorktreeIsGone(t *testing.T) {
 	s := testServer(t)
-	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"logo.png": rawPNG})
+	id, _ := committedProject(t, s, "p1", map[string][]byte{"logo.png": pngFixture})
 	if err := s.store.CreateTask(&types.Task{ID: "t1", ProjectID: id, Title: "t1", Status: types.StatusDone, Branch: "task/t1"}); err != nil {
 		t.Fatal(err)
 	}
 
-	if got := rawImageGet(t, s, rawQuery(id, "logo.png", "HEAD", "t1")); got.Code != http.StatusOK {
+	if got := imageGet(t, s, readQuery(id, "logo.png", "HEAD", "t1")); got.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 for a task with no worktree: %s", got.Code, got.Body.String())
 	}
 	// The same request without a ref wants a working tree, and that tree does not exist.
-	if got := rawImageGet(t, s, rawQuery(id, "logo.png", "", "t1")).Code; got == http.StatusOK {
+	if got := imageGet(t, s, readQuery(id, "logo.png", "", "t1")).Code; got == http.StatusOK {
 		t.Error("a missing worktree answered a working-tree read")
 	}
 }
 
-// TestFSRawRefReadsTheTasksOwnHEAD: HEAD belongs to a worktree, and the diff panel asks for a committed
+// TestFSImageRefReadsTheTasksOwnHEAD: HEAD belongs to a worktree, and the diff panel asks for a committed
 // picture by that name. Answered from the checkout it is "no such file".
-func TestFSRawRefReadsTheTasksOwnHEAD(t *testing.T) {
+func TestFSImageRefReadsTheTasksOwnHEAD(t *testing.T) {
 	s := testServer(t)
-	id, _ := rawImageProject(t, s, "p1", map[string][]byte{"README.md": []byte("hello\n")})
+	id, _ := committedProject(t, s, "p1", map[string][]byte{"README.md": []byte("hello\n")})
 	taskID := createTestTask(t, s, id, "add a logo")
 	wtPath, _, err := s.executor.WorktreeMgr().CreateWorktree(id, taskID, "task/"+taskID, "HEAD")
 	if err != nil {
 		t.Fatalf("create worktree: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(wtPath, "logo.png"), rawPNG, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(wtPath, "logo.png"), pngFixture, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	testgit.Git(t, wtPath, "add", "--", "logo.png")
 	testgit.Git(t, wtPath, "commit", "-m", "add a logo")
 
-	rr := rawImageGet(t, s, rawQuery(id, "logo.png", "HEAD", taskID))
+	rr := imageGet(t, s, readQuery(id, "logo.png", "HEAD", taskID))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("HEAD of the task's branch: status = %d, want 200: %s", rr.Code, rr.Body.String())
 	}
-	if !bytes.Equal(rr.Body.Bytes(), rawPNG) {
+	if !bytes.Equal(rr.Body.Bytes(), pngFixture) {
 		t.Errorf("body = %d bytes, want the picture the task committed", rr.Body.Len())
 	}
 
 	// The same ref with no task still means the checkout, which holds no such picture.
-	if got := rawImageGet(t, s, rawQuery(id, "logo.png", "HEAD", "")).Code; got != http.StatusNotFound {
+	if got := imageGet(t, s, readQuery(id, "logo.png", "HEAD", "")).Code; got != http.StatusNotFound {
 		t.Errorf("HEAD of the checkout: status = %d, want 404", got)
 	}
 }
 
-// TestFSRawRefusesAnOversizedImageBeforeReadingIt: the cap runs on the stat, so a refusal costs one stat
+// TestFSImageRefusesAnOversizedImageBeforeReadingIt: the cap runs on the stat, so a refusal costs one stat
 // and not the file. The sparse file is 32MB of hole, so what the request allocates is the only thing
 // that tells the two orders apart.
-func TestFSRawRefusesAnOversizedImageBeforeReadingIt(t *testing.T) {
+func TestFSImageRefusesAnOversizedImageBeforeReadingIt(t *testing.T) {
 	s := testServer(t)
 	repo := t.TempDir()
 	if err := s.store.CreateProject(&types.Project{ID: "p1", Name: "p1", Path: repo}); err != nil {
@@ -416,7 +417,7 @@ func TestFSRawRefusesAnOversizedImageBeforeReadingIt(t *testing.T) {
 
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	rr := rawImageGet(t, s, rawQuery("p1", "huge.png", "", ""))
+	rr := imageGet(t, s, readQuery("p1", "huge.png", "", ""))
 	runtime.ReadMemStats(&after)
 
 	if rr.Code != http.StatusRequestEntityTooLarge {
@@ -427,5 +428,75 @@ func TestFSRawRefusesAnOversizedImageBeforeReadingIt(t *testing.T) {
 	}
 	if grew := after.TotalAlloc - before.TotalAlloc; grew > allocBudget {
 		t.Errorf("the refusal allocated %d bytes; the cap is meant to run before the read", grew)
+	}
+}
+
+// TestFSImageRefusesAFileInsideGit: a picture's whole permission is the suffix map, and a repository's
+// own directory holds names that satisfy it. The jail lets .git through — it sits under the project root
+// — so the name refusal is the only rule between a task's hooks and an <img> tag, and it has to hold on
+// both halves: the committed read never touches a filesystem, so the relative name is the only place a
+// .git row can be seen at all.
+func TestFSImageRefusesAFileInsideGit(t *testing.T) {
+	s := testServer(t)
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"docs/logo.png": pngFixture})
+	hook := filepath.Join(repo, ".git", "hooks")
+	if err := os.MkdirAll(hook, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(hook, "pre-commit.png"), pngFixture, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := imageGet(t, s, readQuery(id, ".git/hooks/pre-commit.png", "", ""))
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("working tree: status = %d, want 400: %s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), ".git") {
+		t.Errorf("refusal %q does not say it refused a .git path", rr.Body.String())
+	}
+	if bytes.Contains(rr.Body.Bytes(), pngFixture) {
+		t.Error("the refusal carried the file's content")
+	}
+	if got := imageGet(t, s, readQuery(id, ".git/hooks/pre-commit.png", "HEAD", "")).Code; got == http.StatusOK {
+		t.Errorf("committed: a .git name was served (%d)", got)
+	}
+}
+
+// TestFSImageNamesACommittedObjectAsItsValidator: the committed half of every kind answers with the
+// object's id, because an id never names different bytes — which is what makes a repeat view of the same
+// picture cost a 304 and no object read at all.
+func TestFSImageNamesACommittedObjectAsItsValidator(t *testing.T) {
+	s := testServer(t)
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"docs/logo.png": pngFixture})
+	head := strings.TrimSpace(testgit.GitOutput(t, repo, "rev-parse", "HEAD"))
+
+	rr := imageGet(t, s, readQuery(id, "docs/logo.png", head, ""))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
+	}
+	if !bytes.Equal(rr.Body.Bytes(), pngFixture) {
+		t.Errorf("the streamed bytes are not the file: %d B, want %d B", rr.Body.Len(), len(pngFixture))
+	}
+	if got := rr.Header().Get("ETag"); got != `"`+head+`"` {
+		t.Errorf("ETag = %q, want the object id %q", got, head)
+	}
+	if got := rr.Header().Get("Cache-Control"); !strings.Contains(got, "immutable") {
+		t.Errorf("Cache-Control = %q, want one an object id can stand behind", got)
+	}
+
+	req := readKindRequest(fsKindImage, readQuery(id, "docs/logo.png", head, ""))
+	req.Header.Set("If-None-Match", `"`+head+`"`)
+	cond := testResponseAuth(t, s, req)
+	if cond.Code != http.StatusNotModified {
+		t.Fatalf("If-None-Match: status = %d, want 304", cond.Code)
+	}
+	if cond.Body.Len() != 0 {
+		t.Errorf("a 304 carried %d bytes", cond.Body.Len())
+	}
+
+	// The same name in the working tree is nobody's cache key: the tree changes under the reader.
+	live := imageGet(t, s, readQuery(id, "docs/logo.png", "", ""))
+	if got := live.Header().Get("ETag"); got != "" {
+		t.Errorf("ETag = %q on a working-tree read, want none", got)
 	}
 }
