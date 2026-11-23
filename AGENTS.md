@@ -483,6 +483,9 @@ never marks the app offline, and nothing in the product puts a deadline on a wai
 - **An unsaved file draft carries the bytes it diverged from**, so a file that moved under it is merged on the
   way back in. A region both sides changed is painted into the buffer for the person to resolve, never
   dropped. `docs/reconnection.md → The Editor Buffer Across a Browser Being Away`.
+- **Each explorer screen — a project's, or one task's — keeps its own record**, keyed by `explorerRecordKey`,
+  and a task's goes when the task moves to Done or off the board, its files' buffers with it.
+  `docs/reconnection.md → What an Explorer Remembers`.
 - **A task's status is never the answer to "is it still running"** — `taskIsInFlight` is, and the
   server-side mirror `terminalTurnStates` must agree with it.
 - **A screen that cannot order its own reading of a task against the board's copy asks the server** — a turn

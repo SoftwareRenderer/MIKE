@@ -18,7 +18,7 @@
      * screen still writes for itself, so it arrives as a snippet.
      */
     let { core, layout, isMobile, branch, projectId, projectPath, containerPath, taskId,
-        changesOpen, onChangesOpen, folderPath, onReviewUpdated, scrollTops, onScrollTop, browser }: {
+        changesOpen, onChangesOpen, folderPath, onReviewUpdated, browser }: {
         core: ExplorerCore;
         layout: ExplorerLayout;
         isMobile: boolean;
@@ -33,8 +33,6 @@
         /** What the mobile tab bar labels the listing tab. */
         folderPath: string;
         onReviewUpdated?: () => void;
-        scrollTops?: Record<string, number>;
-        onScrollTop?: (path: string, top: number) => void;
         browser: Snippet;
     } = $props();
 
@@ -189,8 +187,8 @@
                         isMobile={isMobile}
                         pendingFsEvent={core.pendingFsEvent}
                         onLinesSelected={core.handleLinesSelected}
-                        {scrollTops}
-                        {onScrollTop}
+                        scrollTops={core.scrollTops}
+                        onScrollTop={core.handleEditorScrollTop}
                     />
                 {:else}
                     <div class="file-editor-placeholder">

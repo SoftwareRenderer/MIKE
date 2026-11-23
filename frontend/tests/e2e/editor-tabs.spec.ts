@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { writeFileSync, readFileSync, rmSync, readdirSync, statSync, mkdirSync, existsSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'path';
-import { apiGetJson, csrfFetch, getProjectId, isolatedProject, gotoProject, ownProjectPath, selectProject } from './helpers';
+import { apiGetJson, csrfFetch, getProjectId, gitIn, isolatedProject, gotoProject, ownProjectPath, selectProject } from './helpers';
 
 // Each test file gets its own project: see isolatedProject() in helpers.ts.
 isolatedProject();
@@ -441,6 +441,178 @@ test.describe('Editor Tabs', () => {
       if (row) await csrfFetch(page, `/api/projects/${row.id}`, { method: 'DELETE' });
       if (existsSync(join(ownDir!, ownFile))) rmSync(join(ownDir!, ownFile), { force: true });
       rmSync(otherDir, { recursive: true, force: true });
+    }
+  });
+
+  // A task's explorer is its own screen: its worktree is another directory, and a person reaches one task and
+  // then the next. One record shared by a project and all of its tasks answers those screens with each other's
+  // files, and answers the task screens with no scroll position at all.
+  test('each task explorer keeps its own files, and the project explorer keeps its own', async ({ page }) => {
+    test.setTimeout(90000);
+    const projectId = await getProjectId(page);
+    const projectDir = ownProjectPath();
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    const config = await apiGetJson<{ workspace_dir: string }>(page, '/api/config');
+    const workspaceDir = config?.workspace_dir || '';
+
+    const stamp = Date.now();
+    // Committed, because a task's worktree is a branch off the project's commit: a file the checkout never
+    // committed is listed by the project explorer and by no worktree.
+    const alpha = `tabs-alpha-${stamp}.txt`;
+    const beta = `tabs-beta-${stamp}.txt`;
+    const projectOnly = `tabs-project-only-${stamp}.txt`;
+    writeFileSync(join(projectDir!, alpha), Array.from({ length: 400 }, (_, i) => `line ${i + 1}`).join('\n') + '\n');
+    writeFileSync(join(projectDir!, beta), 'Beta content\n');
+    writeFileSync(join(projectDir!, projectOnly), 'Only the project holds this\n');
+    gitIn(projectDir!, `add "${alpha}" "${beta}"`);
+    gitIn(projectDir!, '-c user.email="e2e@mike.local" -c user.name="e2e" commit -qm "seed explorer tabs"');
+
+    // An explicit title and a one-word prompt keep these tasks out of the executor: the spec needs two
+    // worktrees, not two turns.
+    const makeTask = async (title: string): Promise<string> => {
+      const created = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
+        method: 'POST',
+        body: { title, prompt: 'x', status: 'backlog' },
+      });
+      expect(created.ok, `create task: ${JSON.stringify(created.data)}`).toBe(true);
+      // The worktree is made by the screen that opens it, while the listing reads the directory for itself:
+      // a task that has never run can be listed while its checkout is still being made. This is the screen's
+      // own idempotent init call, made before the screen opens, and the file is waited for where it lands.
+      const inited = await csrfFetch(page, `/api/projects/${projectId}/tasks/${created.data.id}/init`, { method: 'POST' });
+      expect(inited.ok, `init task: ${JSON.stringify(inited.data)}`).toBe(true);
+      await expect.poll(() => existsSync(join(workspaceDir, projectId, created.data.id, alpha)), { timeout: 20000 }).toBe(true);
+      return created.data.id as string;
+    };
+    const alphaTitle = `Explorer tabs alpha ${stamp}`;
+    const betaTitle = `Explorer tabs beta ${stamp}`;
+    const alphaTask = await makeTask(alphaTitle);
+    await makeTask(betaTitle);
+
+    const openExplorerOf = async (title: string) => {
+      await page.locator('.card', { hasText: title }).first().click();
+      await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 20000 });
+      await page.locator('.task-detail-page [aria-label="Open explorer"]').click();
+      await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 20000 });
+      await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 20000 });
+    };
+    const closeExplorer = async () => {
+      await page.locator('.explorer-header .close-btn').click();
+      await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 20000 });
+    };
+    const openPinned = async (name: string) => {
+      await page.locator('.file-browser-item', { hasText: name }).dblclick();
+      await expect(page.locator('.editor-tab-name').filter({ hasText: name })).toBeVisible({ timeout: 20000 });
+    };
+    const editorScroll = () => page.locator('.cm-scroller').first().evaluate((el) => el.scrollTop);
+
+    try {
+      await gotoProject(page, `/?project=${projectId}`);
+      await expect(page.locator('.card', { hasText: alphaTitle })).toBeVisible({ timeout: 20000 });
+
+      // Task one: one file, read partway down. A tab write waits out a quiet period before IndexedDB sees it,
+      // so a close or a navigation that should persist the last click waits that window out.
+      await openExplorerOf(alphaTitle);
+      await openPinned(alpha);
+      await page.locator('.cm-scroller').first().evaluate((el) => { el.scrollTop = 900; });
+      await expect.poll(editorScroll).toBeGreaterThan(0);
+      await page.waitForTimeout(400);
+      await closeExplorer();
+
+      // The next task is a different screen, reached without the app reloading: it has never had a file
+      // open, and it is not handed the file the first one left open.
+      await openExplorerOf(betaTitle);
+      await expect(page.locator('.editor-tab')).toHaveCount(0);
+      await openPinned(beta);
+      await closeExplorer();
+
+      // Back to the first task: its own file, where it was left.
+      await gotoProject(page, `/?project=${projectId}`);
+      await openExplorerOf(alphaTitle);
+      await expect(page.locator('.editor-tab-name').filter({ hasText: alpha })).toBeVisible({ timeout: 20000 });
+      await expect(page.locator('.editor-tab-name').filter({ hasText: beta })).toHaveCount(0);
+      await expect.poll(editorScroll, { timeout: 15000 }).toBeGreaterThan(0);
+      await closeExplorer();
+
+      // The project's explorer is a third screen: no task's file reaches it, and what it opens stays in it.
+      await gotoProject(page, `/?project=${projectId}&view=explorer`);
+      await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 20000 });
+      await expect(page.locator('.editor-tab')).toHaveCount(0);
+      await openPinned(projectOnly);
+      await page.waitForTimeout(400);   // the write window
+
+      await gotoProject(page, `/?project=${projectId}&task=${alphaTask}&view=task-explorer`);
+      await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 20000 });
+      await expect(page.locator('.editor-tab-name').filter({ hasText: alpha })).toBeVisible({ timeout: 20000 });
+      await expect(page.locator('.editor-tab-name').filter({ hasText: projectOnly })).toHaveCount(0);
+
+      await gotoProject(page, `/?project=${projectId}&view=explorer`);
+      await expect(page.locator('.editor-tab-name').filter({ hasText: projectOnly })).toBeVisible({ timeout: 20000 });
+      await expect(page.locator('.editor-tab-name').filter({ hasText: alpha })).toHaveCount(0);
+    } finally {
+      for (const name of [alpha, beta, projectOnly]) {
+        try { rmSync(join(projectDir!, name), { force: true }); } catch { /* ignore */ }
+      }
+    }
+  });
+
+  // A task's explorer record is temporary, and the board is what says so: the move into Done is made by a card,
+  // by the commit dialog, by another browser and by the executor, so the sweep reads the board.
+  test('a task that moves to Done loses the files its explorer left open', async ({ page }) => {
+    test.setTimeout(90000);
+    const projectId = await getProjectId(page);
+    const projectDir = ownProjectPath();
+    expect(projectDir, 'this worker has no own project path').toBeTruthy();
+    const config = await apiGetJson<{ workspace_dir: string }>(page, '/api/config');
+    const workspaceDir = config?.workspace_dir || '';
+
+    const stamp = Date.now();
+    const title = `Explorer done ${stamp}`;
+    const file = `tabs-done-${stamp}.txt`;
+    writeFileSync(join(projectDir!, file), 'Committed, so the worktree holds it\n');
+    gitIn(projectDir!, `add "${file}"`);
+    gitIn(projectDir!, '-c user.email="e2e@mike.local" -c user.name="e2e" commit -qm "seed the done sweep"');
+    const created = await csrfFetch(page, `/api/projects/${projectId}/tasks`, {
+      method: 'POST',
+      body: { title, prompt: 'x', status: 'backlog' },
+    });
+    expect(created.ok, `create task: ${JSON.stringify(created.data)}`).toBe(true);
+    const taskId = created.data.id as string;
+    const inited = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/init`, { method: 'POST' });
+    expect(inited.ok, `init task: ${JSON.stringify(inited.data)}`).toBe(true);
+    await expect.poll(() => existsSync(join(workspaceDir, projectId, taskId, file)), { timeout: 20000 }).toBe(true);
+
+    try {
+      await gotoProject(page, `/?project=${projectId}`);
+      await page.locator('.card', { hasText: title }).first().click();
+      await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 20000 });
+      await page.locator('.task-detail-page [aria-label="Open explorer"]').click();
+      await expect(page.locator('.file-browser-list')).toBeVisible({ timeout: 30000 });
+      await page.locator('.file-browser-item', { hasText: file }).dblclick();
+      await expect(page.locator('.editor-tab-name').filter({ hasText: file })).toBeVisible({ timeout: 20000 });
+      await page.waitForTimeout(400);   // the write window
+      await page.locator('.explorer-header .close-btn').click();
+      await expect(page.locator('.task-detail-page')).toBeVisible({ timeout: 20000 });
+
+      // The sweep judges a board, so a board is what has to be on screen when the move arrives from outside
+      // this tab: the reading before it holds the task in Backlog, so the frame that moves it says a row changed.
+      await gotoProject(page, `/?project=${projectId}`);
+      await expect(page.locator('.card', { hasText: title })).toBeVisible({ timeout: 20000 });
+
+      for (const status of ['review', 'done']) {
+        const moved = await csrfFetch(page, `/api/projects/${projectId}/tasks/${taskId}/move`, {
+          method: 'POST',
+          body: { status },
+        });
+        expect(moved.ok, `move to ${status}: ${JSON.stringify(moved.data)}`).toBe(true);
+      }
+      await expect(page.locator('[data-column-id="done"] .card', { hasText: title })).toBeVisible({ timeout: 20000 });
+
+      // The record alone was holding those tabs: the file is still on disk, and this screen has never seen one.
+      await gotoProject(page, `/?project=${projectId}&task=${taskId}&view=task-explorer`);
+      await expect(page.locator('.explorer-view')).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('.editor-tab')).toHaveCount(0);
+    } finally {
+      try { rmSync(join(projectDir!, file), { force: true }); } catch { /* ignore */ }
     }
   });
 });

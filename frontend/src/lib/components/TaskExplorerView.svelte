@@ -5,6 +5,7 @@
     import { taskTerminalHref, parseExplorerFile } from '$lib/utils/app-link';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { fromPersistedTabs, mergeRestoredTabs } from '$lib/utils/editor-tabs';
+    import { explorerRecordKey } from '$lib/storage';
     import { ExplorerCore, type ExplorerProps } from '$lib/services/explorer-core.svelte';
     import { ExplorerLayout } from '$lib/services/explorer-layout.svelte';
     import { t } from '$lib/i18n';
@@ -31,7 +32,7 @@
     let navigatedFolder = $state('');
 
     const core = new ExplorerCore({
-        storageKey: () => projectId,
+        storageKey: () => explorerRecordKey(projectId, taskId),
         // Task worktree and, when sandboxed, the mount the same directory appears under.
         pathRoots: () => (sandboxEnabled ? [taskPath, mountPath] : [taskPath]),
         isMobile: isMobileCtx,
@@ -89,14 +90,14 @@
     $effect(() => {
         core.resetTabs(taskId);
         core.loadSavedTabs().then((saved) => {
-            if (!saved || saved.openFiles.length === 0) return;
+            if (!saved) return;
+            core.adoptScroll(saved);
+            if (saved.openFiles.length === 0) return;
             const openWas = core.activeFilePath;
             const restored = mergeRestoredTabs(core.openFiles, fromPersistedTabs(saved.openFiles.filter(f => core.isPathSafe(f.path))));
             const active = openWas || saved.openFiles.find(f => f.path === saved.activeFilePath && core.isPathSafe(f.path))?.path || '';
             core.applyTabs(restored, active, new Set(saved.pinnedFiles.filter(p => restored.some(f => f.path === p))));
             if (!openWas) core.updateFile(active || null);
-            core.scrollTops = { ...saved.scrollTops, ...core.scrollTops };
-            core.fileListScroll = core.fileListScroll || (saved.fileListScroll ?? 0);
         }).catch(() => {});
     });
 

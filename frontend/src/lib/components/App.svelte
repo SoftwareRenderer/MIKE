@@ -23,7 +23,8 @@
     import { explorerPathRoots, fileWithinRoots } from '$lib/utils/app-link';
     import { urlRouter } from '$lib/services/url-router.svelte';
     import { reviewNotifier } from '$lib/services/review-notifications.svelte';
-    import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, loadAppSetting, saveAppSetting } from '$lib/storage';
+    import { explorerRecords } from '$lib/services/explorer-records';
+    import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, loadAppSetting, saveAppSetting, taskWorktreeRoot } from '$lib/storage';
     import { flushBoardMirror, mirrorBoard } from '$lib/services/board-mirror';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';
@@ -141,7 +142,8 @@
     }
 
     $effect(() => {
-        // The board on screen tells the notifier which Review cards the user can already see.
+        // The board on screen tells the notifier which Review cards the user can already see, and the
+        // explorer janitor which tasks have finished or gone and so keep no open files.
         const board = appStore.board;
         const projectId = appStore.selectedProject?.id;
         if (!board || !projectId) {
@@ -149,6 +151,7 @@
             return;
         }
         reviewNotifier.observeBoard(projectId, board.tasks || []);
+        explorerRecords.observeBoard(projectId, board.tasks || []);
     });
 
     $effect(() => {
@@ -1366,7 +1369,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
                         projectId={appStore.selectedProject.id}
                         projectName={appStore.selectedProject.name}
                         taskId={appStore.selectedTask.id}
-                        taskPath={appStore.config?.workspace_dir ? `${appStore.config.workspace_dir}/${appStore.selectedProject.id}/${appStore.selectedTask.id}` : ''}
+                        taskPath={taskWorktreeRoot(appStore.config?.workspace_dir || '', appStore.selectedProject.id, appStore.selectedTask.id)}
                         taskBranch={appStore.selectedTask.branch || ''}
                         taskStatus={appStore.selectedTask.status || ''}
                         initialFile={urlRouter.file}

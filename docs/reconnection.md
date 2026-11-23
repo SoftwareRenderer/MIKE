@@ -131,6 +131,53 @@ A body replayed from IndexedDB
 would overwrite whatever the file got since, so `offline-queue` never carries file content. The editor
 holding the buffer holds the wait (`saveRetryDelayMs`) until the write lands.
 
+## What an Explorer Remembers, and When It Forgets
+
+An explorer screen — the project's own, or one task's — holds its own record in `editor-tabs`, keyed by
+`explorerRecordKey`. It says which files were open, which was active and which pinned, how far each editor
+pane was scrolled (`scrollTops`), and how far the file listing was (`fileListScroll`). The `unsaved-files`
+marker is written under the same key. A task's key hangs off its project's — `<projectId>:task:<taskId>` — because a
+task id and a project id come from one alphabet, and the project half is what lets a sweep judge a task's
+record by its project. A project's explorer keeps the bare project id.
+
+**Two screens never share one record.** Keyed alike they answer with each other's files — the task view with
+the project's, and each task with another's — and an offset saved under one subject comes back under another.
+`ExplorerCore` owns both scrolls, which is why a fix to either lands on both screens. The core captures its
+record key when it adopts its subject (`resetTabs`), because the address bar moves before the screen's effect
+does; a write that read the key as it fired would put one screen's tabs in the record of whoever arrived next.
+A screen writes nothing before it has read its record: the empty list a fresh screen holds would otherwise be
+saved over the one it is about to restore. The listing's offset goes back to the first listing that can scroll,
+and to no later one.
+
+### The wipe takes the task's files with its record
+
+What a task's explorer holds is temporary: its worktree is not read again until the person goes looking for
+that task, and by then the answer they want is what the branch holds. `explorer-records.observeBoard` is fed
+from the App shell's board effect and decides from the board. The move into Done is made by a card's button,
+by the commit dialog, by another browser and by the executor, and a rule hung on one of those misses the
+others. Two readings that say the same tasks and statuses are judged once.
+
+- **A move into Done** forgets that task once. A record written afterwards — the files someone opens while
+  reading a finished task — survives until that task leaves the board, so the drop is the move and not the
+  state.
+- **A row the board does not hold** was deleted, here or elsewhere, and its record goes with it.
+
+`forgetTaskExplorer` takes the record, its unsaved marker, and the buffer and undo chain of the files that
+screen was holding. Those last two are keyed by file path, so which paths were the task's comes from two
+places: everything under its worktree root (`taskWorktreeRoot` — the same helper that names the directory the
+task explorer lists) and every path its own record names. The second is no redundancy: a sandboxed task's
+files are keyed by the container's mount, one spelling every task of that project shares, and only the record
+says which of them this task opened.
+
+Two rules keep the wipe off what is live. A path a mounted explorer holds open (`openExplorerPaths`) is under
+someone typing in it. A path another live record of the project names belongs to whoever else named it.
+
+### The gone-project sweep reads a task key back to its project
+
+`gc` takes the project ids and drops both explorer stores' records whose owner project is gone;
+`cleanExplorerRecordsByProject` splits a task key at its separator to find that owner. An empty project list
+sweeps nothing — the rule `editorRecordRoots` already holds for buffers, because a stale list is not evidence.
+
 ## The Chat Draft Across a Browser Being Away
 
 The composer's text and its image tray belong to the browser: the `drafts` and `attachments` stores hold what
@@ -217,5 +264,9 @@ The server does not time out slow clients. Instead:
 - **E2E Tests**: `ws-stale-reconnect.spec.ts` (the banner, the wake-up refresh, and the board and chat holding what the server wrote while the window was away), `away-and-back.spec.ts`, `away-window-chat.spec.ts`, `return-transcript-order.spec.ts`, `sync-return-freshness.spec.ts`, `focus-return-review.spec.ts`, `offline-mode-cached-board.spec.ts`, `offline-send-queue.spec.ts`, `editor-external-change.spec.ts`, `chat-draft-persistence.spec.ts` and `chat-draft-attachments-stay-deleted.spec.ts`.
 - **Unit Tests**: `connection-restored.unit.svelte.ts`, `reconnect-banner.unit.svelte.ts`,
   `task-events-delivery.unit.svelte.ts`, `stream-subscription.unit.ts`, `chat-history-merge.unit.ts`, `session-boot.unit.svelte.ts`, and for the editor buffer `editor-merge.unit.ts`, `editor-conflict.unit.ts`, `editor-draft-merge-on-open.unit.svelte.ts`, `editor-buffer-persistence.unit.svelte.ts`, `storage-editor-draft.unit.ts`, and for the chat draft `chat-draft.unit.ts`.
+- **Unit Tests for what an explorer remembers**: `storage-explorer-records.unit.ts`,
+  `explorer-records.unit.ts` and `explorer-core.unit.svelte.ts`. `make test-e2e SPECS=editor-tabs` runs
+  `editor-tabs.spec.ts`, whose last two specs keep two task records and the project's apart across a switch,
+  and take a finished task's files away on the move into Done — red when either half stops holding.
 - **Backend Tests**: `app_stream_test.go`, `app_stream_subscribe_race_test.go`,
   `handler_message_window_test.go` (whose revalidation table covers the sync digest too).
