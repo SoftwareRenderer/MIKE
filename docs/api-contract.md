@@ -236,14 +236,49 @@ call's context. It carries `message_id` too, naming the row that stores the reas
 reads through `?full=1`, and — since `complete` names only the run's last row — the only way an earlier call of
 a multi-call turn stays openable. The count half is what that rule decides nothing about. The buffer holds the
 newest count frame for whoever subscribes next, so a call that left no closer reads to a view arriving later as
-reasoning still arriving, and the client draws its thinking notice from any count that was never closed. A call
-that reasoned nothing sends no frame: nothing was announced to close, and a row named over an empty reasoning is
-a toggle over nothing.
-Tests: `backend/exec/loop_reasoning_test.go`, `stream-handler.unit.ts`,
-`chat-entries-collapsed-reasoning.unit.svelte.ts` (the notice survives whichever branch draws the entry, and
-stays down while the call's own tool runs), `reasoning-rate.unit.ts` and `reasoning-block.unit.svelte.ts` (the
-figure's floor, and its clock), `frontend/tests/e2e/collapsed-reasoning.spec.ts`. That the buffer's newest count
-is always a closed one is `go test ./backend/exec -run 'TestAFreshSubscriberOverARunningToolCall'`.
+reasoning still arriving. The client draws its thinking notice from any count never closed while the run is in
+flight. A call that reasoned nothing sends no frame: nothing was announced to close, and a row named over an
+empty reasoning is a toggle over nothing.
+
+The client also closes the counts the buffer never closed, once it is told the **run** is over. A `status` frame
+naming one of the five `terminalTurnStates` (`backend/stream/app_stream.go`) is that instruction.
+`StreamState.endOpenTurn()` (`frontend/src/lib/services/stream-state.svelte.ts`) is its one implementation: the
+open `reasoningPending` counts go, the wait line and the retry notice go with them, and an entry left with
+nothing to render goes too. That last rule is `withoutStalePendingCards`'s (`rendersAnything`) in
+`frontend/src/lib/utils/chat-entries.ts`. The client owns this cleanup rather than each button doing its own, so
+a stopped task reads the same whoever asked for the stop.
+
+A run can still be talking after that frame: a cancelled call flushes what it buffered. Until the next `running`
+`status` frame, or the `hint` that announces a retry, `token`, `reasoning`, `reasoning_progress` and `tool_call`
+are not drawn and cannot re-mark the task streaming. A count out of that flush would otherwise open a thinking
+notice over a paused task, and re-marking the task puts the card's `Running` badge and the Stop button back.
+Both rules are `StreamState`'s; the handler only asks it.
+Tests: `backend/exec/loop_reasoning_test.go` for what the run sends, and `stream-handler.unit.ts` for each
+terminal state closing the count, a late count after `paused` drawing nothing and marking nothing streaming,
+and a resumed turn never being muted. The notice's own drawing is
+`chat-entries-collapsed-reasoning.unit.svelte.ts` (it survives whichever branch draws the entry, stays down
+while the call's own tool runs, and stays down over a stopped turn), and its figure is `reasoning-rate.unit.ts`
+and `reasoning-block.unit.svelte.ts`. Both lanes are clicked through in
+`frontend/tests/e2e/collapsed-reasoning.spec.ts` and `frontend/tests/e2e/stop-thinking-notice.spec.ts`.
+That the buffer's newest count is always a closed one is
+`go test ./backend/exec -run 'TestAFreshSubscriberOverARunningToolCall'`.
+
+### A lock wait says how it ended
+
+`lock_wait` is a task event with one shape for every domain. `domain` names the wait: `worktree`, `stash`,
+`model`, or `other` for a name this app does not know — an unknown one draws a wait rather than nothing.
+`waited_seconds` is the elapsed wait as an integer. `phase` rides only where the caller has a finer answer (a
+model wait says `first_token`). The frame repeats every `stream.LockWaitNoticeEvery`
+(`backend/stream/app_stream.go`) while the wait lasts, and comes once more when it ends. That ending is named:
+`acquired: true` when the lock was taken, `withdrawn: true` when the caller was called off before it held the
+lock. The client clears the line on either ending and reads nothing else from them. Only the caller knows which
+happened, and a spinner left over a wait nobody is making any more is what this frame exists to prevent. A free
+lock sends nothing at all.
+
+Which waits are abandonable is the server's decision, not the frame's: a request's context calls a person off,
+and a path no request owns (the executor's own rewind) passes one no browser can cancel. `docs/locking.md → Watched Waits` owns that side.
+Tests: `backend/stream/lock_wait_test.go` (both endings on the wire), `stream-handler.unit.ts` (either ending
+clears the line; a lost ending costs a repeat, not a spinner).
 
 ### A broken failure loop adds no frame shape
 

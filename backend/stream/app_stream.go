@@ -522,14 +522,20 @@ func TaskEventPayload(taskID string, event types.StreamEvent) map[string]any {
 // stops looking like a pause and starts looking like a wait someone is deciding about.
 const LockWaitNoticeEvery = 3 * time.Second
 
-// LockWaitNotifier tells a task's clients why they are still waiting for a lock.
+// LockWaitNotifier tells a task's clients why they are still waiting for a lock and how the wait ended:
+// taken, or given up before it was. Only the caller knows which, and a client told the wrong one either
+// keeps a spinner or thanks a lock that stayed free.
 func (asm *AppStreamManager) LockWaitNotifier(projectID, taskID, domain string) keylock.WaitNotice {
-	return func(waited time.Duration, acquired bool) {
-		asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeLockWait, Data: map[string]any{
+	return func(waited time.Duration, outcome keylock.WaitOutcome) {
+		data := map[string]any{
 			"domain":         domain,
 			"waited_seconds": int(waited.Seconds()),
-			"acquired":       acquired,
-		}})
+			"acquired":       outcome == keylock.WaitAcquired,
+		}
+		if outcome == keylock.WaitAbandoned {
+			data["withdrawn"] = true
+		}
+		asm.SendTaskEvent(projectID, taskID, types.StreamEvent{Type: types.WSTypeLockWait, Data: data})
 	}
 }
 

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"errors"
 	"fmt"
@@ -97,7 +98,11 @@ func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request, proj
 	}
 
 	// Delete may checkout a replacement branch and reset the worktree.
-	defer s.lockWorktreeWatched(projectID, taskID)()
+	unlockDelete, ok := s.lockWorktreeWatched(r.Context(), projectID, taskID)
+	if !ok {
+		return // The person went away while the worktree was busy, and nothing was deleted.
+	}
+	defer unlockDelete()
 
 	task, ok = s.taskInPath(w, projectID, taskID)
 	if !ok {
@@ -192,7 +197,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 
 	// Switch stashes the outgoing thread's work, then checks out the target's branch. The run is stopped first,
 	// and the task comes back as the lock found it.
-	quieted, wasRunning, unlockWorktree := s.quietWorktree(w, projectID, taskID, "switched")
+	quieted, wasRunning, unlockWorktree := s.quietWorktree(r.Context(), w, projectID, taskID, "switched")
 	if quieted == nil {
 		return
 	}
@@ -217,7 +222,7 @@ func (s *Server) handleThreadSwitch(w http.ResponseWriter, r *http.Request) {
 			_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", oldBranch)
 			// Save the worktree as it is so switching back can restore it — and if it cannot be saved,
 			// leave both threads exactly as they are.
-			stashHash, err := s.stashWorktreeState(projectID, taskID, oldThreadID, git.StashMessageForSwitch(taskID))
+			stashHash, err := s.stashWorktreeState(r.Context(), projectID, taskID, oldThreadID, git.StashMessageForSwitch(taskID))
 			if err != nil {
 				s.refuseUnsavedWork(w, projectID, task, "switched", err, wasRunning)
 				return
@@ -329,7 +334,11 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		_ = s.executor.StopTask(taskID)
 	}
 
-	defer s.lockWorktreeWatched(projectID, taskID)()
+	unlockFork, ok := s.lockWorktreeWatched(r.Context(), projectID, taskID)
+	if !ok {
+		return // Nothing was forked, and the stop above left no work of its own behind.
+	}
+	defer unlockFork()
 
 	task, ok := s.taskInPath(w, projectID, taskID)
 	if !ok {
@@ -356,7 +365,7 @@ func (s *Server) handleThreadFork(w http.ResponseWriter, r *http.Request) {
 		_ = s.executor.WorktreeMgr().GitRunInWorktree(taskID, "checkout", task.Branch)
 		// Save the worktree as it is: this thread's in-flight work has to survive the rewind below, and
 		// switching back has to be able to put it back. If it cannot be saved, the fork does not happen.
-		stashHash, err := s.stashWorktreeState(projectID, taskID, task.CurrentThreadID, git.StashMessageForFork(taskID))
+		stashHash, err := s.stashWorktreeState(r.Context(), projectID, taskID, task.CurrentThreadID, git.StashMessageForFork(taskID))
 		if err != nil {
 			s.refuseUnsavedWork(w, projectID, task, "forked", err, false)
 			return
@@ -506,8 +515,9 @@ func (s *Server) deleteThreadBranch(taskID string, branchName string) {
 	}
 }
 
-// Parks the worktree's changes for threadID. A clean worktree returns "" with no error: nothing to save.
-func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (string, error) {
+// Save the worktree's changes for threadID. A clean worktree returns "" with no error: nothing to save. An
+// abandoned wait returns `ctx.Err()` and stashes nothing.
+func (s *Server) stashWorktreeState(ctx context.Context, projectID, taskID, threadID, label string) (string, error) {
 	wm := s.executor.WorktreeMgr()
 	// The status is read here rather than through a yes/no helper: a worktree this cannot read must
 	// never answer "clean", and an unreadable worktree is exactly what a caller must not overwrite.
@@ -523,8 +533,12 @@ func (s *Server) stashWorktreeState(projectID, taskID, threadID, label string) (
 		return "", err
 	}
 	// A thread switch stashes the worktree, so it queues behind every other stash in the project.
-	defer wm.LockProjectStashWatched(projectID, stream.LockWaitNoticeEvery,
-		s.appStreamMgr.LockWaitNotifier(projectID, taskID, "stash"))()
+	unlockStash, ok := wm.LockProjectStashWatched(ctx, projectID, stream.LockWaitNoticeEvery,
+		s.appStreamMgr.LockWaitNotifier(projectID, taskID, "stash"))
+	if !ok {
+		return "", ctx.Err()
+	}
+	defer unlockStash()
 
 	stashHash, err := wm.PushStash(worktreePath, label)
 	if errors.Is(err, git.ErrNothingToStash) {
@@ -551,13 +565,13 @@ var errTurnStartedInGap = errors.New("a turn started for this task while this wa
 // task as the lock found it, whether a stop happened, and the release (a nil task means this answered already).
 // The stop goes outside the lock because StopTask waits for the run whose tool call holds it, and a turn that
 // starts in the gap is stopped and tried once more before the request is refused with nothing modified.
-func (s *Server) quietWorktree(w http.ResponseWriter, projectID, taskID, done string) (*types.Task, bool, func()) {
-	return s.quietWorktreeFrom(w, projectID, taskID, done, s.taskInPath)
+func (s *Server) quietWorktree(ctx context.Context, w http.ResponseWriter, projectID, taskID, done string) (*types.Task, bool, func()) {
+	return s.quietWorktreeFrom(ctx, w, projectID, taskID, done, s.taskInPath)
 }
 
 // quietWorktreeFrom is quietWorktree with the read of the task handed in, so a test can say when a turn
 // started in the gap. Production reads it the way the route does, which also answers a task that went away.
-func (s *Server) quietWorktreeFrom(w http.ResponseWriter, projectID, taskID, done string,
+func (s *Server) quietWorktreeFrom(ctx context.Context, w http.ResponseWriter, projectID, taskID, done string,
 	read func(http.ResponseWriter, string, string) (*types.Task, bool)) (*types.Task, bool, func()) {
 	const attempts = 2
 	stopped := false
@@ -570,7 +584,13 @@ func (s *Server) quietWorktreeFrom(w http.ResponseWriter, projectID, taskID, don
 			_ = s.executor.StopTask(taskID)
 			stopped = true
 		}
-		unlock := s.lockWorktreeWatched(projectID, taskID)
+		unlock, got := s.lockWorktreeWatched(ctx, projectID, taskID)
+		if !got {
+			// Nothing was switched or forked; the stop above is the one thing that happened, and the row
+			// says so, as it does for every stop.
+			Fail(w, ctx.Err(), "wait for the worktree", "task not found")
+			return nil, stopped, nil
+		}
 		task, ok = read(w, projectID, taskID)
 		if !ok {
 			unlock()
@@ -665,14 +685,14 @@ func (s *Server) lockWorktree(taskID string) func() {
 
 // lockWorktreeWatched is how a request in this package reaches the task's worktree lock, which is the
 // executor's: a tool call holds it, so a table of the server's own would serialize against nothing that
-// writes. A handler holds it across the whole operation, and a wait behind a long tool call is announced the
-// way Commit & Done announces one.
+// writes. A handler holds it across the whole operation, and the caller's context ends the wait — see
+// keylock.Table.LockWatchedCtx.
 //
 // Release function rather than mutex: these are injected into api.GitHandler, and a mutex handed
 // across a package boundary is a value that can be stored, copied, and unlocked by whoever holds a
 // copy — see git.WorktreeManager.LockProjectStash for the same argument.
-func (s *Server) lockWorktreeWatched(projectID, taskID string) func() {
-	return s.executor.LockWorktreeWatched(taskID, stream.LockWaitNoticeEvery,
+func (s *Server) lockWorktreeWatched(ctx context.Context, projectID, taskID string) (func(), bool) {
+	return s.executor.LockWorktreeWatched(ctx, taskID, stream.LockWaitNoticeEvery,
 		s.appStreamMgr.LockWaitNotifier(projectID, taskID, "worktree"))
 }
 

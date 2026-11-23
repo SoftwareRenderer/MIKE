@@ -197,7 +197,7 @@ func TestThreadSwitchStopsTheRunOutsideTheWorktreeLock(t *testing.T) {
 	release := fx.s.lockWorktree(fx.taskID)
 	got := make(chan func(), 1)
 	go func() {
-		_, _, unlock := fx.s.quietWorktree(httptest.NewRecorder(), fx.projID, fx.taskID, "switched")
+		_, _, unlock := fx.s.quietWorktree(t.Context(), httptest.NewRecorder(), fx.projID, fx.taskID, "switched")
 		got <- unlock
 	}()
 
@@ -258,7 +258,7 @@ func TestThreadSwitchRetriesOnceBeforeRefusing(t *testing.T) {
 		})
 
 		rec := httptest.NewRecorder()
-		quieted, stopped, unlock := fx.s.quietWorktreeFrom(rec, fx.projID, fx.taskID, "switched", read)
+		quieted, stopped, unlock := fx.s.quietWorktreeFrom(t.Context(), rec, fx.projID, fx.taskID, "switched", read)
 		if quieted == nil || unlock == nil {
 			t.Fatalf("the switch refused after one retry; it answered %d: %s", rec.Code, rec.Body.String())
 		}
@@ -287,7 +287,7 @@ func TestThreadSwitchRetriesOnceBeforeRefusing(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
-		quieted, stopped, unlock := fx.s.quietWorktreeFrom(rec, fx.projID, fx.taskID, "switched", always)
+		quieted, stopped, unlock := fx.s.quietWorktreeFrom(t.Context(), rec, fx.projID, fx.taskID, "switched", always)
 		if quieted != nil || unlock != nil {
 			if unlock != nil {
 				unlock()
@@ -310,4 +310,49 @@ func TestThreadSwitchRetriesOnceBeforeRefusing(t *testing.T) {
 			t.Errorf("the refusal does not say nothing happened: %s", rec.Body.String())
 		}
 	})
+}
+
+// A switch whose person navigated away stops queueing behind the tool call that holds the worktree, and
+// nothing was captured, so nothing has to be given back.
+func TestThreadSwitchCalledOffCapturesNothing(t *testing.T) {
+	fx := newWorktreeLockFixture(t, "switch called off")
+	holder := fx.s.lockWorktree(fx.taskID)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	read := func(http.ResponseWriter, string, string) (*types.Task, bool) {
+		cur, err := fx.s.store.GetTaskByID(fx.taskID)
+		if err != nil {
+			return nil, false
+		}
+		return cur, true
+	}
+
+	rec := httptest.NewRecorder()
+	quieted, stopped, unlock := fx.s.quietWorktreeFrom(ctx, rec, fx.projID, fx.taskID, "switched", read)
+	holder()
+	if quieted != nil || unlock != nil {
+		if unlock != nil {
+			unlock()
+		}
+		t.Fatal("a caller called off was handed the worktree it never waited into")
+	}
+	if stopped {
+		t.Error("nothing was running, so a switch that stopped nothing must not report a stop")
+	}
+	if rec.Body.Len() == 0 {
+		t.Error("the abandoned wait left the request unanswered")
+	}
+	if _, err := os.Stat(fx.file); err != nil {
+		t.Fatal("the abandoned switch touched the worktree")
+	}
+
+	// The waiter that gave up left no claim on the key: whoever asks next walks straight in.
+	got := make(chan struct{})
+	go func() { fx.s.lockWorktree(fx.taskID)(); close(got) }()
+	select {
+	case <-got:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the called-off waiter kept the task's worktree lock")
+	}
 }

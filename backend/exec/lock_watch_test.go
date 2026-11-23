@@ -4,6 +4,7 @@ package exec
 // blocks, and lets a commit run over a live tool call.
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -19,9 +20,10 @@ func TestLockWorktreeWatchedQueuesOnTheSameTableAsLockWorktree(t *testing.T) {
 	got := make(chan struct{})
 	var notices int
 	go func() {
-		release := te.LockWorktreeWatched(taskID, 5*time.Millisecond, keylock.WaitNotice(func(time.Duration, bool) {
-			notices++
-		}))
+		release, _ := te.LockWorktreeWatched(context.Background(), taskID, 5*time.Millisecond,
+			keylock.WaitNotice(func(time.Duration, keylock.WaitOutcome) {
+				notices++
+			}))
 		close(got)
 		release()
 	}()

@@ -1223,6 +1223,12 @@
         noteTaskRow(stoppedState, readAgainst);
         // Re-read the transcript so unpersisted streaming rows don't come back as duplicates.
         await loadHistory(false, stoppedState);
+        // The provider keeps talking during the stop request and the read above keeps what that window
+        // opened, so the ended-state teardown runs again here — gated on the row, so a stop that never
+        // reached the server cannot mute a turn that is still running.
+        if (!taskIsInFlight(knownExecutionState)) stream.endOpenTurn();
+        // The effect below clears the flag only once the task is out of the streaming set.
+        stopping = false;
     }
 
     $effect(() => {
