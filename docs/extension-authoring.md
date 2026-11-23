@@ -158,6 +158,20 @@ That first card has no browser in front of it choosing a model, so `applyTaskDef
 and auto-commit defaults. A row with no provider is one `executor.StartTask` refuses, and the create only
 logs that refusal — the pair is what makes the card run.
 
+The dialog asks two questions about that project's sandbox before any of it exists: whether the agent's
+container may reach the network, and whether it gets Docker's default capabilities. Both start off, and
+the answer rides the create as `sandbox_network_isolation` and `sandbox_capabilities`. It has to: the
+create starts a task, and `handleUpdateProject` refuses a sandbox change while one is running. An absent
+field is the older answer — isolated, no capability — so nothing widens because a form was left alone.
+
+The capability list is `DOCKER_DEFAULT_CAPABILITIES`
+(`frontend/src/lib/components/SandboxConfigModal/capabilities.ts`), the one set the project's Sandbox
+Configuration offers, so the two screens cannot disagree about what "Docker's defaults" means. A name is
+shape-checked before the first directory is written and judged for what may be granted by
+`types.ValidateSandboxAdditions` where the project row is made.
+
+The person lands on the first task, not on its board: `docs/link-rows.md → A project the app just made`.
+
 ## The bundle
 
 `templates/extension/` holds `README.md`, `AGENTS.md`, a `tests/README.md`, and the authoring skill
@@ -207,6 +221,10 @@ bytes.
   Every JSON name the manifest types declare is named somewhere in the skill, walking into every
   capability type, so a field added to Go without a page fails. And no table in the grammar page names a
   field the types do not declare.
-- `backend/api/extension_scaffold_test.go` — the create path, and the defaults its first task arrives
-  with.
+- `backend/api/extension_scaffold_test.go` — the create path, the defaults its first task arrives with,
+  and the two sandbox answers: what an opt-in lands on the project row, what an absent field leaves alone,
+  and the refusal that writes no directory. The dialog's steps and the fields it sends are
+  `frontend/src/lib/components/ConfigModal/__tests__/extension-create-handoff.unit.svelte.ts`, and the
+  address bar and the row it leaves behind are
+  `frontend/tests/e2e/create-extension-opens-task.spec.ts`.
 - `backend/api/project_dev_repo_test.go` — only a development project's directory is removed.

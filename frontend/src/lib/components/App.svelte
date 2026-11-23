@@ -1038,15 +1038,22 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         }
     }
 
-    /** A created extension arrives with its project and a task already running, and lands on the board
-     *  the same way an added project does. */
-    function handleOpenCreatedProject(project: Project) {
+    /** A created extension lands on its board the way an added project does, then opens its first task
+     *  the way a card click does. A start the server refused still opens: the card's Start button is
+     *  where that is fixed. */
+    async function handleOpenCreatedExtension(project: Project, task: Task) {
         if (!appStore.projects.some(p => p.id === project.id)) {
             appStore.projects = [...appStore.projects, project];
         }
         uiStore.showConfig = false;
         clearTaskDetail();
-        selectProject(project, true, { board: true });
+        await selectProject(project, true, { board: true });
+        // A board read that ended on another project's rows has nothing to open the card into.
+        if (appStore.selectedProject?.id !== project.id) return;
+        // Two pushes, so Back returns to the board. `view` is cleared because a `view` naming a screen
+        // keeps the detail closed.
+        urlRouter.write({ project: project.id, task: task.id, view: null, file: null }, true, true);
+        await restoreTaskFromUrl();
     }
 
     async function handleCloneProject(gitUrl: string, targetDir: string, sandboxEnabled: boolean) {
@@ -1501,7 +1508,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             onClose={() => uiStore.showConfig = false}
             onSaved={() => uiStore.showConfig = false}
             onSignOut={() => sessionBoot.signOut()}
-            onOpenProject={handleOpenCreatedProject}
+            onOpenCreatedExtension={handleOpenCreatedExtension}
         />
     {/if}
     {#if uiStore.showTerminal && terminalPanel.component}

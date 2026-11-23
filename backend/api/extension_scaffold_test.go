@@ -191,6 +191,86 @@ func TestScaffoldMakesRepositoryProjectRowAndTask(t *testing.T) {
 	}
 }
 
+// The create's two recommendations are the project's own sandbox columns, and the answer has to ride the
+// create: the create starts a task, and a running task locks them until every task in the project stops.
+
+func TestScaffoldCarriesTheRecommendationOntoTheProject(t *testing.T) {
+	h, s, _, _, _ := scaffoldHandler(t)
+	body := `{"name":"FeedReader","description":"fetch a feed",` +
+		`"sandbox_network_isolation":false,"sandbox_capabilities":["CAP_CHOWN","CAP_NET_RAW"]}`
+
+	rec := postScaffold(t, h, body)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Project types.Project `json:"project"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.GetProject(out.Project.ID)
+	if err != nil {
+		t.Fatalf("the project row is missing: %v", err)
+	}
+	if !project.SandboxEnabled {
+		t.Error("a recommendation about a sandbox is never a reason to run a task on the host")
+	}
+	if project.SandboxNetworkIsolation {
+		t.Error("the person allowed the network and the container still has none")
+	}
+	if strings.Join(project.SandboxCapabilities, ",") != "CAP_CHOWN,CAP_NET_RAW" {
+		t.Errorf("the granted capabilities are %v", project.SandboxCapabilities)
+	}
+}
+
+// An absent field is the answer the create has always given. A create that says nothing cannot widen a
+// project, whatever the client's form defaulted to on the way out the door.
+func TestScaffoldWithoutARecommendationLeavesTheProjectIsolated(t *testing.T) {
+	h, s, _, _, _ := scaffoldHandler(t)
+	rec := postScaffold(t, h, `{"name":"Quiet","description":"count the words on a card"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", rec.Code, rec.Body.String())
+	}
+	var out struct {
+		Project types.Project `json:"project"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	project, err := s.GetProject(out.Project.ID)
+	if err != nil {
+		t.Fatalf("the project row is missing: %v", err)
+	}
+	if !project.SandboxNetworkIsolation || len(project.SandboxCapabilities) != 0 {
+		t.Errorf("a create that named no sandbox answer widened the project: %+v", project)
+	}
+}
+
+func TestScaffoldRefusesACapabilityBeforeWritingAnything(t *testing.T) {
+	h, s, _, _, extRoot := scaffoldHandler(t)
+	body := `{"name":"Privileged","description":"count the words on a card",` +
+		`"sandbox_capabilities":["--privileged"]}`
+
+	rec := postScaffold(t, h, body)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST %s = %d, want 400: %s", body, rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "--privileged") {
+		t.Errorf("the refusal did not name the value it refused: %s", rec.Body.String())
+	}
+	projects, err := s.ListProjects()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(projects) != 0 {
+		t.Errorf("a refused create made projects: %+v", projects)
+	}
+	if entries, err := os.ReadDir(extRoot); err == nil && len(entries) != 0 {
+		t.Errorf("a refused create left %d directories in the extensions tree", len(entries))
+	}
+}
+
 // Without the worker pair on this card the start at the end of the create has nothing to run.
 func TestScaffoldTaskCarriesTheConfiguredDefaults(t *testing.T) {
 	h, s, _, _, _ := scaffoldHandler(t)

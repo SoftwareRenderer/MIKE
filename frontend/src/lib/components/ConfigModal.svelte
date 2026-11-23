@@ -1,7 +1,7 @@
 <script lang="ts">
     
     import { tick } from 'svelte';
-    import type { Config, Project, ProjectUpdates, Provider } from '$lib/types';
+    import type { Config, Project, ProjectUpdates, Provider, Task } from '$lib/types';
     import { isAgentProvider } from '$lib/types';
     import { getModelName, getProviderDisplayName, providerRef } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
@@ -41,7 +41,7 @@
     import fsExitIcon from '$lib/assets/icons/fullscreen-exit.svg?raw';
     import fsEnterIcon from '$lib/assets/icons/fullscreen-enter.svg?raw';
 
-    let { config, onClose, onSaved, onSignOut, onOpenProject }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void>; /** The Extensions tab created an extension with its project and first task; the shell that owns the address bar opens that board. */ onOpenProject?: (project: Project) => void } = $props();
+    let { config, onClose, onSaved, onSignOut, onOpenCreatedExtension }: { config: Config | null; onClose: () => void; onSaved: () => void; onSignOut?: () => void | Promise<void>; /** The Extensions tab created an extension with its project and its first started task; the shell that owns the address bar opens that task. */ onOpenCreatedExtension?: (project: Project, task: Task) => void } = $props();
 
     let workerProvider = $state('');
     let workerModel = $state('');
@@ -1028,7 +1028,7 @@
 
         <!-- Extensions Tab -->
         {#if activeTab === 'extensions'}
-            <ExtensionsTab {onOpenProject} />
+            <ExtensionsTab {onOpenCreatedExtension} />
         {/if}
 
         <!-- MCP Tab -->

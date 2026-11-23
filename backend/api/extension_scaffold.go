@@ -54,10 +54,13 @@ func NewExtensionScaffoldHandler(deps ExtensionScaffoldDeps) *ExtensionScaffoldH
 }
 
 // scaffoldRequest is decoded into pointer fields, so a body that sends neither field is refused
-// differently from one that sends them empty.
+// differently from one that sends them empty. Naming no sandbox answer widens nothing: the project is
+// isolated with no capability, as it has always been.
 type scaffoldRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
+	Name                    *string  `json:"name"`
+	Description             *string  `json:"description"`
+	SandboxNetworkIsolation *bool    `json:"sandbox_network_isolation"`
+	SandboxCapabilities     []string `json:"sandbox_capabilities"`
 }
 
 // devTaskPreamble is the only text the create path adds to the prompt; the person's description follows
@@ -69,8 +72,9 @@ const devTaskPreamble = "You are writing a MIKE extension in this repository.\n\
 	"press Try Extension.\n\n" +
 	"What the person asked for:\n"
 
-// HandleScaffold answers POST /api/extensions/scaffold. The person supplies a name and one
-// description; the type, the manifest and every file come from the agent the task starts.
+// HandleScaffold answers POST /api/extensions/scaffold. The person supplies a name, one description and
+// the answer to the two sandbox recommendations; the type, the manifest and every file come from the agent
+// the task starts.
 func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http.Request) {
 	var req scaffoldRequest
 	if !httputil.DecodeJSON(w, r, &req) {
@@ -84,6 +88,11 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 	description := strings.TrimSpace(derefString(req.Description))
 	if description == "" {
 		httputil.JSONError(w, http.StatusBadRequest, "say what the extension should do — the agent chooses its type from those words")
+		return
+	}
+	// Refused before the first directory exists, so a bad name creates nothing to clean up.
+	if err := types.ValidateSandboxAdditions(nil, req.SandboxCapabilities); err != nil {
+		httputil.JSONError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	// The task handler is optional: a build that cannot run a turn still creates the extension.
@@ -120,11 +129,15 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 	}
 
 	networkIsolation := true
+	if req.SandboxNetworkIsolation != nil {
+		networkIsolation = *req.SandboxNetworkIsolation
+	}
 	project, code, msg := h.projects.createProjectFromRequest(types.CreateProjectRequest{
 		Path:                    repo,
 		Name:                    filepath.Base(repo),
 		SandboxEnabled:          true,
 		SandboxNetworkIsolation: &networkIsolation,
+		SandboxCapabilities:     req.SandboxCapabilities,
 	})
 	if project == nil {
 		// The project path answered its own sentence; only the directory it refused is ours to undo.

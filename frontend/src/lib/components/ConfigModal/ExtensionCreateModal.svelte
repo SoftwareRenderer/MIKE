@@ -1,10 +1,12 @@
 <script lang="ts">
-    import type { Project } from '$lib/types';
+    import type { Project, Task } from '$lib/types';
     import { t } from '$lib/i18n';
     import BaseModal from '../BaseModal.svelte';
     import Spinner from '../Spinner.svelte';
     import { scaffoldExtension } from '$lib/api';
+    import ExtensionCreateSandboxStep from './ExtensionCreateSandboxStep.svelte';
     import {
+        extensionCreateSandboxOptions,
         validateExtensionCreateDraft,
         type ExtensionCreateErrors,
     } from '$lib/utils/extension-create-draft';
@@ -15,7 +17,8 @@
      * the server's own words, because it names the path it could not write.
      */
     let { oncreated, onclose }: {
-        oncreated?: (project: Project) => void;
+        /** The rows the create made; only the create knows the task's id before the board holds it. */
+        oncreated?: (project: Project, task: Task) => void;
         onclose: () => void;
     } = $props();
 
@@ -24,21 +27,35 @@
     let touched = $state(false);
     let busy = $state(false);
     let failure = $state('');
+    /** Only the sandbox step's Create makes anything. */
+    let step = $state<'form' | 'sandbox'>('form');
+    let allowNetwork = $state(false);
+    let defaultCapabilities = $state(false);
 
     const errors = $derived<ExtensionCreateErrors>(
         validateExtensionCreateDraft({ name, description }));
-    const submittable = $derived(!busy && !errors.name && !errors.description);
+    const submittable = $derived(!errors.name && !errors.description);
 
-    async function submit(e: SubmitEvent) {
+    function toSandboxStep(e: SubmitEvent) {
         e.preventDefault();
         touched = true;
         if (!submittable) return;
+        failure = '';
+        step = 'sandbox';
+    }
+
+    async function create() {
         busy = true;
         failure = '';
         try {
-            const made = await scaffoldExtension(name.trim(), description.trim());
-            oncreated?.(made.project);
+            const made = await scaffoldExtension(
+                name.trim(),
+                description.trim(),
+                extensionCreateSandboxOptions({ allowNetwork, defaultCapabilities }),
+            );
+            oncreated?.(made.project, made.task);
         } catch (err) {
+            // The step stays up with the server's sentence, so the person can press again.
             failure = err instanceof Error ? err.message : String(err);
             busy = false;
         }
@@ -46,18 +63,36 @@
 </script>
 
 {#snippet footer()}
-    <button type="button" class="btn" onclick={onclose}>{t('app.cancel')}</button>
-    <button type="submit" form="extension-create-form" class="btn btn-primary" disabled={!submittable}>
-        {#if busy}
-            <Spinner decorative /> {t('settings.extensions.creating')}
-        {:else}
+    {#if step === 'form'}
+        <button type="button" class="btn" onclick={onclose}>{t('app.cancel')}</button>
+        <button type="submit" form="extension-create-form" class="btn btn-primary" disabled={!submittable}>
             {t('settings.extensions.createSubmit')}
-        {/if}
-    </button>
+        </button>
+    {:else}
+        <button type="button" class="btn" onclick={() => { step = 'form'; }} disabled={busy}>
+            {t('settings.extensions.createBack')}
+        </button>
+        <button type="button" class="btn btn-primary" onclick={create} disabled={busy}>
+            {#if busy}
+                <Spinner decorative /> {t('settings.extensions.creating')}
+            {:else}
+                {t('settings.extensions.createSubmit')}
+            {/if}
+        </button>
+    {/if}
 {/snippet}
 
-<BaseModal title={t('settings.extensions.createTitle')} width="520px" footer={footer} onClose={onclose}>
-    <form id="extension-create-form" class="create-body" onsubmit={submit}>
+<BaseModal
+    title={step === 'form'
+        ? t('settings.extensions.createTitle')
+        : t('settings.extensions.createSandboxTitle')}
+    width="520px"
+    modalClass="extension-create-modal"
+    footer={footer}
+    onClose={onclose}
+>
+{#if step === 'form'}
+    <form id="extension-create-form" class="create-body" onsubmit={toSandboxStep}>
         <p class="create-intro">{t('settings.extensions.createIntro')}</p>
         <label class="create-field">
             <span class="create-label">{t('settings.extensions.createNameLabel')}</span>
@@ -66,7 +101,6 @@
                 name="name"
                 class="create-input"
                 bind:value={name}
-                disabled={busy}
                 autocomplete="off"
                 aria-invalid={touched && !!errors.name}
                 placeholder={t('settings.extensions.createNamePlaceholder')}
@@ -83,7 +117,6 @@
                 class="create-input create-textarea"
                 rows="5"
                 bind:value={description}
-                disabled={busy}
                 aria-invalid={touched && !!errors.description}
                 placeholder={t('settings.extensions.createDescriptionPlaceholder')}
             ></textarea>
@@ -93,10 +126,13 @@
         {/if}
 
         <p class="create-note">{t('settings.extensions.createNote')}</p>
-        {#if failure}
-            <p class="create-error" role="alert">{failure}</p>
-        {/if}
     </form>
+{:else}
+    <ExtensionCreateSandboxStep bind:allowNetwork bind:defaultCapabilities disabled={busy} />
+    {#if failure}
+        <p class="create-error" role="alert">{failure}</p>
+    {/if}
+{/if}
 </BaseModal>
 
 <style>

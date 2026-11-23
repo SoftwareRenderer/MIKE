@@ -10,6 +10,9 @@ const STORAGE_STATE_ISOLATED = '/tmp/kanban-test-storage-state.json.isolated';
 // derived from it, so the two lanes can never drift out of sync.
 const ISOLATED_SPECS = [
   'extension-frame-channel',
+  // Creates a development extension row beside its project, and a development row is read by the
+  // Installed list every other extension spec reads.
+  'create-extension-opens-task',
   // Installs the byte-preview fixture, so it cannot share a server whose extension list someone else
   // is reading.
   'binary-preview',

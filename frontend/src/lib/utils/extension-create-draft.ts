@@ -1,4 +1,5 @@
 import type { MessageKey } from '$lib/i18n';
+import { DOCKER_DEFAULT_CAPABILITIES } from '$lib/components/SandboxConfigModal/capabilities';
 
 /** What the Create extension form holds: a name and what the extension should do. */
 export interface ExtensionCreateDraft {
@@ -25,4 +26,25 @@ export function validateExtensionCreateDraft(draft: ExtensionCreateDraft): Exten
         errors.description = 'settings.extensions.createDescriptionRequired';
     }
     return errors;
+}
+
+/** What the create sends for the two recommendations: the project's own sandbox columns. */
+export interface ExtensionCreateSandboxOptions {
+    networkIsolation: boolean;
+    capabilities: string[];
+}
+
+/**
+ * The wire form of the two answers, both off until the person touches one. Allowing network means NOT
+ * isolating, which is the column's own sense. The answer has to ride the create: a running task locks a
+ * project's sandbox settings.
+ */
+export function extensionCreateSandboxOptions(choice: {
+    allowNetwork: boolean;
+    defaultCapabilities: boolean;
+}): ExtensionCreateSandboxOptions {
+    return {
+        networkIsolation: !choice.allowNetwork,
+        capabilities: choice.defaultCapabilities ? [...DOCKER_DEFAULT_CAPABILITIES] : [],
+    };
 }

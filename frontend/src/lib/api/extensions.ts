@@ -1,4 +1,5 @@
 import type { Extension, ExtensionConsentRequest, Project, RegistryEntry, ExtensionUpdate, ReloadExtensionResult, Task } from '../types';
+import type { ExtensionCreateSandboxOptions } from '$lib/utils/extension-create-draft';
 import { API_BASE, apiFetch, apiError, csrfHeaders, readEventStream } from './helpers';
 import { t } from '$lib/i18n';
 
@@ -205,16 +206,23 @@ function streamOperation(path: string, body: Record<string, any>): AsyncIterable
 
 /**
  * Create a custom extension: the server lays down the authoring repository, the project beside it and the
- * first task, and answers with all three.
+ * first task, and answers with all three. A request naming no sandbox answer leaves the project isolated
+ * with no capability.
  */
 export async function scaffoldExtension(
     name: string,
-    description: string
+    description: string,
+    sandbox: ExtensionCreateSandboxOptions,
 ): Promise<{ project: Project; extension: Extension; task: Task; repository: string }> {
     const res = await apiFetch(`${API_BASE}/extensions/scaffold`, {
         method: 'POST',
         headers: await csrfHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ name, description }),
+        body: JSON.stringify({
+            name,
+            description,
+            sandbox_network_isolation: sandbox.networkIsolation,
+            sandbox_capabilities: sandbox.capabilities,
+        }),
     });
     if (!res.ok) throw await apiError(res, t('api.createExtension'));
     return res.json();

@@ -1,5 +1,5 @@
 <script lang="ts">
-    import type { Extension, RegistryEntry, ExtensionUpdate, ExtensionType, Project } from '$lib/types';
+    import type { Extension, RegistryEntry, ExtensionUpdate, ExtensionType, Project, Task } from '$lib/types';
     import {
         checkUpdates,
         deleteExtension,
@@ -43,10 +43,10 @@
      * leaves the name claimed in the server's in-flight set with no row and no way for the screen to say
      * why. Progress comes from the operation's stream alone — there is no build-progress route to poll.
      */
-    let { onOpenProject }: {
-        /** The create path made a project beside its repository; the shell that owns the address bar
-         *  decides what "show it" means, because a screen this deep never navigates on its own. */
-        onOpenProject?: (project: Project) => void;
+    let { onOpenCreatedExtension }: {
+        /** The create made the project and started its first task. The shell that owns the address bar
+         *  opens it, because a screen this deep never navigates on its own. */
+        onOpenCreatedExtension?: (project: Project, task: Task) => void;
     } = $props();
 
     let extensions = $state<Extension[]>([]);
@@ -581,11 +581,11 @@
     {#if showCreateModal}
         <ExtensionCreateModal
             onclose={() => showCreateModal = false}
-            oncreated={(project) => {
+            oncreated={(project, task) => {
                 showCreateModal = false;
                 void loadExtensions();
                 void extensionManager.loadExtensions();
-                onOpenProject?.(project);
+                onOpenCreatedExtension?.(project, task);
             }}
         />
     {/if}
