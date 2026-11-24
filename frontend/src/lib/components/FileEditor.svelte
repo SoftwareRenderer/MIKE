@@ -1857,7 +1857,7 @@
                                     : t('editor.binaryFile')}
                         </p>
                         {#if binaryPreviewable}
-                            <button type="button" class="editor-preview-binary" onclick={() => { binaryPreviewOpen = true; }}>
+                            <button type="button" class="chip-btn editor-preview-binary" onclick={() => { binaryPreviewOpen = true; }}>
                                 {t('editor.previewBinary')}
                             </button>
                         {/if}
@@ -1938,7 +1938,8 @@
 </div>
 
 <style>
-    /* The byte viewer's way in, beside the size the notice states. */
+    /* Where the byte viewer's way in sits in the notice; the chip it wears is `.chip-btn` in
+       `styles/shared.css`. */
     .editor-preview-binary {
         margin: 0 0 4px;
     }

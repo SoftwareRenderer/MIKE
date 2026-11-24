@@ -369,23 +369,12 @@
     flex-shrink: 0;
     opacity: 0.6;
 }
-/* The one chip a binary row offers an action with, whichever action it is. */
+/* Where the chips a binary row offers sit beside its notice. Their look is `.chip-btn` in
+   `styles/shared.css`, which every one of them also wears. */
 .diff-view-image-btn,
-.diff-list-contents-btn {
+.diff-list-contents-btn,
+.diff-preview-binary-btn {
     margin-left: 8px;
-    padding: 2px 8px;
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--color-text-secondary);
-    font-family: var(--font-sans);
-    font-size: var(--text-2xs);
-    cursor: pointer;
-}
-.diff-view-image-btn:hover,
-.diff-list-contents-btn:hover {
-    border-color: var(--color-accent);
-    color: var(--color-accent);
 }
 
 /* Empty file notice */

@@ -119,6 +119,26 @@
     font-size: var(--text-xs);
 }
 
+/* The chip a notice offers its action with, whichever action it is. Here rather than in `diff-viewer.css`:
+   the editor's byte notice wants the same chip and never loads that sheet. A call site adds where the chip
+   sits in its row, never a colour, and never the cursor or background `app.css` already answers for every
+   button — a class-level `cursor: pointer` would outrank the `not-allowed` a disabled chip must keep. */
+.chip-btn {
+    padding: 2px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-text-secondary);
+    font-family: var(--font-sans);
+    font-size: var(--text-2xs);
+}
+/* `opacity: 1` cancels `app.css`'s hover dim, for the reason it states: this control answers the pointer
+   with its own colour. */
+.chip-btn:hover {
+    opacity: 1;
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+}
+
 /* Here rather than in `diff-viewer.css`: the task view and the git panel paint this while `DiffViewer`
    is still being fetched, so that sheet is not on the page yet. */
 .diff-viewer-loading {

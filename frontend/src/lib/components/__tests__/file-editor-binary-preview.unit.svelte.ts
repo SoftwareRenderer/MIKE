@@ -124,6 +124,13 @@ describe('a file whose bytes the editor will not hold', () => {
         expect(dialog!.textContent).toContain('mesh/gear.zbin');
     });
 
+    it('draws Preview with the same chip the diff row draws its actions with', async () => {
+        uiInjector.registerFromExtensions([viewerExtension(['zbin'])]);
+        const el = await openRefused(`${PROJECT}/mesh/gear.zbin`);
+
+        expect(previewButton(el)?.classList.contains('chip-btn'), 'Preview drew its own box instead of the chip').toBe(true);
+    });
+
     it('mounts its frame with the file in the host context, never in the frame URL', async () => {
         uiInjector.registerFromExtensions([viewerExtension(['zbin'])]);
         const el = await openRefused(`${PROJECT}/mesh/gear.zbin`);

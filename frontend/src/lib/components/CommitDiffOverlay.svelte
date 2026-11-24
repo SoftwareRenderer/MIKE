@@ -420,10 +420,10 @@
                                     <div class="diff-binary-notice">
                                         {t('diff.binaryFile')}
                                         {#if image}
-                                            <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+                                            <button type="button" class="chip-btn diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
                                         {/if}
                                         {#if archive}
-                                            <button type="button" class="diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
+                                            <button type="button" class="chip-btn diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
                                         {/if}
                                     </div>
                                 {:else if file.isDeleted}
@@ -434,10 +434,10 @@
                                     <div class="diff-binary-notice">
                                         {t('diff.binaryFile')}
                                         {#if image}
-                                            <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+                                            <button type="button" class="chip-btn diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
                                         {/if}
                                         {#if archive}
-                                            <button type="button" class="diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
+                                            <button type="button" class="chip-btn diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
                                         {/if}
                                     </div>
                                 {/if}

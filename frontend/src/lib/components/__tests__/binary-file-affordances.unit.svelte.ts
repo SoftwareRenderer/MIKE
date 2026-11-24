@@ -45,6 +45,8 @@ function openCommit(files: DiffFile[]) {
 
 const pictureButtons = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('.diff-view-image-btn')];
 const listingButtons = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('.diff-list-contents-btn')];
+/** Every control a binary notice offers, in the order the notice draws them. */
+const noticeActions = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('.diff-binary-notice button')];
 
 /** The listing pane asks for the archive as soon as it renders. */
 function stubListing() {
@@ -76,6 +78,17 @@ describe('the control a binary row wears', () => {
         const { container } = openViewer({ unstagedFiles: everyKind() });
         expect(pictureButtons(container).map((b) => b.textContent)).toEqual(['View image']);
         expect(listingButtons(container).map((b) => b.textContent)).toEqual(['List contents']);
+    });
+
+    it('draws every action a binary notice offers with the one chip', () => {
+        // The chip's look lives on `.chip-btn` alone, so an action that stops wearing it drew its own box.
+        for (const open of [() => openViewer({ unstagedFiles: everyKind() }), () => openCommit(everyKind('a/'))]) {
+            const actions = noticeActions(open().container);
+            expect(actions.length, 'the notice offered no action to judge').toBeGreaterThan(0);
+            for (const action of actions) {
+                expect(action.classList.contains('chip-btn'), action.textContent).toBe(true);
+            }
+        }
     });
 
     it('offers the picture to a binary row the server gave no size for', () => {

@@ -74,6 +74,14 @@ describe('a binary row an extension renders', () => {
         expect(src.searchParams.get('extch'), 'a frame mounted without a channel token has no armed grants').toBeTruthy();
     });
 
+    it('draws Preview with the chip every binary action wears', () => {
+        uiInjector.registerFromExtensions([viewerExtension(['zbin'])]);
+        const { container } = openViewer([binaryFile('mesh/gear.zbin')]);
+
+        const [button] = previewButtons(container);
+        expect(button?.classList.contains('chip-btn'), 'Preview drew its own box instead of the chip').toBe(true);
+    });
+
     it('offers nothing for a file type nobody declared', () => {
         uiInjector.registerFromExtensions([viewerExtension(['zbin'])]);
         const { container } = openViewer([binaryFile('vendor/blob.bin')]);

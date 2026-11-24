@@ -453,13 +453,13 @@ import { slide } from 'svelte/transition';
         </svg>
         <span>{size === undefined ? t('diff.binaryFile') : t('diff.binaryWithSize', { size: formatBytes(size) })}</span>
         {#if preview}
-            <button type="button" class="diff-preview-binary-btn" onclick={() => { previewModal = preview }}>{t('diff.previewBinary')}</button>
+            <button type="button" class="chip-btn diff-preview-binary-btn" onclick={() => { previewModal = preview }}>{t('diff.previewBinary')}</button>
         {/if}
         {#if image}
-            <button type="button" class="diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
+            <button type="button" class="chip-btn diff-view-image-btn" onclick={() => { imageModal = image }}>{t('diff.viewImage')}</button>
         {/if}
         {#if archive}
-            <button type="button" class="diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
+            <button type="button" class="chip-btn diff-list-contents-btn" onclick={() => { archiveModal = archive }}>{t('diff.listContents')}</button>
         {/if}
     </div>
 {/snippet}
