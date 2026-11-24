@@ -25,7 +25,7 @@
     import { trustedExecutionState, isTaskPaused } from '$lib/utils/execution-state';
     import { offersResume } from '$lib/utils/review-bar';
     import { reselectProvider, getProviderDisplayName } from '$lib/utils/providers';
-    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, entriesWithoutRows, takeEchoMatch, removeFailedSend, removeDismissedError, applyMessageEdit } from '$lib/utils/chat-entries';
+    import { buildEntriesFromMessages, mergeLoadedHistory, buildEntryMetas, computeLastUserMessageIds, findLastUserMessageBefore, trimEntriesForRegenerate, pendingToolIds, endsOnReviewResult, takeEchoMatch, removeFailedSend, removeDismissedError, applyMessageEdit } from '$lib/utils/chat-entries';
     import { getAppStreamRef } from '$lib/stream-ref';
     import { useConnectionRestored } from '$lib/composables/use-connection-restored.svelte';
     import { useTaskEvents } from '$lib/composables/use-task-events.svelte';
@@ -539,6 +539,7 @@
         loadHistory,
         updateActiveThread,
         updateThreadUrl,
+        runInFlight: () => taskIsInFlight(knownExecutionState) || streamingTaskStore.has(taskId),
         onDiverged: () => { transcriptDiverged = true; },
     });
 
@@ -669,10 +670,7 @@
             const applies = !unchanged && windowIsReading(read, historyRows.length > 0);
             if (applies) {
                 const joined = applyWindowRead(historyRows, window.messages);
-                if (!joined.keepsEarlier) {
-                    stream.state.entries = entriesWithoutRows(stream.state.entries);
-                    dropHeadRows();
-                }
+                if (!joined.keepsEarlier) dropHeadRows();
                 historyRows = joined.rows;
 
                 if (!joined.keepsEarlier) {
@@ -681,7 +679,7 @@
                 }
                 // A window that cannot be joined replaced the conversation rather than extending it, and the
                 // reader's row is gone with it. Only then does a rebuild move the viewport.
-                renderHistory(scrollAfter || !joined.keepsEarlier, executionState);
+                renderHistory(scrollAfter || !joined.keepsEarlier, executionState, !joined.keepsEarlier);
             }
             // The baseline names what this screen painted, never what it merely downloaded.
             historyRevision = appliedRevision(read, applies, { windowRevision: window.revision, held: historyRevision });
@@ -747,14 +745,15 @@
 
     /** Draws the transcript from the rows loaded so far. Rebuilding it whole keeps a turn the window cut
      * in the middle as one entry. */
-    function renderHistory(scrollAfter: boolean, executionState: string) {
+    function renderHistory(scrollAfter: boolean, executionState: string, replacedConversation = false) {
         // The opening page joins here and nowhere else: dedup by id drops it once the walk reaches the start.
         const rows = prependRows(historyRows, headRows);
         const { entries: mergedDbEntries, checkpointHashes } = buildEntriesFromMessages(rows);
         stream.state.checkpointCommitHashes = checkpointHashes;
         gapAboveEntryId = headRows.length > 0 ? (historyRows[0]?.id ?? '') : '';
 
-        stream.state.entries = mergeLoadedHistory(mergedDbEntries, rows.map(m => m.id), stream.state.entries, taskIsInFlight(executionState));
+        stream.state.entries = mergeLoadedHistory(mergedDbEntries, rows.map(m => m.id), stream.state.entries,
+            taskIsInFlight(executionState), replacedConversation);
         // These are new entry objects, so refs captured while streaming are now
         // detached; re-point them before more events for this turn arrive.
         stream.reconcileActiveToolCalls();

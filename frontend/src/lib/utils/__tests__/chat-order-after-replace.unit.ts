@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { StreamState } from '$lib/services/stream-state.svelte';
 import { createStreamHandler, type StreamHandlerCallbacks } from '$lib/services/stream-handler';
 import { applyWindowRead } from '$lib/utils/chat-window';
-import { buildEntriesFromMessages, entriesWithoutRows, mergeLoadedHistory } from '$lib/utils/chat-entries';
+import { buildEntriesFromMessages, mergeLoadedHistory } from '$lib/utils/chat-entries';
 import type { ChatEntry } from '$lib/types';
 
 /**
@@ -26,6 +26,8 @@ function makeCallbacks(): StreamHandlerCallbacks {
         loadHistory: vi.fn(),
         updateActiveThread: vi.fn(),
         updateThreadUrl: vi.fn(),
+        // These drives stream a live turn; a case that means otherwise says so.
+        runInFlight: () => true,
         onNewError: vi.fn(),
     };
 }
@@ -65,14 +67,13 @@ function drawnIds(entries: ChatEntry[]): string[] {
 
 const readEntryIds = () => drawnIds(buildEntriesFromMessages(readRows).entries);
 
-/** The transcript after a read that could not be joined. Mirrors `loadHistory` → `renderHistory`
- * (`TaskChat.svelte`), the rule's only caller. */
+/** The transcript after a read that could not be joined — the one read `renderHistory()` (`TaskChat.svelte`)
+ * tells `mergeLoadedHistory()` about. */
 function redraw(held: typeof heldRows, read: typeof readRows, drawn: ChatEntry[], running: boolean): ChatEntry[] {
     const joined = applyWindowRead(held, read);
     expect(joined.keepsEarlier).toBe(false); // every case here needs a read that cannot be joined
-    const trimmed = entriesWithoutRows(drawn);
     const { entries } = buildEntriesFromMessages(joined.rows);
-    return mergeLoadedHistory(entries, joined.rows.map(r => r.id), trimmed, running);
+    return mergeLoadedHistory(entries, joined.rows.map(r => r.id), drawn, running, true);
 }
 
 /** The turn the socket dropped on: its card was announced and never answered. Behind it, a note and a prompt
@@ -86,7 +87,7 @@ function tailWithStuckCard(): ChatEntry[] {
     ]);
 }
 
-describe('entriesWithoutRows — a read that replaces the conversation', () => {
+describe('mergeLoadedHistory — a read that replaces the conversation', () => {
     it('does not drag the turns behind an unanswered card below the answers the read brought', () => {
         const drawn = tailWithStuckCard();
         expect(drawnIds(drawn)).toEqual(['live-0', 'adv-5', 'u6']);

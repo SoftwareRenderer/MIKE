@@ -510,6 +510,9 @@ never marks the app offline, and nothing in the product puts a deadline on a wai
   holds nothing rather than replacing one that holds something.
 - **The offline screen answers from the mirror** — its projects, board and config come out of IndexedDB with
   no request in front of them, and the loading screen stays up over that read.
+- **An unanswered tool call is work or a leftover per call, never per task** — a call with any row written below
+  it was left behind, and an answer this screen holds outranks the row that has not caught up with it.
+  `docs/reconnection.md → The row that lags the answer the socket gave`.
 - Mechanisms: **`docs/reconnection.md`**.
 
 ## Licensing

@@ -92,6 +92,9 @@ export interface StreamHandlerCallbacks {
     loadHistory: (scrollAfter: boolean) => void;
     updateActiveThread: (threadId: string) => void;
     updateThreadUrl: (threadId: string) => void;
+    /** Whether a run is live for this task, as the screen reads it. The handler never answers that for itself:
+     * the answer is the task's own row, or a turn this screen is streaming. */
+    runInFlight: () => boolean;
     /** Reports a failure the client has not shown yet — never called for a replayed frame. */
     onNewError?: () => void;
     /** Reports that this screen threw away content no later read can redraw, so its transcript is behind. */
@@ -108,7 +111,7 @@ export interface StreamHandlerCallbacks {
  *   // In WebSocket onmessage: handleEvent(event);
  */
 export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallbacks) {
-    const { genId, scroll, markStreaming, markNotStreaming, onRefreshDiff, onThreadSwitch, loadHistory, updateActiveThread, updateThreadUrl, onNewError, onDiverged } = cb;
+    const { genId, scroll, markStreaming, markNotStreaming, onRefreshDiff, onThreadSwitch, loadHistory, updateActiveThread, updateThreadUrl, runInFlight, onNewError, onDiverged } = cb;
     const s = stream.state;
 
     // rAF batching for scroll — coalesces rapid calls during token bursts
@@ -249,6 +252,11 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     break;
                 }
                 if (s.processedToolIds.has(data.tool_id)) break;
+
+                // An announcement is all a card has to say the tool is running, and one can reach this screen
+                // long after the run that sent it: the replay buffer keeps an unanswered call, and the
+                // component's gate lifts as soon as its rows land. Refuse to start a counter no run can stop.
+                if (!s.runAnnounced && !runInFlight()) break;
 
                 let entry = s.currentAssistantId ? s.entries.find(e => e.id === s.currentAssistantId) || null : null;
                 if (!entry) entry = ensureAssistantEntry();
@@ -429,7 +437,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                 } else if (data.state === 'starting_container') {
                     s.entries = [...s.entries, { id: genId(), role: 'system', content: t('chat.stream.startingContainer'), isStreaming: false, createdAt: new Date().toISOString() }];
                 } else if (data.state === 'running') {
-                    stream.forgetTurnBoundary();
+                    stream.announceRun();
                     const wasInFlight = s.currentAssistantId !== null || s.activeToolCalls.size > 0;
                     // The sandbox container started — any build/pull box is complete.
                     const buildEntry = s.entries.find(e => e.buildLog && !e.buildLog.done);
@@ -495,7 +503,7 @@ export function createStreamHandler(stream: StreamState, cb: StreamHandlerCallba
                     if (data.kind === 'retry') {
                         // The dead call is retried with the same messages, so what it streamed has no
                         // row behind it and the retry streams the answer over it.
-                        stream.forgetTurnBoundary();
+                        stream.announceRun();
                         stream.dropAbandonedTurn();
                         s.retryCount = 1;
                         s.retryError = data.error || '';

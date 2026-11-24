@@ -82,6 +82,24 @@ The box stays browser-only either way: no row is written for it. A page refresh 
 that replaces the conversation instead of extending it (`entriesWithoutRows`). `chat-history-merge.unit.ts` is
 what fails when a finished box moves.
 
+### The row that lags the answer the socket gave
+
+The `tool_result` frame is sent before its row is written, so a read taken across that gap answers with the call
+still open. The merge then draws that row's card from the answer the browser already holds, and keeps the row's id,
+which the checkpoint divider and its "view changes" link are keyed on.
+
+The answers come from the whole screen, not from the tail `entriesWithoutRows` keeps. The entry carrying an answer
+sits above the last row-backed one, and losing it is what leaves a card counting "Running for…" over a tool that
+returned.
+
+Whether an unanswered call is work or a leftover is judged per call, never per task. A call with any row
+written below it was left behind: nothing is written below a call while it runs. For a task no run is in flight,
+every open call is such a leftover.
+
+`chat-history-merge.unit.ts` is red when either judgment is read from the tail or handed back to the task's
+status. `return-lagging-window-read.spec.ts` holds a window read across the gap, and is red when the lagging bytes
+reopen a card the socket had answered.
+
 ## The Editor Buffer Across a Browser Being Away
 
 An unsaved buffer belongs to the browser, not the server: the editor writes it to the `editor-drafts`

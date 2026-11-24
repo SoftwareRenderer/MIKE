@@ -1,4 +1,4 @@
-import type { ChatEntry, Thread } from '$lib/types';
+import type { ChatEntry, Thread, ToolCallInfo } from '$lib/types';
 import { t } from '$lib/i18n';
 import { PENDING_SEND_ID_PREFIX } from './pending-sends';
 
@@ -457,42 +457,55 @@ export function buildEntriesFromMessages(
  * and a live entry stays only when the DB provably lacks it: a tool_call event is sent once, and the rows carry
  * the identity, so an entry whose tool id already has a row is a duplicate.
  *
- * `taskIsRunning` decides whether a pending tool call is work or a leftover, and it must come from
- * `taskIsInFlight(execution_state)`, never from the task's status, which stays `in_progress` after a stop.
+ * `taskIsRunning` is half of what makes an unanswered call work rather than a leftover; `stalePendingCallIds()`
+ * answers the other half. It must come from `taskIsInFlight(execution_state)`, never from the task's status,
+ * which stays `in_progress` after a stop. `conversationReplaced` says these rows could not be joined to what is
+ * on screen, so an entry the read holds a row for is the read's to draw.
  */
 export function mergeLoadedHistory(
     dbEntries: ChatEntry[],
     dbMessageIds: Iterable<string>,
     liveEntries: ChatEntry[],
     taskIsRunning: boolean,
+    conversationReplaced = false,
 ): ChatEntry[] {
-    // Hide a card a stopped task will never answer, not the message holding it: dropping the entry
+    // An answer the stream delivered outranks a row that has not caught up with it: the `tool_result` frame is
+    // sent before its row is written, so a read taken across that gap holds the call still open. The answers come
+    // from the whole screen, not from the tail the cut below keeps — the entry carrying one sits above it.
+    const answered = answeredCallsById(liveEntries);
+    const live = conversationReplaced ? entriesWithoutRows(liveEntries) : liveEntries;
+    const rows = dbEntries.map(e => withAnsweredCalls(e, answered));
+
+    // Hide a card no run will answer, not the message holding it: dropping the entry
     // would take the turn's text and finished cards too.
-    const settled = taskIsRunning ? dbEntries : dbEntries.map(withoutStalePendingCards).filter((e): e is ChatEntry => e !== null);
+    const stale = taskIsRunning ? stalePendingCallIds(rows) : everyPendingCallId(rows, live);
+    const settled = rows.map(e => withoutPendingCalls(e, stale)).filter((e): e is ChatEntry => e !== null);
 
     const dbIds = new Set(dbMessageIds);
-    // Over dbEntries, not settled: a hidden card is still a row that describes the call, so a live
+    // Over the rows, not settled: a hidden card is still a row that describes the call, so a live
     // copy of it is a duplicate.
     const dbToolIds = new Set<string>();
-    for (const e of dbEntries) {
+    for (const e of rows) {
         for (const tc of e.toolCalls ?? []) dbToolIds.add(tc.toolId);
     }
-    const lastLive = liveEntries[liveEntries.length - 1];
+    const lastLive = live[live.length - 1];
 
     const merged: ChatEntry[] = [...settled];
-    for (const e of liveEntries) {
+    for (const e of live) {
         // The complete event renames a streaming entry to its row id.
         if (dbIds.has(e.id)) continue;
 
-        const calls = e.toolCalls ?? [];
-        if (calls.length > 0) {
-            if (!taskIsRunning && calls.some(tc => tc.isPending)) continue;
+        const all = e.toolCalls ?? [];
+        if (all.length > 0) {
+            const calls = all.filter(tc => !stale.has(tc.toolId));
+            // Nothing but cards no run will answer: the rows already say what happened to them.
+            if (calls.length === 0) continue;
             const missing = calls.filter(tc => !dbToolIds.has(tc.toolId));
+            if (missing.length === 0) continue;
             if (missing.length === calls.length) {
-                merged.push(e);
+                merged.push({ ...e, toolCalls: calls });
                 continue;
             }
-            if (missing.length === 0) continue;
             // Join the DB's copy of the turn instead of opening a second one: that entry keeps the
             // row id, which the checkpoint divider and its "view changes" link are keyed on.
             const shared = new Set(calls.map(tc => tc.toolId));
@@ -547,7 +560,10 @@ function noRowHolds(entry: ChatEntry): boolean {
  * The tail of the transcript that survives a read which replaced the conversation: the run at its end that no
  * stored row holds, oldest first. The cut sits at the end of that content rather than its start, because a
  * merge can only append and an entry above the last row-backed one is older than a row the read proved exists.
+ * The boundary is not what `mergeLoadedHistory()` reads answers from — it reads the whole screen.
  * `docs/reconnection.md → The tab that comes back`.
+ *
+ * @knipignore A unit test asks where the boundary falls, on the screen's own list.
  */
 export function entriesWithoutRows(entries: ChatEntry[]): ChatEntry[] {
     return entries.slice(entries.findLastIndex(e => !noRowHolds(e)) + 1);
@@ -565,15 +581,76 @@ function isRowCopy(entry: ChatEntry, rows: ChatEntry[], isNewestOnScreen: boolea
         && (r.content === entry.content || r.content.startsWith(entry.content)));
 }
 
-/** The entry without the pending tool calls a stopped task will never resolve; null if nothing renders. */
-function withoutStalePendingCards(entry: ChatEntry): ChatEntry | null {
-    const pending = entry.toolCalls?.filter(tc => tc.isPending) ?? [];
-    if (pending.length === 0) return entry;
-    const settledCalls = entry.toolCalls!.filter(tc => !tc.isPending);
-    const rendersAnything = settledCalls.length > 0 || !!entry.content || entry.hasReasoning || !!entry.reasoningContent
+/** The calls this screen already holds an answer for, by tool id. */
+function answeredCallsById(entries: ChatEntry[]): Map<string, ToolCallInfo> {
+    const answered = new Map<string, ToolCallInfo>();
+    for (const e of entries) {
+        for (const tc of e.toolCalls ?? []) if (!tc.isPending) answered.set(tc.toolId, tc);
+    }
+    return answered;
+}
+
+/**
+ * The entry with each open call the screen has since been answered for carrying that answer instead. The row
+ * keeps its identity — the checkpoint divider and its "view changes" link are keyed on it.
+ */
+function withAnsweredCalls(entry: ChatEntry, answered: Map<string, ToolCallInfo>): ChatEntry {
+    if (!entry.toolCalls?.some(tc => tc.isPending)) return entry;
+    let replaced = false;
+    const toolCalls = entry.toolCalls.map(tc => {
+        const known = tc.isPending ? answered.get(tc.toolId) : undefined;
+        if (!known) return tc;
+        replaced = true;
+        return { ...known, messageId: tc.messageId ?? known.messageId, startedAt: tc.startedAt ?? known.startedAt };
+    });
+    return replaced ? { ...entry, toolCalls } : entry;
+}
+
+/**
+ * The open calls in these row-backed entries that no run will answer.
+ *
+ * A tool's row is written before the tool runs and its answer is written into that same row, and the next
+ * call's row is written only once this one has returned — so a call with any row below it was left without an
+ * answer: the run died mid-tool, or the result never reached the database.
+ *
+ * A `user` row is no witness: the answer to `ask_question` arrives as one while its call is still open. Nor is
+ * the call's own turn: its row and its text are both written before its tools run, so inside an entry only a
+ * call below counts.
+ */
+function stalePendingCallIds(rows: ChatEntry[]): Set<string> {
+    const stale = new Set<string>();
+    let below = false;
+    for (let i = rows.length - 1; i >= 0; i--) {
+        const entry = rows[i]!;
+        const calls = entry.toolCalls ?? [];
+        for (let k = calls.length - 1; k >= 0; k--) {
+            const tc = calls[k]!;
+            if (tc.isPending && below) stale.add(tc.toolId);
+            // The row exists, so whatever sits above it was answered before it was written.
+            below = true;
+        }
+        if (calls.length === 0 && (entry.content || entry.reasoningContent || entry.hasReasoning || entry.stats)) below = true;
+    }
+    return stale;
+}
+
+/** Every open call, which is what a task no longer running leaves behind. */
+function everyPendingCallId(rows: ChatEntry[], liveEntries: ChatEntry[]): Set<string> {
+    const stale = new Set<string>();
+    for (const e of [...rows, ...liveEntries]) {
+        for (const tc of e.toolCalls ?? []) if (tc.isPending) stale.add(tc.toolId);
+    }
+    return stale;
+}
+
+/** The entry without the cards no run will answer; null if nothing renders. */
+function withoutPendingCalls(entry: ChatEntry, stale: Set<string>): ChatEntry | null {
+    const kept = entry.toolCalls?.filter(tc => !stale.has(tc.toolId));
+    if (!kept || kept.length === entry.toolCalls!.length) return entry;
+    const rendersAnything = kept.length > 0 || !!entry.content || entry.hasReasoning || !!entry.reasoningContent
         || !!entry.attachments?.length || !!entry.buildLog;
     if (!rendersAnything) return null;
-    return { ...entry, toolCalls: settledCalls.length > 0 ? settledCalls : undefined };
+    return { ...entry, toolCalls: kept.length > 0 ? kept : undefined };
 }
 
 // Drop an error entry repeating the one right before it: old databases hold one copy of a failure per

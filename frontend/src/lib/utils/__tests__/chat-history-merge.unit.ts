@@ -18,14 +18,17 @@ function makeCallbacks(): StreamHandlerCallbacks {
         loadHistory: vi.fn(),
         updateActiveThread: vi.fn(),
         updateThreadUrl: vi.fn(),
+        // These drives stream a live turn; a case that means otherwise says so.
+        runInFlight: () => true,
         onNewError: vi.fn(),
     };
 }
 
 /** Drive the real stream handler to get what the browser holds before a history load. */
-function liveEntries(events: Array<{ type: string; data: unknown }>): ChatEntry[] {
+function liveEntries(events: Array<{ type: string; data: unknown }>, idPrefix = 'live-'): ChatEntry[] {
     const stream = new StreamState();
-    const handle = createStreamHandler(stream, makeCallbacks());
+    let n = 0;
+    const handle = createStreamHandler(stream, { ...makeCallbacks(), genId: () => `${idPrefix}${n++}` });
     for (const e of events) handle({ type: e.type as never, data: e.data } as never, false);
     return stream.state.entries;
 }
@@ -247,6 +250,51 @@ describe('mergeLoadedHistory — a live copy of a row the read brought', () => {
     });
 });
 
+describe('mergeLoadedHistory — which unanswered call is work', () => {
+    const callsOf = (entries: ChatEntry[]) => entries.flatMap(e => e.toolCalls ?? []);
+
+    it('keeps the answer the stream gave a call whose row the read took before it landed', () => {
+        // The `tool_result` frame is sent before its row is written, so a window read issued across that gap
+        // answers with the call still open. The screen has the answer; the row has not caught up with it.
+        const messages = [
+            userRow('u1', 'go'),
+            assistantRow('a1'),
+            toolRow('m1', 't1', 'bash'), // read while it ran: no `tool_result` column yet
+        ];
+        const live = liveEntries([
+            { type: 'status', data: { state: 'running' } },
+            { type: 'tool_call', data: { tool_id: 't1', tool_name: 'bash', args: { command: 'ls' } } },
+            { type: 'tool_result', data: { tool_id: 't1', success: true, output: 'main.go', duration: 4 } },
+        ]);
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), live, true);
+
+        const call = callsOf(merged).find(tc => tc.toolId === 't1');
+        expect(call?.isPending, 'a read that lagged the answer un-answered a call the stream settled').toBe(false);
+        expect(call?.result).toBe('main.go');
+        expect(call?.messageId, 'the call keeps the row it was read from').toBe('m1');
+    });
+
+    it('hides a call the conversation moved past, while a later run is in flight', () => {
+        // A run that died mid-tool leaves its row open, and every later turn sits below it. Judging the call
+        // by the task alone makes it count for as long as any run runs.
+        const messages = [
+            userRow('u1', 'go'),
+            assistantRow('a1'),
+            toolRow('m1', 't1', 'read_file'), // nothing below it answered it; the run ended there
+            userRow('u2', 'keep going'),
+            assistantRow('a2'),
+            toolRow('m2', 't2', 'bash', 'built'),
+            toolRow('m3', 't3', 'bash'),      // the call running now
+        ];
+
+        const merged = mergeLoadedHistory(buildEntriesFromMessages(messages).entries, messages.map(m => m.id), [], true);
+
+        expect(toolIdsOf(merged)).toEqual(['t2', 't3']);
+        expect(callsOf(merged).filter(tc => tc.isPending).map(tc => tc.toolId)).toEqual(['t3']);
+    });
+});
+
 describe('mergeLoadedHistory — a task that is not running', () => {
     it('hides a tool call whose result never arrived, without hiding the message around it', () => {
         const messages = [
@@ -464,5 +512,42 @@ describe('entriesWithoutRows — what a replaced conversation leaves on screen',
         // The call answered, so only the text streaming after it is still awaiting a row.
         expect(entriesWithoutRows(live).map(e => e.id)).toEqual(['live-1']);
         expect(entriesWithoutRows(live).every(e => e.isStreaming)).toBe(true);
+    });
+});
+
+describe('mergeLoadedHistory — a read whose rows lag the answer the socket gave', () => {
+    /** The screen when the read lands: the rows as the read brings them, the card the frame answered, and the
+     * turn still streaming below it. */
+    function redraw(running: boolean): ChatEntry[] {
+        const messages = [userRow('u1', 'go'), toolRow('t1', 'call-1', 'bash'), assistantRow('a2', { content: 'Working on it.' })];
+        const entries = buildEntriesFromMessages(messages as never[]).entries;
+        const onScreen = [...entries,
+            ...liveEntries([
+                { type: 'tool_call', data: { tool_id: 'call-1', tool_name: 'bash', args: { command: 'sleep 5' } } },
+                { type: 'tool_result', data: { tool_id: 'call-1', output: 'done', success: true } },
+            ]),
+            ...liveEntries([{ type: 'token', data: { text: 'and the turn carries on' } }], 'tail-')];
+        // The answered card sits above the last row-backed entry, so the cut a replaced conversation makes
+        // retires the entry carrying it — and the merge must still find that answer.
+        expect(entriesWithoutRows(onScreen).map(e => e.id)).toEqual(['tail-0']);
+
+        return mergeLoadedHistory(entries, messages.map(m => m.id), onScreen, running, true);
+    }
+
+    function cardsOf(drawn: ChatEntry[]): Array<[string, boolean]> {
+        return drawn.flatMap(e => (e.toolCalls ?? []).map(tc => [tc.toolId, tc.isPending] as [string, boolean]));
+    }
+
+    it('an answered call is not reopened by the row that has not caught up with it', () => {
+        const drawn = redraw(true);
+
+        expect(cardsOf(drawn)).toEqual([['call-1', false]]);
+        const card = drawn.flatMap(e => e.toolCalls ?? [])[0]!;
+        expect(card.result).toBe('done');
+        expect(card.messageId, 'the row keeps the identity the checkpoint divider keys on').toBe('t1');
+    });
+
+    it('the answer stands over the lagging row for a task no longer running too', () => {
+        expect(cardsOf(redraw(false))).toEqual([['call-1', false]]);
     });
 });

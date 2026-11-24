@@ -127,6 +127,8 @@ describe('what the frames leave on screen once the run is stopped', () => {
             loadHistory: vi.fn(),
             updateActiveThread: vi.fn(),
             updateThreadUrl: vi.fn(),
+            // The frames these drives stream arrive during a run.
+            runInFlight: () => true,
         };
     }
 

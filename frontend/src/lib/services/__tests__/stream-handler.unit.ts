@@ -15,6 +15,8 @@ function makeCallbacks(overrides: Partial<StreamHandlerCallbacks> = {}): StreamH
         loadHistory: vi.fn(),
         updateActiveThread: vi.fn(),
         updateThreadUrl: vi.fn(),
+        // The frames these suites drive arrive during a run unless a case says otherwise.
+        runInFlight: () => true,
         onNewError: vi.fn(),
         onDiverged: vi.fn(),
         ...overrides,
@@ -1807,4 +1809,71 @@ describe('the status frame that ends a run', () => {
 
             expect(stream.state.entries[stream.state.entries.length - 1]?.reasoningPending?.chars).toBe(800);
         });
+});
+
+describe('a tool_call announcement no run will answer', () => {
+    function setup(runInFlight = false) {
+        const stream = new StreamState();
+        const handleEvent = createStreamHandler(stream, makeCallbacks({ runInFlight: () => runInFlight }));
+        return { stream, handleEvent };
+    }
+    const announced = { type: 'tool_call', data: { tool_id: 'tc1', tool_name: 'bash', args: { command: 'ls' } } } as const;
+    const runningFrame = { type: 'status', data: { state: 'running' } } as const;
+    const toolIdsOn = (stream: StreamState) => stream.state.entries.flatMap(e => (e.toolCalls ?? []).map(tc => tc.toolId));
+
+    it('opens no card, because the counter it starts has no run left to stop it', () => {
+        // The shape a return produces: the rows landed, the read hid the call's leftover card, and the
+        // buffered announcement arrives behind the read with the component's own gate already lifted.
+        const { stream, handleEvent } = setup();
+
+        handleEvent(announced, false);
+
+        expect(toolIdsOn(stream)).toEqual([]);
+        expect([...stream.state.processedToolIds], 'the refused id stays unprocessed, so a live run can still announce it').toEqual([]);
+    });
+
+    it('still updates the card the read brought, which the lost announcement belongs to', () => {
+        const { stream, handleEvent } = setup();
+        const { entries } = buildEntriesFromMessages([{
+            id: 'm1', role: 'tool_call', content: '', created_at: '2026-09-10T10:00:00Z',
+            tool_calls: JSON.stringify({ tool_id: 'tc1', tool_name: 'bash', args: {} }),
+        }]);
+        stream.state.entries = entries;
+
+        handleEvent(announced, false);
+
+        const calls = stream.state.entries.flatMap(e => e.toolCalls ?? []);
+        expect(calls.map(tc => tc.toolId)).toEqual(['tc1']);
+        expect(calls[0]!.args).toEqual({ command: 'ls' });
+        expect(calls[0]!.startedAt, 'the card keeps the moment its row was written').toBeDefined();
+    });
+
+    it('opens the card for a run this screen heard begin, before the board agrees', () => {
+        const { stream, handleEvent } = setup();
+
+        handleEvent(runningFrame, false);
+        handleEvent(announced, false);
+
+        expect(toolIdsOn(stream)).toEqual(['tc1']);
+    });
+
+    it('opens the card while the screen holds the task in flight', () => {
+        const { stream, handleEvent } = setup(true);
+
+        handleEvent(announced, false);
+
+        expect(toolIdsOn(stream)).toEqual(['tc1']);
+    });
+
+    it('closes the run it was told about, so a later announcement is stale again', () => {
+        const { stream, handleEvent } = setup();
+        handleEvent(runningFrame, false);
+        handleEvent(announced, false);
+        handleEvent({ type: 'tool_result', data: { tool_id: 'tc1', success: true, output: 'ok', duration: 1 } }, false);
+        handleEvent({ type: 'status', data: { state: 'completed' } }, false);
+
+        handleEvent({ ...announced, data: { ...announced.data, tool_id: 'tc2' } }, false);
+
+        expect(toolIdsOn(stream)).toEqual(['tc1']);
+    });
 });

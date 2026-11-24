@@ -22,6 +22,11 @@ export class StreamState {
          */
         turnEnded: false,
         /**
+         * True while this screen has heard a run begin and no frame has ended it — `turnEnded`'s other half. A
+         * screen that has just mounted has heard neither, which is what a replayed announcement reads as live.
+         */
+        runAnnounced: false,
+        /**
          * The last assistant entry the stream closed. A run can close its entry before the `complete` that
          * names its row lands.
          */
@@ -123,6 +128,7 @@ export class StreamState {
             if (!e.reasoningContent) e.hasReasoning = false;
         }
         this.state.turnEnded = true;
+        this.state.runAnnounced = false;
     }
 
     /**
@@ -176,11 +182,18 @@ export class StreamState {
         this.state.currentAssistantId = null;
     }
 
-    /** Ends the mute `endOpenTurn()` put on a finished run's frames: the `running` status frame, the retry
-     * hint, a thread switch and a full reset. `resetStreaming` deliberately does not call it, or the
-     * reconcile after a stop would let through the frames that stop is still waiting for. */
+    /** Ends the mute `endOpenTurn()` put on a finished run's frames: a thread switch and a full reset.
+     * `resetStreaming` deliberately does not call it, or the reconcile after a stop would let through the
+     * frames that stop is still waiting for. A frame saying a run began unmutes through `announceRun()`. */
     forgetTurnBoundary() {
         this.state.turnEnded = false;
+    }
+
+    /** `forgetTurnBoundary()` plus the claim that a run began. The unmute alone is not that claim: a thread
+     * switch unmutes without one, and a tool call announced from the replay buffer is not a running tool. */
+    announceRun() {
+        this.forgetTurnBoundary();
+        this.state.runAnnounced = true;
     }
 
     /** Forgets the streaming ref unless an entry on screen is still streaming under it, so the next `token`
@@ -200,6 +213,7 @@ export class StreamState {
         this.state.unresolvedToolIds = new Set();
         this.state.streamTokenCount = 0;
         this.state.awaitingResponse = false;
+        this.state.runAnnounced = false;
         // sessionCost stays: it is the task's accumulated cost, restored from the stored task on load.
     }
 
