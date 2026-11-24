@@ -115,6 +115,18 @@ describe('extBaseURL — the served directory the server reported', () => {
         expect(resolveAssetURL(ext, 'messages.json')).toBe('/extensions/probe-pack/messages.json');
     });
 
+    it('uses served_url for the dev staging layout', () => {
+        // A task's loaded copy is served from a staging directory no client can name from a
+        // manifest. This is the wire string `dev_load_test.go` asserts.
+        const ext = withServed('stl-previewer', 'Test', '/extensions/_dev/_try/stl-previewer/beam-prairie-flare');
+        expect(extBaseURL(ext)).toBe('/extensions/_dev/_try/stl-previewer/beam-prairie-flare');
+        expect(entry(ext)).toBe('/extensions/_dev/_try/stl-previewer/beam-prairie-flare/');
+        expect(resolveAssetURL(ext, 'Preview.js'))
+            .toBe('/extensions/_dev/_try/stl-previewer/beam-prairie-flare/Preview.js');
+        // Depth is never the reason a base is refused; only its shape is.
+        expect(extBaseURL(withServed('pack', 'acme', '/extensions/a/b/c'))).toBe('/extensions/a/b/c');
+    });
+
     it('keeps a reported path that only needed encoding', () => {
         expect(extBaseURL(withServed('my theme', 'acme', '/extensions/acme/my%20theme')))
             .toBe('/extensions/acme/my%20theme');
@@ -128,7 +140,12 @@ describe('extBaseURL — the served directory the server reported', () => {
             '//evil.example/x',       // protocol-relative
             '/extensions/../etc',     // climbs out
             '/extensions/%2e%2e/etc', // …after decoding
-            '/extensions/a/b/c',      // deeper than <author>/<name>
+            '/extensions/a/b/..',     // a dot segment, at any depth
+            '/extensions/a/b/../c',   // …mid-path too
+            '/extensions/a/b/c%2fd',  // a separator inside a segment
+            '/extensions/a/b?c',      // a query is not a filename
+            '/extensions/a/b#c',      // nor is a fragment
+            '/extensions/a%00b',      // a control character
             '/extensions/',           // the root itself
             '/extensions/bad%zz',     // not a valid escape
             '/extensions/a\\b',       // a Windows separator is not a path separator here

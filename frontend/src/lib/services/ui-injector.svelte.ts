@@ -39,17 +39,17 @@ export function extBaseURL(ext: Extension): string {
 /**
  * The served directory the server reported, or null to fall back to the guess.
  *
- * Still validated rather than trusted: the value comes off the wire, and a base
- * that leaves `/extensions/` is a request for something else. Each segment is
- * decoded, refused when it is empty, a dot, a traversal, or carries a separator
- * or control character, then re-encoded — so a reported path can neither climb
- * out of the installed-extension tree nor smuggle an origin into a URL the app
- * will later hand to `fetch`.
+ * Validated, not trusted: the value comes off the wire. A segment that could move
+ * the URL elsewhere — a dot, a separator, a query or fragment marker, a control
+ * character — is refused, so a reported base can neither leave the served tree nor
+ * smuggle an origin into a URL the app later hands to `fetch`.
+ *
+ * Depth is not judged. `servedURLFromDir` (`backend/extensions/handler.go`) owns
+ * the layout, and a Try Extension's loaded copy sits four segments deep.
  */
 function servedBaseURL(served: unknown): string | null {
     if (typeof served !== 'string' || !served.startsWith(EXTENSIONS_PREFIX)) return null;
     const parts = served.slice(EXTENSIONS_PREFIX.length).split('/');
-    if (parts.length > 2) return null; // deeper than <author>/<name>: not an extension directory
     const encoded: string[] = [];
     for (const part of parts) {
         let segment: string;
@@ -59,7 +59,7 @@ function servedBaseURL(served: unknown): string | null {
             return null; // a broken escape sequence is not a path
         }
         if (segment === '' || segment === '.' || segment === '..') return null;
-        if (/[\\/\u0000-\u001f\u007f]/.test(segment)) return null;
+        if (/[\\/?#\u0000-\u001f\u007f]/.test(segment)) return null;
         encoded.push(encodeURIComponent(segment));
     }
     return EXTENSIONS_PREFIX + encoded.join('/');

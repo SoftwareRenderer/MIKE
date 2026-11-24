@@ -32,9 +32,8 @@ export const LOCALE_HINT_KEY = 'kanban-i18n-locale';
 export interface CachedCatalog {
     /**
      * The directory the pack's catalog was fetched from — `extBaseURL`, i.e. its
-     * `served_url` (`/extensions/<author>/<name>`, or `/extensions/<name>` for a
-     * flat install). Namespaced vs flat is exactly what a client cannot infer from
-     * a manifest author, so the answer is recorded rather than re-derived.
+     * `served_url`. No client can name it from a manifest author, so the answer is
+     * recorded rather than re-derived on read.
      */
     source: string;
     locale: string;
