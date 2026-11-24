@@ -661,8 +661,7 @@
             const targetStatus = statuses[targetIdx];
             (async () => {
                 try {
-                    const { moveTask: apiMoveTask } = await import('$lib/api');
-                    const updated = await apiMoveTask(projectId, task.id, targetStatus);
+                    const updated = await moveTask(projectId, task.id, targetStatus);
                     Object.assign(task, mergeQueuedUpdate(task, updated));
                     updateTaskInBoard(appStore, task.id, task);
                 } catch (err) {

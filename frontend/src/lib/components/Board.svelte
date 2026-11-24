@@ -3,7 +3,7 @@
     import Column from './Column.svelte';
     import MultiSelectBar from './MultiSelectBar.svelte';
     import { tick, onMount } from 'svelte';
-    import { moveTask, clearDoneTasks, deleteTask, startTask } from '$lib/api';
+    import { moveTask, clearDoneTasks, deleteTask, startTask, startSubtask, updateTask } from '$lib/api';
     import { sortByLastMoved } from '$lib/utils/sort-tasks';
     import { appStore, uiStore, dialogStore, updateTaskInBoard, removeTaskFromBoard } from '$lib/stores';
     import { gc, editorRecordRoots } from '$lib/storage';
@@ -47,8 +47,8 @@
         api: {
             deleteTask,
             startTask,
-            startSubtask: async (proj, taskId) => (await import('$lib/api')).startSubtask(proj, taskId),
-            updateTask: async (proj, taskId, update) => (await import('$lib/api')).updateTask(proj, taskId, update),
+            startSubtask,
+            updateTask,
         },
         board: {
             update: (task) => updateTaskInBoard(appStore, task.id, task),

@@ -5,6 +5,7 @@
     import { getModelName, getProviderDisplayName, providerRef, displayModelName } from '$lib/utils/providers';
     import { t } from '$lib/i18n';
     import { useClickOutside } from '$lib/composables/use-click-outside.svelte';
+    import { fetchModels } from '$lib/api';
 
     interface Props {
         providers: Provider[];
@@ -96,7 +97,6 @@
         agentModelsLoading = true;
         agentModels = [];
         try {
-            const { fetchModels } = await import('$lib/api');
             const result = await fetchModels(url);
             if (result.models && result.models.length > 0) {
                 agentModels = result.models;

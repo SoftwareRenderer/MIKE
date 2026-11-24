@@ -7,7 +7,7 @@
 // else, with one named exemption.
 
 // -- Helpers --
-export { generateId, setCsrfToken, clearCsrfToken } from './helpers';
+export { generateId, setCsrfToken } from './helpers';
 
 // -- Cache --
 export { isFromCache } from './cache';
@@ -34,8 +34,8 @@ export {
     applyQueuedActionsToBoard,
 } from './queue';
 
-// The send types are declared with the send call itself, which the queue replays.
-export type { SendResult, SendTaskMessagePayload } from './raw/tasks';
+// The send result is declared with the send call itself, which the queue replays.
+export type { SendResult } from './raw/tasks';
 
 // -- Projects --
 export {
@@ -55,7 +55,7 @@ export {
 
 // A sandbox build is a progress stream, never a queued write, so it lives under ./raw/.
 export { buildSandboxImageStream, watchSandboxImageBuild, cancelSandboxImageBuild } from './raw/projects';
-export type { SandboxBuildResult, SandboxImageStatus } from './raw/projects';
+export type { SandboxImageStatus } from './raw/projects';
 
 // -- Tasks --
 export {
@@ -137,7 +137,7 @@ export {
     getTaskGitLog,
     getTaskCommitDiffFiles,
 } from './git';
-export type { ParsedDiffFile, TaskDiff, TaskDiffOptions, GitBatchResult, HeldBranch } from './git';
+export type { TaskDiff, TaskDiffOptions, GitBatchResult, HeldBranch } from './git';
 
 // -- Stream --
 export { createAppStream } from './stream';
@@ -166,7 +166,7 @@ export {
     getHomeDirectory,
     resolveHomeDirectory,
 } from './fs';
-export type { FsEntry, FsFileRead, FsArchiveEntry, FsArchiveListing, FsStatRow, FsSearchResult, FsSearchAnswer } from './fs';
+export type { FsEntry, FsArchiveEntry, FsArchiveListing, FsStatRow, FsSearchResult } from './fs';
 export { deleteFsPaths, copyFsPaths, moveFsPaths, renameFsPath } from './fs-ops';
 export type { FsOpsResult } from './fs-ops';
 
@@ -224,4 +224,3 @@ export type { ExtensionUrlProbe } from './extensions';
 
 // -- MCP --
 export { testMCPServer } from './mcp';
-export type { MCPServerProbe, MCPServerProbeRequest } from './mcp';

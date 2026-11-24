@@ -13,7 +13,7 @@
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
     import { commitQueueStore } from '$lib/stores/commit-queue.svelte';
     import { taskEventStore } from '$lib/stores/task-events.svelte';
-    import { getProjects, getCachedProjects, CloneFailure, getCachedConfig, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, adoptQueue, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, getDroppedActions } from '$lib/api';
+    import { getProjects, getCachedProjects, CloneFailure, getCachedConfig, getBoard, getConfig, deleteProject, createProject, cloneProject, createAppStream, getProjectCounts, setOfflineStatus, loadQueue, flushQueueNow, adoptQueue, onQueueFlushed, waitForFlush, applyQueuedActionsToBoard, isFromCache, initTask, updateTask, getDroppedActions } from '$lib/api';
     import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
     import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
@@ -921,7 +921,6 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
         // moved, so a refusal puts it back and says why; a write the queue accepted needs no toast, because the
         // offline banner already names what is unreachable.
         try {
-            const { updateTask } = await import('$lib/api');
             await updateTask(edit.projectId, edit.taskId, patch);
         } catch (err) {
             updateTaskInBoard(appStore, edit.taskId, task);

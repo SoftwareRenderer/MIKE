@@ -8,8 +8,8 @@ import { filterTopLevelTaskIds } from './task-utils';
 import type { Task } from '$lib/types';
 
 /**
- * The writes a bulk action performs, one function per endpoint. They are passed in rather than
- * imported so a lazily-loaded screen keeps its `await import('$lib/api')` its own.
+ * The writes a bulk action performs, one function per endpoint. Nothing in this directory imports the api
+ * layer, so the screen that knows the endpoints hands them in — and its tests substitute them.
  */
 interface BulkTaskApis {
     deleteTask: (projectId: string, taskId: string) => Promise<unknown>;

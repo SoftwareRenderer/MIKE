@@ -1,4 +1,5 @@
 import type { Plugin } from 'vite';
+import { dynamicEdgeIds, staticEdgeIds } from './import-edges.ts';
 
 /**
  * Which built chunks belong to the diagram renderer rather than to the app shell: a chunk is the
@@ -29,13 +30,6 @@ export const MERMAID_PRECACHE_DENY = `**/${MERMAID_CHUNK_PREFIX}*.js`;
 let appReached = new Set<string>();
 let computed = false;
 
-/** Both spellings of the dynamic-import edge. This bundler (vite 8 / rolldown) offers only
- * `dynamicallyImportedIds`, and a missed edge would move the app's own lazy chunks into the deny list. */
-function edgeIds(info: unknown): string[] {
-    const m = info as { importedIds?: string[]; dynamicImportedIds?: string[]; dynamicallyImportedIds?: string[] };
-    return [...(m.importedIds ?? []), ...(m.dynamicImportedIds ?? m.dynamicallyImportedIds ?? [])];
-}
-
 /** Collects import edges and the entry set, then answers reachability once the build has ended. */
 export function mermaidChunksPlugin(): Plugin {
     const edges = new Map<string, string[]>();
@@ -47,7 +41,7 @@ export function mermaidChunksPlugin(): Plugin {
         moduleParsed(info) {
             if (!info.id) return;
             if (MERMAID_MODULES.test(info.id)) mermaidInGraph = true;
-            edges.set(info.id, edgeIds(info));
+            edges.set(info.id, [...staticEdgeIds(info), ...dynamicEdgeIds(info)]);
             if (info.isEntry) entries.add(info.id);
         },
         buildEnd() {

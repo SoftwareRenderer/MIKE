@@ -5,7 +5,7 @@
     import { appStore, uiStore, dialogStore, updateTaskInBoard, updateTaskAndSelection, removeTaskFromBoard } from '$lib/stores';
     import { streamingTaskStore } from '$lib/stores/streaming-tasks.svelte';
     import { diffStatsStore } from '$lib/stores/diff-stats.svelte';
-    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageTaskPaths, toDiffFiles, getTask } from '$lib/api';
+    import { moveTask, deleteTask, getTaskDiff, getTaskCommits, getDiffFile, clearDoneTasks, stageTaskPaths, toDiffFiles, getTask, startTask, startSubtask, updateTask } from '$lib/api';
     import type { GitBatchResult } from '$lib/api';
     import { fetchTaskSync } from '$lib/services/task-sync';
     import { resyncPlan, type HeldRow } from '$lib/utils/task-sync';
@@ -494,10 +494,10 @@
         projectId: () => task.project_id,
         statusLabel,
         api: {
-            deleteTask: async (proj, taskId) => (await import('$lib/api')).deleteTask(proj, taskId),
-            startTask: async (proj, taskId) => (await import('$lib/api')).startTask(proj, taskId),
-            startSubtask: async (proj, taskId) => (await import('$lib/api')).startSubtask(proj, taskId),
-            updateTask: async (proj, taskId, update) => (await import('$lib/api')).updateTask(proj, taskId, update),
+            deleteTask,
+            startTask,
+            startSubtask,
+            updateTask,
         },
         board: {
             update: (updated) => updateTaskInBoard(appStore, updated.id, updated),

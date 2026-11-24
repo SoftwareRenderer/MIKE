@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 // The extension is load-bearing: `configLoader: 'native'` resolves specifiers verbatim.
 import { buildIdPlugin } from './scripts/build-id.ts';
 import { bootGraphPlugin } from './scripts/boot-graph.ts';
+import { splitGraphPlugin } from './scripts/split-graph.ts';
 import { isMermaidChunk, mermaidChunksPlugin, MERMAID_CHUNK_PREFIX, MERMAID_PRECACHE_DENY, DIAGRAM_NEIGHBOUR_MODULES, MERMAID_VENDORED_MODULES, MERMAID_VENDOR_CHUNK } from './scripts/mermaid-chunks.ts';
 import { alias } from './scripts/aliases.js';
 import { isAppShellAsset, isExtensionAsset } from './scripts/sw-routes.ts';
@@ -13,6 +14,7 @@ export default defineConfig({
         svelte(),
         buildIdPlugin(),
         bootGraphPlugin(),
+        splitGraphPlugin(),
         mermaidChunksPlugin(),
         VitePWA({
             // No `autoUpdate`: that would set skipWaiting/clientsClaim and let the browser pick when a
