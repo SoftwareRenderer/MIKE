@@ -36,20 +36,22 @@ func main() {
 	tlsKey := flag.String("tls-key", "", "Path to TLS private key file (default: $MIKE_TLS_KEY)")
 	allowedHosts := flag.String("allowed-hosts", "", "Hostnames accepted in the Host header, comma-separated (default: $MIKE_ALLOWED_HOSTS; required behind a reverse proxy that forwards a public domain)")
 	logLevel := flag.String("log-level", "", "Log verbosity: debug, info, warn or error (default: $MIKE_LOG_LEVEL or info)")
+	fileSizeLimitMB := flag.Int64("file-size-limit-mb", 0, "Largest file this server moves, in megabytes: an upload, a picture read, an extension's byte read, a committed archive (default: $MIKE_FILE_SIZE_LIMIT_MB or 20)")
 	resetFlag := flag.Bool("reset-passkeys", false, "Delete every registered passkey and every active session, then exit. For a device that is lost or a passkey that is gone; the server does not start.")
 	flag.Parse()
 
 	cfg, err := startup.Resolve(startup.Flags{
-		Port:          *port,
-		Listen:        *listen,
-		DataDir:       *dataDir,
-		WorktreesDir:  *worktreesDir,
-		FrontendDist:  *frontendDist,
-		TLSCertPath:   *tlsCert,
-		TLSKeyPath:    *tlsKey,
-		AllowedHosts:  *allowedHosts,
-		LogLevel:      *logLevel,
-		ResetPasskeys: *resetFlag,
+		Port:            *port,
+		Listen:          *listen,
+		DataDir:         *dataDir,
+		WorktreesDir:    *worktreesDir,
+		FrontendDist:    *frontendDist,
+		TLSCertPath:     *tlsCert,
+		TLSKeyPath:      *tlsKey,
+		AllowedHosts:    *allowedHosts,
+		LogLevel:        *logLevel,
+		FileSizeLimitMB: *fileSizeLimitMB,
+		ResetPasskeys:   *resetFlag,
 	})
 	if err != nil {
 		log.Fatalf("Configuration error: %v", err)

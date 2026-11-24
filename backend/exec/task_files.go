@@ -43,11 +43,6 @@ const uploadsExcludeHeader = "# mike uploads (kept out of task status)"
 // effect.
 const noUploadEnvironmentMessage = "the task's environment is not prepared — start the task, then attach the file again"
 
-// MaxUploadBytes bounds one upload, and is the one number for it: server.MaxUploadSize is defined from
-// here, because the HTTP layer imports this package and not the reverse, so the handler cannot own the size
-// this write enforces.
-const MaxUploadBytes = 20 << 20
-
 // maxUploadSuffixTries bounds the `-N` search: one stat per try, and a directory holding this many files of
 // one name is a mistake rather than a queue.
 const maxUploadSuffixTries = 1000
@@ -143,8 +138,8 @@ func (te *TaskExecutor) WriteTaskFile(projectID, taskID, rawName string, data []
 	if len(data) == 0 {
 		return "", fmt.Errorf("uploaded file is empty")
 	}
-	if len(data) > MaxUploadBytes {
-		return "", fmt.Errorf("file is %d bytes, the limit is %d", len(data), MaxUploadBytes)
+	if int64(len(data)) > te.fileSizeLimitBytes {
+		return "", fmt.Errorf("file is %d bytes, the limit is %d", len(data), te.fileSizeLimitBytes)
 	}
 
 	task, err := te.store.GetTask(projectID, taskID)

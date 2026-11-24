@@ -4,7 +4,9 @@
 // (.svelte.ts extension: the composable under test uses $state.)
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setCsrfToken } from '$lib/api';
-import { dialogStore } from '$lib/stores';
+import { appStore, dialogStore } from '$lib/stores';
+import type { Config } from '$lib/types';
+import { DEFAULT_FILE_SIZE_LIMIT_BYTES } from '$lib/utils/file-drop';
 import { useFileDropUpload } from '../use-file-drop-upload.svelte';
 
 /**
@@ -152,6 +154,8 @@ describe('useFileDropUpload', () => {
         setCsrfToken('csrf-test');
         vi.spyOn(dialogStore, 'showToast').mockImplementation(() => {});
         vi.spyOn(dialogStore, 'showConfirm').mockResolvedValue(true);
+        // A served limit left behind by one test would decide the next one's drop.
+        appStore.config = null;
     });
 
     afterEach(() => {
@@ -367,5 +371,25 @@ describe('useFileDropUpload', () => {
         await vi.waitFor(() => expect(drop.uploading).toBe(false));
         expect(FakeXHR.sent).toHaveLength(0);
         expect(toasts()).toContain('over 20 MB');
+    });
+
+    it('sends a file the built-in cap would refuse once the server named a larger one', async () => {
+        appStore.config = { file_size_limit_mb: 60 } as Config;
+        const { drop, event } = harness([{ relPath: 'big.bin', size: DEFAULT_FILE_SIZE_LIMIT_BYTES + 1 }]);
+        drop.handleDrop(event);
+
+        await vi.waitFor(() => expect(drop.uploading).toBe(false));
+        expect(FakeXHR.sent.map((xhr) => xhr.form?.get('relpath'))).toEqual(['big.bin']);
+        expect(toasts()).not.toContain('over');
+    });
+
+    it('quotes the cap this server named, not the one the browser was built with', async () => {
+        appStore.config = { file_size_limit_mb: 60 } as Config;
+        const { drop, event } = harness([{ relPath: 'huge.bin', size: 61 * 1024 * 1024 }]);
+        drop.handleDrop(event);
+
+        await vi.waitFor(() => expect(drop.uploading).toBe(false));
+        expect(FakeXHR.sent).toHaveLength(0);
+        expect(toasts()).toContain('over 60 MB');
     });
 });

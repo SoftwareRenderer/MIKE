@@ -53,6 +53,21 @@ func TestMaxBodyMiddlewareBoundsEveryReader(t *testing.T) {
 	}
 }
 
+// messageCeiling is the body bound this server's chain was built with, read from its own resolved config.
+func messageCeiling(s *Server) int64 {
+	return httputil.MessageBodyBytes(s.settings.FileSizeLimitBytes())
+}
+
+// TestBootedServerEnforcesTheConfiguredMessageCeiling is the wiring between the two halves: the middleware's
+// bound and the message decoders' come from one resolution of the file limit. Broken, a booted server falls
+// back to httputil's package floor and quietly refuses the largest message the product sends.
+func TestBootedServerEnforcesTheConfiguredMessageCeiling(t *testing.T) {
+	s := testServer(t)
+	if got, want := httputil.MessageBodyLimit(), messageCeiling(s); got != want {
+		t.Errorf("the message decoders enforce %d bytes while the middleware was built with %d", got, want)
+	}
+}
+
 // TestServerRefusesOversizedBody is the same rule through the middleware chain the server actually runs, at
 // the message bound, and on the GET that must not be bounded because the WebSocket upgrades are GETs. Both
 // bodies are ones the handler would act on, so only the bound can stop it: a garbage body would be refused
@@ -67,7 +82,7 @@ func TestServerRefusesOversizedBody(t *testing.T) {
 	made := filepath.Join(t.TempDir(), "made")
 	body := `{"path":"` + made + `"}`
 	oversized := postRequest("/api/fs/mkdir", strings.NewReader(body), cookie, csrf)
-	oversized.ContentLength = httputil.MaxMessageBodyBytes + 1
+	oversized.ContentLength = messageCeiling(s) + 1
 
 	rr := serveThroughChain(t, s, oversized)
 	if rr.Code != http.StatusRequestEntityTooLarge {
@@ -82,7 +97,7 @@ func TestServerRefusesOversizedBody(t *testing.T) {
 	// handler would otherwise act on.
 	chunked := postRequest("/api/fs/mkdir", io.MultiReader(
 		strings.NewReader(`{"path":"`+made+`","pad":"`),
-		&fillerReader{remaining: httputil.MaxMessageBodyBytes},
+		&fillerReader{remaining: messageCeiling(s)},
 		strings.NewReader(`"}`),
 	), cookie, csrf)
 	w := serveThroughChain(t, s, chunked)

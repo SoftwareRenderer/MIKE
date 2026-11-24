@@ -50,6 +50,9 @@ const (
 	EnvAllowPrivateSubmoduleHosts = "MIKE_ALLOW_PRIVATE_SUBMODULE_HOSTS"
 	// EnvBuildOutputLimitMB caps the disk one image build may write into its output directory.
 	EnvBuildOutputLimitMB = "MIKE_BUILD_OUTPUT_LIMIT_MB"
+	// EnvFileSizeLimitMB is the variable twin of --file-size-limit-mb; DefaultFileSizeLimitMB says what it
+	// bounds.
+	EnvFileSizeLimitMB = "MIKE_FILE_SIZE_LIMIT_MB"
 )
 
 // DefaultPort and DefaultListenAddr are the built-in defaults of the ladder. Loopback by default
@@ -81,6 +84,14 @@ const (
 	// caps holds the finished image as an archive beside the builder's own temp tree, so a build costs
 	// about twice the size of the image it produces.
 	DefaultBuildOutputLimitMB = int64(8192)
+
+	// DefaultFileSizeLimitMB is the largest file this server moves in either direction, in megabytes:
+	// what a person attaches, what a diff paints, what an extension renders, what a commit hands the
+	// archive reader.
+	DefaultFileSizeLimitMB = int64(20)
+
+	// DefaultFileSizeLimitBytes is DefaultFileSizeLimitMB in the unit the routes compare against.
+	DefaultFileSizeLimitBytes = DefaultFileSizeLimitMB << 20
 )
 
 // Flags carries what the command line provided. The zero value means "not given", which is what makes
@@ -98,6 +109,8 @@ type Flags struct {
 	TLSKeyPath   string
 	AllowedHosts string
 	LogLevel     string
+	// FileSizeLimitMB is --file-size-limit-mb.
+	FileSizeLimitMB int64
 	// ResetPasskeys is --reset-passkeys: wipe every registered passkey and every session, then exit.
 	// It has no environment spelling on purpose — a credential-destroying command a stale environment
 	// variable can select is one that runs at every restart.
@@ -181,6 +194,9 @@ type Config struct {
 
 	// BuildOutputLimitMB is the disk cap of one image build's output directory. Always > 0.
 	BuildOutputLimitMB int64
+
+	// FileSizeLimitMB is the largest file this server moves, in megabytes. Always > 0.
+	FileSizeLimitMB int64
 
 	// DangerZone is the operator's permission to turn sandboxing off. It is not a permission to
 	// execute anywhere: a project's sandbox_enabled column answers that.
@@ -284,6 +300,11 @@ func Resolve(f Flags) (Config, error) {
 	// The same reason as the budget percentage: this number decides how much disk a Dockerfile may
 	// fill, so a typo refuses the boot rather than deciding it quietly.
 	c.BuildOutputLimitMB, err = resolveBuildOutputLimitMB(os.Getenv(EnvBuildOutputLimitMB))
+	if err != nil {
+		return Config{}, err
+	}
+
+	c.FileSizeLimitMB, err = resolveFileSizeLimitMB(f.FileSizeLimitMB, "--file-size-limit-mb", EnvFileSizeLimitMB, DefaultFileSizeLimitMB)
 	if err != nil {
 		return Config{}, err
 	}
@@ -409,6 +430,42 @@ func resolveBuildOutputLimitMB(raw string) (int64, error) {
 	}
 	return n, nil
 }
+
+// resolveFileSizeLimitMB resolves the file limit in megabytes. A zero flag is the absence and an unset or
+// empty variable the default; anything else that does not parse, or is not positive, refuses the boot.
+func resolveFileSizeLimitMB(flagValue int64, flagName, envName string, fallback int64) (int64, error) {
+	if flagValue != 0 {
+		if flagValue < 0 {
+			return 0, fmt.Errorf("%s: %d is not a positive number of megabytes", flagName, flagValue)
+		}
+		return flagValue, nil
+	}
+	raw := os.Getenv(envName)
+	if raw == "" {
+		return fallback, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("%s=%q is not a number of megabytes", envName, raw)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("%s: %d is not a positive number of megabytes", envName, n)
+	}
+	return n, nil
+}
+
+// FileSizeLimitBytes is FileSizeLimitMB as the byte count the routes compare against. A zero or negative
+// limit is the absence of a decision, not a cap of zero: a Config assembled without walking the ladder
+// takes the default ceiling.
+func (c Config) FileSizeLimitBytes() int64 {
+	if c.FileSizeLimitMB <= 0 {
+		return DefaultFileSizeLimitBytes
+	}
+	return c.FileSizeLimitMB << 20
+}
+
+// FileSizeLimitMegabytes is the figure a refusal quotes, derived from the bytes the route compared.
+func (c Config) FileSizeLimitMegabytes() int64 { return c.FileSizeLimitBytes() >> 20 }
 
 // isOne is the shape of an opt-in switch: only the exact value "1" turns it on. A truthy-looking
 // typo (true, yes, on) is not the opt-in it was meant to be, and a set-but-empty value keeps the

@@ -11,14 +11,13 @@ import (
 	"mike/backend/httputil"
 )
 
-// handleTaskUpload accepts multipart/form-data with one `file` part and answers {"path": "..."} —
-// the path the browser inserts into the message. MaxUploadSize and its sentence are the ones the fs
-// upload endpoint uses: one request, one file, one limit.
+// handleTaskUpload accepts multipart/form-data with one `file` part and answers {"path": "..."} — the path
+// the browser inserts into the message. One request, one file, the fs upload endpoint's ceiling.
 func (s *Server) handleTaskUpload(w http.ResponseWriter, r *http.Request) {
 	projectID := r.PathValue("projectID")
 	taskID := r.PathValue("taskID")
 
-	file, header, release, ok := uploadedFile(w, r)
+	file, header, release, ok := s.uploadedFile(w, r)
 	if !ok {
 		return
 	}
@@ -31,13 +30,14 @@ func (s *Server) handleTaskUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	data, err := io.ReadAll(io.LimitReader(file, MaxUploadSize+1))
+	limit := s.settings.FileSizeLimitBytes()
+	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		httputil.Fault(w, "read uploaded file", err)
 		return
 	}
-	if len(data) > MaxUploadSize {
-		httputil.JSONError(w, http.StatusRequestEntityTooLarge, uploadTooLargeMessage)
+	if int64(len(data)) > limit {
+		httputil.JSONError(w, http.StatusRequestEntityTooLarge, s.fileTooLarge())
 		return
 	}
 

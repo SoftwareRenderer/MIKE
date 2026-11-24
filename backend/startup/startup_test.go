@@ -190,6 +190,7 @@ var resolverEnv = []string{
 	EnvAgentPath, EnvSkipSandboxSweep, EnvTrustProxy, EnvLoginRateLimit, EnvAllowRootFS,
 	EnvDangerZone, EnvGCDryRun, EnvPProf, EnvMemoryBudgetPct, EnvUpdateURL, EnvDisableUpdates,
 	EnvRestrictMCP, EnvRestrictStatReset, EnvTLSCert, EnvTLSKey, EnvBuildOutputLimitMB,
+	EnvFileSizeLimitMB,
 }
 
 func clearResolverEnv(t testing.TB) {
@@ -355,6 +356,60 @@ func TestBuildOutputLimitMBRefusesAnythingButWholeMegabytes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestFileSizeLimitMBRefusesAnythingButWholeMegabytes(t *testing.T) {
+	for _, tc := range []struct {
+		raw  string
+		want int64
+	}{
+		{"", DefaultFileSizeLimitMB},
+		{"20", 20},
+		{"1", 1},
+		{"1024", 1024},
+	} {
+		t.Run("MIKE_FILE_SIZE_LIMIT_MB="+tc.raw, func(t *testing.T) {
+			t.Setenv(EnvFileSizeLimitMB, tc.raw)
+			if got := mustResolve(t, Flags{}).FileSizeLimitMB; got != tc.want {
+				t.Errorf("limit = %d, want %d", got, tc.want)
+			}
+		})
+	}
+	for _, raw := range []string{"0", "-1", "20M", "2.5", "twenty"} {
+		t.Run("refuses "+raw, func(t *testing.T) {
+			t.Setenv(EnvEncryptionKey, "a-long-enough-test-key")
+			t.Setenv(EnvFileSizeLimitMB, raw)
+			_, err := Resolve(Flags{})
+			if err == nil {
+				t.Fatalf("Resolve accepted %s=%q", EnvFileSizeLimitMB, raw)
+			}
+			if !strings.Contains(err.Error(), EnvFileSizeLimitMB) {
+				t.Errorf("error %q must name %s", err.Error(), EnvFileSizeLimitMB)
+			}
+		})
+	}
+	t.Run("the flag outranks the variable", func(t *testing.T) {
+		t.Setenv(EnvFileSizeLimitMB, "64")
+		if got := mustResolve(t, Flags{FileSizeLimitMB: 5}).FileSizeLimitMB; got != 5 {
+			t.Errorf("limit = %d, want the flag's 5", got)
+		}
+	})
+	t.Run("refuses a negative flag", func(t *testing.T) {
+		t.Setenv(EnvEncryptionKey, "a-long-enough-test-key")
+		_, err := Resolve(Flags{FileSizeLimitMB: -1})
+		if err == nil {
+			t.Fatal("Resolve accepted --file-size-limit-mb=-1")
+		}
+		if !strings.Contains(err.Error(), "--file-size-limit-mb") {
+			t.Errorf("error %q must name --file-size-limit-mb", err.Error())
+		}
+	})
+	t.Run("bytes are the megabytes", func(t *testing.T) {
+		c := mustResolve(t, Flags{FileSizeLimitMB: 3})
+		if c.FileSizeLimitBytes() != 3<<20 {
+			t.Errorf("FileSizeLimitBytes() = %d, want %d", c.FileSizeLimitBytes(), int64(3)<<20)
+		}
+	})
 }
 
 // mustFailResolve resolves with MIKE_MEMORY_BUDGET_PCT=raw and returns the error text, failing the

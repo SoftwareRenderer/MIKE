@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"mike/backend/exec"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
@@ -159,7 +158,7 @@ func TestUploadRefusesNotAFormAs400AndKeeps413ForSize(t *testing.T) {
 		t.Errorf("refusal %q did not come from the body reader", rr.Body.String())
 	}
 
-	oversize := bytes.Repeat([]byte("x"), exec.MaxUploadBytes+1)
+	oversize := bytes.Repeat([]byte("x"), int(fileLimit(s)+1))
 	if rr := postTaskUpload(t, s, "up-shape", "t1", "big.bin", oversize); rr.Code != http.StatusRequestEntityTooLarge {
 		t.Errorf("task upload over the cap: status = %d, want 413: %s", rr.Code, rr.Body.String())
 	} else if !strings.Contains(rr.Body.String(), "MB") {

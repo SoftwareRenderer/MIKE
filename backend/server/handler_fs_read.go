@@ -10,16 +10,14 @@ import (
 	"strconv"
 	"strings"
 
-	"mike/backend/exec"
 	"mike/backend/extensions"
 	"mike/backend/fsutil"
 	"mike/backend/types"
 	"mike/pkg/logging"
 )
 
-// The three answers one file read gives, named by the request's kind; an absent kind is text. The kind
-// picks a policy and never widens one: each carries its own permission and its own ceiling, and the
-// shared bottom half holds no permission of its own to be widened.
+// The three answers one file read gives, named by the request's kind; an absent kind is text. The kind picks
+// a policy and never widens one; the two byte kinds share this server's one file ceiling.
 const (
 	fsKindText  = "text"
 	fsKindImage = "image"
@@ -40,22 +38,15 @@ var imageTypes = map[string]string{
 	".avif": "image/avif",
 }
 
-// maxImageBytes is the upload ceiling: what a person may commit into a repository is what this route may
-// hand back.
-const maxImageBytes int64 = exec.MaxUploadBytes
-
-var imageTooLargeMessage = fmt.Sprintf("file too large (max %dMB)", maxImageBytes/(1<<20))
-
-// maxExtensionReadBytes is a render ceiling, not the upload ceiling: a file a person can commit is far
-// larger than anything a tab should hold while it renders one.
-const maxExtensionReadBytes int64 = 8 << 20
-
 // extensionReadContentType is what the bytes kind answers with. The bytes go to an extension's own
 // parser, never to a browser subresource, so the core names no type and nothing a request carries picks
 // one.
 const extensionReadContentType = "application/octet-stream"
 
-var extensionReadTooLarge = "file too large (max " + strconv.FormatInt(maxExtensionReadBytes/(1<<20), 10) + "MB)"
+// fileTooLarge is the refusal both byte kinds answer with, naming the megabytes the ceiling enforces.
+func (s *Server) fileTooLarge() string {
+	return fmt.Sprintf("file too large (max %dMB)", s.settings.FileSizeLimitMegabytes())
+}
 
 // byteReadCacheCommitted is forever, because a committed read's validator is its object id and an object
 // id never names different bytes.
@@ -128,10 +119,8 @@ func (s *Server) handleFSRead(w http.ResponseWriter, r *http.Request) {
 	switch kind {
 	case fsKindText:
 		s.serveFSText(w, r, scope, rel, ref)
-	case fsKindImage:
-		s.serveFSBytes(w, r, scope, rel, ref, contentType, maxImageBytes, imageTooLargeMessage)
 	default:
-		s.serveFSBytes(w, r, scope, rel, ref, contentType, maxExtensionReadBytes, extensionReadTooLarge)
+		s.serveFSBytes(w, r, scope, rel, ref, contentType)
 	}
 }
 
@@ -143,29 +132,29 @@ func (s *Server) serveFSText(w http.ResponseWriter, r *http.Request, scope fsSco
 	var content []byte
 	var markers map[int][]string
 	if ref == "" {
-		f, info, ok := s.fsOpenWorktree(w, scope, rel, maxFSReadBytes, fsTooLargeMessage)
+		f, info, ok := s.fsOpenWorktree(w, scope, rel, maxEditorBufferBytes, fsTooLargeMessage)
 		if !ok {
 			return
 		}
 		defer f.Close()
-		data, readErr := readSized(f, info.Size(), maxFSReadBytes)
+		data, readErr := readSized(f, info.Size(), maxEditorBufferBytes)
 		if readErr != nil {
 			logging.For(logging.HTTP).Errorf("fs read failed: %v", readErr)
 			JSONError(w, http.StatusInternalServerError, "failed to read file")
 			return
 		}
-		if int64(len(data)) > maxFSReadBytes {
+		if int64(len(data)) > maxEditorBufferBytes {
 			JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
 			return
 		}
 		content = data
 		markers = computeGutterMarkers(s, scope.worktreePath, rel, r.URL.Query().Get("task"))
 	} else {
-		object, ok := s.fsBeginCommitted(w, r, scope, ref, rel, maxFSReadBytes, fsTooLargeMessage)
+		object, ok := s.fsBeginCommitted(w, r, scope, ref, rel, maxEditorBufferBytes, fsTooLargeMessage)
 		if !ok {
 			return
 		}
-		blob, ok := fsHeldObject(w, r, scope, object, maxFSReadBytes, fsTooLargeMessage)
+		blob, ok := fsHeldObject(w, r, scope, object, maxEditorBufferBytes, fsTooLargeMessage)
 		if !ok {
 			return
 		}
@@ -182,11 +171,11 @@ func (s *Server) serveFSText(w http.ResponseWriter, r *http.Request, scope fsSco
 	})
 }
 
-// serveFSBytes answers one file's own bytes, typed by the kind that asked. Nothing here waits on the
-// bytes: the type came from the name, the length from the stat or the object probe, and the refusal for an
-// oversized file from the same probe — so the working tree streams from the opened file and a committed
-// object streams out of git without either being held in memory first.
-func (s *Server) serveFSBytes(w http.ResponseWriter, r *http.Request, scope fsScope, rel, ref, contentType string, ceiling int64, tooLarge string) {
+// serveFSBytes answers one file's own bytes at this server's file limit, typed by the kind that asked. Nothing
+// waits on the bytes: the type came from the name, the length and the oversized refusal from the stat or the
+// object probe, so both halves stream.
+func (s *Server) serveFSBytes(w http.ResponseWriter, r *http.Request, scope fsScope, rel, ref, contentType string) {
+	ceiling, tooLarge := s.settings.FileSizeLimitBytes(), s.fileTooLarge()
 	if ref == "" {
 		f, info, ok := s.fsOpenWorktree(w, scope, rel, ceiling, tooLarge)
 		if !ok {
@@ -206,11 +195,10 @@ func (s *Server) serveFSBytes(w http.ResponseWriter, r *http.Request, scope fsSc
 	if !ok {
 		return
 	}
-	// A pinned object id cannot change under the read, so its length is trustworthy and its bytes go
-	// straight out of git. Anything else — a name the tree would not resolve, or a probe git could not
-	// answer — is held, because the only way a refusal stays a refusal is a status, and a status cannot
-	// follow a sent 200.
-	if !object.sized || object.id == "" {
+	// Only an object whose length nobody promised is held: a refusal needs a status, and a status cannot
+	// follow a sent 200. A name no tree resolved is no such case — its probe still measured the object git
+	// will send — and it is the common one, because a read that names no task keeps `HEAD` as written.
+	if !object.sized {
 		data, ok := fsHeldObject(w, r, scope, object, ceiling, tooLarge)
 		if !ok {
 			return

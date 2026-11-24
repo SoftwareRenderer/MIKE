@@ -17,7 +17,7 @@ Configuration is resolved **once** at startup. Consumers receive the final decis
 
 ## Variables with a `--flag` twin
 
-Nine of the ten flags have environment twins; **flags win**:
+Nine of the eleven flags have environment twins; **flags win**:
 - `--port`/`MIKE_PORT`
 - `--listen`/`MIKE_LISTEN`
 - `--data-dir`/`MIKE_DATA_DIR`
@@ -27,6 +27,7 @@ Nine of the ten flags have environment twins; **flags win**:
 - `--log-level`/`MIKE_LOG_LEVEL`
 - `--tls-cert`/`MIKE_TLS_CERT`
 - `--tls-key`/`MIKE_TLS_KEY`
+- `--file-size-limit-mb`/`MIKE_FILE_SIZE_LIMIT_MB`
 
 One flag has no environment twin:
 - `--reset-passkeys` (one-shot operation; deletes credentials)
@@ -59,6 +60,7 @@ environment.
 | `MIKE_SANDBOX_SKIP_STARTUP_CLEANUP` | Any non-empty value suppresses the boot sweep that deletes stale `kanban-sandbox-*` and `kanban-ext-*` containers. |
 | `MIKE_MEMORY_BUDGET_PCT` | Percentage of installed RAM (default `90`) available for all sandboxes. Invalid values (outside `1-100`) cause startup to fail. **`docs/sandbox-runtime.md`**. |
 | `MIKE_BUILD_OUTPUT_LIMIT_MB` | Disk cap of one image build's output directory, in whole megabytes (default `8192`). That directory holds the finished image as an archive beside the builder's own temp directory, so a build costs about twice the size of the image it produces. Zero, a negative and anything unparseable refuse the boot naming the variable. **`docs/sandbox-runtime.md`**. |
+| `MIKE_FILE_SIZE_LIMIT_MB` | Largest file this server moves, in whole megabytes (default `20`): what a person attaches, what a diff paints as a picture, what an extension renders as bytes, and what a commit hands the archive reader. One number because those are one question. A negative flag and anything unparseable or non-positive refuse the boot naming the variable or flag. The browser reads the resolved value from `/api/config` rather than carrying its own copy. **`docs/api-contract.md → Reading one file: text, a picture, or bytes`** |
 | `MIKE_GC_DRY_RUN` | Exactly `1` reports branch GC decisions without deleting data. |
 | `MIKE_PPROF` | Exactly `1` serves `net/http/pprof` on `localhost:6060`. |
 | `MIKE_FRONTEND_DIST` | **Dev only.** Serve SPA from this directory (default `./frontend/dist`) instead of the embedded copy. Refused in `-tags release` binaries. |

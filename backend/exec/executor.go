@@ -27,6 +27,7 @@ import (
 	"mike/backend/mcp"
 	"mike/backend/prompts"
 	"mike/backend/sandbox"
+	"mike/backend/startup"
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
@@ -59,8 +60,9 @@ type TaskExecutor struct {
 	lspMgr        lspManager
 	extTools      *extensions.ToolRegistry
 	// Provides tools for MCP servers enabled by a project; read per turn.
-	mcpReg      *mcp.Registry
-	commitQueue *CommitQueue
+	mcpReg             *mcp.Registry
+	commitQueue        *CommitQueue
+	fileSizeLimitBytes int64
 	// How long to wait before re-issuing a failed stream. Production is backoffFor; the retry loop
 	// reads this, so a test that only needs "retried, then failed" is not held to the production
 	// ladder. Its shape belongs to TestBackoffFor_* and TestQuietStreamBackoffWaitsAtLeastTheSilenceItSaw.
@@ -347,6 +349,9 @@ type Deps struct {
 	// AllowPrivateSubmoduleHosts is the operator's widening of the address screen a repository-chosen
 	// submodule URL is checked against. The zero value screens the private ranges out too.
 	AllowPrivateSubmoduleHosts bool
+	// FileSizeLimitBytes bounds one uploaded file. Zero is "not given", not "unlimited":
+	// NewTaskExecutor falls to the default ceiling.
+	FileSizeLimitBytes int64
 }
 
 // NewTaskExecutor wires an executor and the collaborators split out of it. Every TaskExecutor in
@@ -367,6 +372,10 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 	if deps.SandboxMgr != nil {
 		binaries = deps.SandboxMgr
 	}
+	fileSizeLimitBytes := deps.FileSizeLimitBytes
+	if fileSizeLimitBytes <= 0 {
+		fileSizeLimitBytes = startup.DefaultFileSizeLimitBytes
+	}
 	te := &TaskExecutor{
 		store:              deps.Store,
 		configStore:        deps.ConfigStore,
@@ -379,6 +388,7 @@ func NewTaskExecutor(deps Deps) *TaskExecutor {
 		extTools:           deps.ExtensionTools,
 		mcpReg:             deps.MCP,
 		commitQueue:        deps.CommitQueue,
+		fileSizeLimitBytes: fileSizeLimitBytes,
 		llmBackoff:         llmBackoff,
 		rewindConversation: deps.RewindConversation,
 		submoduleFetch:     git.SubmoduleFetch{AllowPrivateHosts: deps.AllowPrivateSubmoduleHosts},

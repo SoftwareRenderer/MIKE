@@ -1,7 +1,7 @@
 import { uploadFsFile, type UploadResult } from '$lib/api/fs-upload';
-import { dialogStore } from '$lib/stores';
+import { appStore, dialogStore } from '$lib/stores';
 import { t } from '$lib/i18n';
-import { collectDroppedFiles, collectPickedFiles, MAX_DROP_FILES, MAX_UPLOAD_BYTES, type DroppedFile, type DroppedSelection } from '$lib/utils/file-drop';
+import { collectDroppedFiles, collectPickedFiles, MAX_DROP_FILES, type DroppedFile, type DroppedSelection } from '$lib/utils/file-drop';
 import { useFileDropZone } from './use-file-drop-zone.svelte';
 
 /**
@@ -55,7 +55,12 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
         const dataTransfer = e.dataTransfer;
         if (!dataTransfer) return;
         if (!begin()) return;
-        void collectDroppedFiles(dataTransfer).then(run).catch(reportUnexpected).finally(endRun);
+        // Read once per run: the sort and the sentence about it name the same number.
+        const limit = appStore.fileSizeLimitBytes;
+        void collectDroppedFiles(dataTransfer, limit)
+            .then((selection) => run(selection, limit))
+            .catch(reportUnexpected)
+            .finally(endRun);
     });
     const { handleDragEnter, handleDragOver, handleDragLeave, handleDrop } = dropZone;
 
@@ -66,7 +71,8 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
      */
     function uploadFiles(files: File[]) {
         if (files.length === 0 || !begin()) return;
-        void run(collectPickedFiles(files)).catch(reportUnexpected).finally(endRun);
+        const limit = appStore.fileSizeLimitBytes;
+        void run(collectPickedFiles(files, limit), limit).catch(reportUnexpected).finally(endRun);
     }
 
     /**
@@ -158,12 +164,12 @@ export function useFileDropUpload(options: FileDropUploadOptions) {
         return outcomes;
     }
 
-    async function run(selection: DroppedSelection) {
+    async function run(selection: DroppedSelection, maxBytes: number) {
         const notes: string[] = [];
         if (selection.tooBig.length) {
             notes.push(t('explorer.shared.dropTooBig', {
                 count: selection.tooBig.length,
-                max: Math.round(MAX_UPLOAD_BYTES / (1024 * 1024)),
+                max: Math.round(maxBytes / (1024 * 1024)),
             }));
         }
         if (selection.unreadable.length) {

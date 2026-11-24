@@ -2,8 +2,10 @@
 // The three buckets one gesture can carry, and what each one does to the field.
 // (.svelte.ts extension: the composable under test uses $state.)
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { dialogStore } from '$lib/stores';
-import { MAX_IMAGES, MAX_IMAGE_SIZE, MAX_INLINE_TEXT, type DecodeImage } from '$lib/utils/attachments';
+import { appStore, dialogStore } from '$lib/stores';
+import type { Config } from '$lib/types';
+import { DEFAULT_FILE_SIZE_LIMIT_BYTES } from '$lib/utils/file-drop';
+import { MAX_IMAGES, MAX_INLINE_TEXT, type DecodeImage } from '$lib/utils/attachments';
 import { useImageAttachments } from '../use-image-attachments.svelte';
 
 function pasteOf(files: File[], text: string | null = null) {
@@ -71,6 +73,8 @@ function setup(options: { upload?: boolean; hasTask?: boolean; held?: number; de
 beforeEach(() => {
     document.body.innerHTML = '';
     vi.restoreAllMocks();
+    // A config left behind by one test would carry this browser's cap into the next.
+    appStore.config = null;
 });
 
 describe('paste', () => {
@@ -209,13 +213,26 @@ describe('image caps', () => {
     it('uploads an image over the byte cap into the task and says it became a file', async () => {
         const h = setup();
         const huge = png('huge.png');
-        Object.defineProperty(huge, 'size', { value: MAX_IMAGE_SIZE + 1 });
+        Object.defineProperty(huge, 'size', { value: DEFAULT_FILE_SIZE_LIMIT_BYTES + 1 });
 
         h.intake.handlePaste(pasteOf([huge]));
 
         await vi.waitFor(() => expect(h.uploaded).toEqual(['huge.png']));
         expect(h.images).toHaveLength(0);
         expect(h.toasts.mock.calls.flat().join(' ')).toContain('attached as a file');
+    });
+
+    it('keeps an image the built-in cap would refuse but this server’s own limit allows', async () => {
+        appStore.config = { file_size_limit_mb: 60 } as Config;
+        const h = setup();
+        const huge = png('huge.png');
+        Object.defineProperty(huge, 'size', { value: DEFAULT_FILE_SIZE_LIMIT_BYTES + 1 });
+
+        h.intake.handlePaste(pasteOf([huge]));
+
+        await vi.waitFor(() => expect(h.images).toHaveLength(1));
+        expect(h.uploaded).toEqual([]);
+        expect(h.toasts).not.toHaveBeenCalled();
     });
 
     it('uploads an image no browser can picture, naming the resample as the reason', async () => {
@@ -241,7 +258,7 @@ describe('image caps', () => {
     it('names the missing task rather than claiming an upload for a surface that has nowhere to write', async () => {
         const h = setup({ hasTask: false });
         const huge = png('huge.png');
-        Object.defineProperty(huge, 'size', { value: MAX_IMAGE_SIZE + 1 });
+        Object.defineProperty(huge, 'size', { value: DEFAULT_FILE_SIZE_LIMIT_BYTES + 1 });
 
         h.intake.handlePaste(pasteOf([huge]));
 

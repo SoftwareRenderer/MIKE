@@ -2,6 +2,7 @@ import type { Project, Board, Config, Task, Provider } from '$lib/types';
 import { loadAppSetting, saveAppSetting } from '$lib/storage';
 import { getConfig } from '$lib/api/config';
 import { isFromCache } from '$lib/api/cache';
+import { DEFAULT_FILE_SIZE_LIMIT_BYTES } from '$lib/utils/file-drop';
 
 // ─── Board Helpers ───
 function replaceTaskById(tasks: Task[], taskId: string, task: Task): Task[] | null {
@@ -97,6 +98,16 @@ export class AppStore {
      * board draws are the same value; there is no second stored task list. */
     get tasks(): Task[] {
         return this.board?.tasks || [];
+    }
+
+    /**
+     * The byte ceiling one file moves under on this server — the size its too-large refusal quotes, so the
+     * browser never turns away a file the server would have taken. A config naming none means the default,
+     * never 0, which would refuse every file.
+     */
+    get fileSizeLimitBytes(): number {
+        const megabytes = this.config?.file_size_limit_mb;
+        return megabytes && megabytes > 0 ? megabytes * 1024 * 1024 : DEFAULT_FILE_SIZE_LIMIT_BYTES;
     }
 
     // Sidebar

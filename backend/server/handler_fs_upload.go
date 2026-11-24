@@ -9,20 +9,13 @@ import (
 	"path/filepath"
 	"strings"
 
-	"mike/backend/exec"
 	"mike/backend/fsutil"
 	"mike/pkg/logging"
 )
 
 // Uploads are the only fs write whose body is not JSON: /api/fs/write's `content`
-// is a string field capped at 1 MB, so it cannot carry binary data.
+// is a string field capped by the editor's buffer, so it cannot carry binary data.
 const (
-	// MaxUploadSize is the maximum size for a single uploaded file, mirroring
-	// the internal write limit.
-	MaxUploadSize = exec.MaxUploadBytes
-	// uploadTooLargeMessage is the error message returned when an upload
-	// exceeds the size limit.
-	uploadTooLargeMessage = "file too large (max 20MB)"
 	// uploadBoundaryOverhead covers the multipart framing MaxBytesReader counts on top of
 	// the file body.
 	uploadBoundaryOverhead = 8 << 10
@@ -34,12 +27,13 @@ const (
 // uploadedFile extracts the file from a multipart body, applying size limits
 // before reading. The returned cleanup function closes the file and removes
 // temporary form files.
-func uploadedFile(w http.ResponseWriter, r *http.Request) (multipart.File, *multipart.FileHeader, func(), bool) {
-	r.Body = http.MaxBytesReader(w, r.Body, MaxUploadSize+uploadBoundaryOverhead)
+func (s *Server) uploadedFile(w http.ResponseWriter, r *http.Request) (multipart.File, *multipart.FileHeader, func(), bool) {
+	limit := s.settings.FileSizeLimitBytes()
+	r.Body = http.MaxBytesReader(w, r.Body, limit+uploadBoundaryOverhead)
 	if err := r.ParseMultipartForm(uploadFormMemory); err != nil {
 		var tooLarge *http.MaxBytesError
 		if errors.As(err, &tooLarge) {
-			JSONError(w, http.StatusRequestEntityTooLarge, uploadTooLargeMessage)
+			JSONError(w, http.StatusRequestEntityTooLarge, s.fileTooLarge())
 			return nil, nil, nil, false
 		}
 		JSONError(w, http.StatusBadRequest, "multipart form with a file part is required")
@@ -74,7 +68,7 @@ func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	file, header, release, ok := uploadedFile(w, r)
+	file, header, release, ok := s.uploadedFile(w, r)
 	if !ok {
 		return
 	}
@@ -115,14 +109,15 @@ func (s *Server) handleFSUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// MaxBytesReader already capped the body; this check is the one that names the file.
-	content, err := io.ReadAll(io.LimitReader(file, MaxUploadSize+1))
+	limit := s.settings.FileSizeLimitBytes()
+	content, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
 		logging.For(logging.HTTP).Errorf("fs upload read failed: %v", err)
 		JSONError(w, http.StatusInternalServerError, "failed to read uploaded file")
 		return
 	}
-	if len(content) > MaxUploadSize {
-		JSONError(w, http.StatusRequestEntityTooLarge, uploadTooLargeMessage)
+	if int64(len(content)) > limit {
+		JSONError(w, http.StatusRequestEntityTooLarge, s.fileTooLarge())
 		return
 	}
 

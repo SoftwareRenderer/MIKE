@@ -234,7 +234,9 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   body (GET is skipped so the WebSocket upgrades stay upgrades): a declared length over the cap is
   refused up front, a chunked one by the wrapped reader. Most handlers (`git`, `fs`, `task`, `thread`)
   decode `r.Body` directly rather than through `httputil.DecodeJSON`, which has its own limit and answers
-  **413** rather than "invalid request body" when the body was simply big.
+  **413** rather than "invalid request body" when the body was simply big. The routes that carry a message's
+  attachments read at `httputil.MaxMessageBodyBytes` instead, which boot derives from this deployment's file
+  limit, so the body a middleware admits and the body a handler refuses are one number.
 - Outbound reads are capped too: an extension's answer (`httputil.ReadUpstream`, applied by
   `httputil.DoOutbound`) buffers a bounded response and answers it with a type of MIKE's own
   (`proxyContentType`), never the upstream's. A contributed tool's answer is bounded twice over — the
@@ -258,12 +260,15 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   bounds the process; this bounds the conversation. This cut lands past the capture's own trailing marker,
   so where the capture dropped bytes, its count is reported to the log at this cut instead of reaching the
   model. `backend/exec/output_limits_test.go` is what fails when a path skips it.
-- **Each kind of `GET /api/fs/read` prices its own ceiling before the open.** Text and a picture answer
-  413 from `os.Lstat` for a working tree and `gitBlobSize` for `?ref=`, so a request for a 4 GB file costs
-  one subprocess instead of 4 GB. The byte kind asks at `maxExtensionReadBytes`: the copy is `io.CopyN` to
-  that same number, so a file that grew between the stat and the read cannot stream past it — the preview is
-  a render, and a tab holds what it renders. Tests:
-  `backend/server/handler_fs_bytes_test.go`.
+- **Every kind of `GET /api/fs/read` prices its ceiling before the open**, and one number names them all but
+  the editor's: `maxEditorBufferBytes` for the text half, this server's file limit
+  (`MIKE_FILE_SIZE_LIMIT_MB`, **`docs/configuration.md`**) for a picture and for an extension's bytes. Each
+  answers 413 from `os.Lstat` for a working tree and `gitBlobSize` for `?ref=`, so a request for a 4 GB file
+  costs one subprocess instead of 4 GB. The byte kind streams — `io.CopyN` to that same number, so a file that
+  grew between the stat and the read cannot stream past it — and the text half holds, because the bytes decide
+  two of its statuses. Tests: `backend/server/handler_fs_bytes_test.go`, and
+  `handler_fs_alloc_baseline_test.go` for the streamed answer costing the response's bytes rather than the
+  file's.
 - What crosses the sandbox bridge is bounded the same way: `protocol.MaxFramePayload` is checked before
   `ReadFrame` allocates from the declared length, `protocol.MaxReadBytes` is enforced in the guest *and*
   on the host's chunk collector (a stale bridge must not be able to stream past it), and a sandboxed
@@ -275,9 +280,10 @@ Tests: `backend/api/git_diff_file_path_test.go`, `git_diff_file_full_test.go`,
   rows a listing collects: gzip packs tar's 512-byte headers hard enough that a small file can hold an
   enormous number of them. A walk that runs out of either answers the rows it reached with
   `truncated: true`. A committed archive is held whole, because the reader needs bytes it can seek and git
-  answers with an object's bytes, so `archiveCommitBufferBytes` bounds it — probed with `git cat-file -s`
+  answers with an object's bytes, so this server's file limit bounds it — probed with `git cat-file -s`
   first and again by the bounded read. A working-tree archive is read through the open file and answers to
-  no such ceiling, and a member is bounded by `maxFSReadBytes`, the number `/api/fs/read` uses. Tests:
+  no such ceiling, and one decompressed member is bounded by `archiveMemberBytes` — its own number, because a
+  member's size is what a small file can explode to, which is no person's upload size. Tests:
   `backend/archive/archive_test.go` and `backend/server/handler_fs_archive_test.go`.
 - **A folder's size is walked under a budget.** `GET /api/fs/stat` prices a folder with
   `fsutil.TreeUsageFor` under `fsStatWalkEntries` and `fsStatWalkTimeout`, so an enormous tree costs one

@@ -6,6 +6,7 @@
   "default_operating_mode": "plan",
   "default_subtasks_auto_merge": null,
   "encryption_enabled": true,
+  "file_size_limit_mb": 20,
   "hide_model_badge": true,
   "keyboard_shortcuts": {
     "create_task": ""

@@ -300,7 +300,7 @@ func TestFSArchiveEntryRefusesWhatTheEditorCannotShow(t *testing.T) {
 
 	var big bytes.Buffer
 	tw := tar.NewWriter(&big)
-	body := strings.Repeat("a", int(maxFSReadBytes)+1)
+	body := strings.Repeat("a", int(archiveMemberBytes)+1)
 	if err := tw.WriteHeader(&tar.Header{Name: "big.txt", Typeflag: tar.TypeReg, Size: int64(len(body)), ModTime: archiveFixtureStamp, Format: tar.FormatGNU}); err != nil {
 		t.Fatal(err)
 	}

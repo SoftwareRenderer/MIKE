@@ -1,4 +1,4 @@
-import { dialogStore } from '$lib/stores';
+import { appStore, dialogStore } from '$lib/stores';
 import { t } from '$lib/i18n';
 import type { DraftAttachment } from '$lib/storage';
 import { useFileDropZone } from './use-file-drop-zone.svelte';
@@ -60,12 +60,15 @@ export function useImageAttachments(options: ImageAttachmentsOptions) {
     }
 
     async function takeImages(files: File[]): Promise<File[]> {
-        const picked = await readImageAttachments(files, MAX_IMAGES - options.held(), options.decode);
+        // The server's ceiling, read at the gesture: an image over it has no upload path either, so both
+        // refusals quote one number.
+        const limit = appStore.fileSizeLimitBytes;
+        const picked = await readImageAttachments(files, MAX_IMAGES - options.held(), options.decode, limit);
         if (picked.accepted.length > 0) options.addImages(picked.accepted);
         // Only say the bytes became a file when they can still land somewhere; with no task to write into,
         // takeFiles reports the refusal.
         const canUpload = !!options.uploadFile && !!options.hasTask?.();
-        const problem = describeRejectedImages(picked, canUpload);
+        const problem = describeRejectedImages(picked, canUpload, limit);
         if (problem) report(problem);
         return picked.asFiles.map(({ file }) => file);
     }

@@ -240,8 +240,8 @@ func TestFSBytesRefusesAnOversizedFileBeforeReadingIt(t *testing.T) {
 	if rr.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413: %s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), "8MB") {
-		t.Errorf("refusal %q does not name the cap it applied", rr.Body.String())
+	if want := strconv.FormatInt(s.settings.FileSizeLimitMegabytes(), 10) + "MB"; !strings.Contains(rr.Body.String(), want) {
+		t.Errorf("refusal %q does not name the cap it applied, want it to say %s", rr.Body.String(), want)
 	}
 	if grew := after.TotalAlloc - before.TotalAlloc; grew > allocBudget {
 		t.Errorf("the refusal allocated %d bytes; the cap is meant to run before the read", grew)
@@ -254,7 +254,7 @@ func TestFSBytesRefusesAnOversizedBlob(t *testing.T) {
 	s := testServer(t)
 	declareSuffixes(t, s, "viewer", true, "zbin")
 	id, repo := committedProject(t, s, "p1", map[string][]byte{"part.zbin": bytesFixture})
-	big := bytes.Repeat([]byte{0x5a}, (8<<20)+(1<<20))
+	big := bytes.Repeat([]byte{0x5a}, int(fileLimit(s)+(1<<20)))
 	if err := os.WriteFile(filepath.Join(repo, "big.zbin"), big, 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -350,6 +350,55 @@ func TestFSBytesCachesOnlyWhatAnObjectIDCanStandBehind(t *testing.T) {
 	}
 	if got := resolved.Header().Get("ETag"); got == "" {
 		t.Error("a ref that resolved to an object got no validator")
+	}
+}
+
+// TestFSBytesAnswersARefThatNamedNoObject: a read that names no task keeps `HEAD` as written, so it names no
+// object — the board's own diff, whose panel carries no task. The answer is still the object's bytes at the
+// probe's length; what the missing id costs is the cache validator.
+func TestFSBytesAnswersARefThatNamedNoObject(t *testing.T) {
+	s := testServer(t)
+	declareSuffixes(t, s, "viewer", true, "zbin")
+	// Over the object-id reading's buffers so holding cannot hide inside them; under the file limit so the
+	// request is answered at all.
+	size := allocBudget + (1 << 20)
+	id, repo := committedProject(t, s, "p1", map[string][]byte{"part.zbin": bytesFixture})
+	big := bytes.Repeat([]byte{0x5a}, int(size))
+	if err := os.WriteFile(filepath.Join(repo, "mesh.zbin"), big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testgit.Git(t, repo, "add", "--", "mesh.zbin")
+	testgit.Git(t, repo, "commit", "-m", "big")
+
+	// What the answer must be, streaming or not: the object's bytes, the probe's length, no validator.
+	moving := bytesGet(t, s, readQuery(id, "mesh.zbin", "HEAD", ""))
+	if moving.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", moving.Code, moving.Body.String())
+	}
+	if !bytes.Equal(moving.Body.Bytes(), big) {
+		t.Errorf("body = %d bytes, want the object's %d", moving.Body.Len(), len(big))
+	}
+	if got := moving.Header().Get("Content-Length"); got != strconv.Itoa(int(size)) {
+		t.Errorf("Content-Length = %q, want the probe's %d — the promised length is what lets the read stream", got, size)
+	}
+	if got := moving.Header().Get("ETag"); got != "" {
+		t.Errorf("ETag = %q for a ref that named no object", got)
+	}
+	if got := moving.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q for a ref that named no object, want no-store", got)
+	}
+
+	// The two spellings of the one object answer the same bytes; only the validator differs.
+	head := strings.TrimSpace(testgit.GitOutput(t, repo, "rev-parse", "HEAD"))
+	pinned := bytesGet(t, s, readQuery(id, "mesh.zbin", head, ""))
+	if pinned.Code != http.StatusOK {
+		t.Fatalf("pinned read: status = %d, want 200: %s", pinned.Code, pinned.Body.String())
+	}
+	if !bytes.Equal(pinned.Body.Bytes(), moving.Body.Bytes()) {
+		t.Error("the object id and the name no tree resolved answered different bytes for one object")
+	}
+	if got := pinned.Header().Get("ETag"); got != `"`+head+`"` {
+		t.Errorf("ETag = %q, want the object id %q", got, head)
 	}
 }
 
