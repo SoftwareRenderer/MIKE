@@ -34,17 +34,14 @@ type fsReadResponse struct {
 	GutterMarkers map[int][]string `json:"gutter_markers,omitempty"`
 }
 
-// maxFSReadBytes is what GET /api/fs/read returns at most — the size an editor can
-// show, not a security boundary. Checking it before the read is the point: one request
-// for a 4 GB file, in the working tree or in any commit, then costs one stat or one
-// `cat-file -s` instead of 4 GB of memory.
-const maxFSReadBytes int64 = 1_000_000
-
-// maxFSWriteBytes is what POST /api/fs/write accepts as `content`. It is the same
-// number as the read cap because it is the same reason — the size an editor shows —
-// but it is its own constant because the two are free to move apart, and a shared
-// name would make one cap's change silently move the other.
-const maxFSWriteBytes = 1_000_000
+// maxEditorBufferBytes is the largest buffer the editor holds in either direction: what GET /api/fs/read
+// returns as `content` and what POST /api/fs/write accepts are one number, so a file a person can open is one
+// they can save. It is not a security boundary, and it does not move with the file limit: this text is held
+// whole, where the file limit bounds what this server forwards.
+//
+// Checking it before the read is the point: one request for a 4 GB file, in the working tree or in any
+// commit, then costs one stat or one `cat-file -s` instead of 4 GB of memory.
+const maxEditorBufferBytes int64 = 1_000_000
 
 // fsTooLargeMessage is the answer both size checks give. A test pins it to the caps it
 // describes, because a cap raised without its sentence tells the user a lie.
@@ -202,7 +199,7 @@ func (s *Server) handleFSWrite(w http.ResponseWriter, r *http.Request) {
 		JSONError(w, http.StatusBadRequest, "path is required")
 		return
 	}
-	if len(req.Content) > maxFSWriteBytes {
+	if int64(len(req.Content)) > maxEditorBufferBytes {
 		JSONError(w, http.StatusRequestEntityTooLarge, fsTooLargeMessage)
 		return
 	}

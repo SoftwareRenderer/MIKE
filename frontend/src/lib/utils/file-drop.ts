@@ -7,8 +7,11 @@
  * a single-file drop still works, only the folder structure is lost.
  */
 
-/** Byte cap for one uploaded file; it mirrors MaxUploadSize on the server. */
-export const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
+/**
+ * The fallback byte cap for one file, until GET /api/config names this server's own: a screen never refuses
+ * what its server would take.
+ */
+export const DEFAULT_FILE_SIZE_LIMIT_BYTES = 20 * 1024 * 1024;
 
 /**
  * Ceiling on one drop. Not a quota but a stop-loss: `node_modules` is a drag of tens
@@ -27,7 +30,7 @@ export interface DroppedFile {
 /** What a single drop event turned into. */
 export interface DroppedSelection {
     files: DroppedFile[];
-    /** Files over MAX_UPLOAD_BYTES — reported, never sent. */
+    /** Files over the cap the selection was sorted under — reported, never sent. */
     tooBig: DroppedFile[];
     /** Names that could not be read (a link, a permission refusal, a vanished file). */
     unreadable: string[];
@@ -67,8 +70,8 @@ function atCap(out: DroppedSelection): boolean {
 }
 
 /** Sort one file into the run or the oversize list — the same rule for every source. */
-function classify(out: DroppedSelection, file: File, relPath: string): void {
-    (file.size > MAX_UPLOAD_BYTES ? out.tooBig : out.files).push({ file, relPath });
+function classify(out: DroppedSelection, file: File, relPath: string, maxBytes: number): void {
+    (file.size > maxBytes ? out.tooBig : out.files).push({ file, relPath });
 }
 
 /** Whether a drag carries files at all — an in-app drag (cards, selected text) must not light up the drop zone. */
@@ -101,7 +104,7 @@ function readBatch(reader: EntryReader): Promise<Entry[] | null> {
     });
 }
 
-async function walk(entry: Entry, prefix: string, out: DroppedSelection): Promise<void> {
+async function walk(entry: Entry, prefix: string, out: DroppedSelection, maxBytes: number): Promise<void> {
     const relPath = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (atCap(out)) {
         out.truncated = true;
@@ -117,7 +120,7 @@ async function walk(entry: Entry, prefix: string, out: DroppedSelection): Promis
             }
             if (batch.length === 0) break;
             for (const child of batch) {
-                await walk(child, relPath, out);
+                await walk(child, relPath, out, maxBytes);
                 if (out.truncated) return;
             }
         }
@@ -128,14 +131,17 @@ async function walk(entry: Entry, prefix: string, out: DroppedSelection): Promis
         out.unreadable.push(relPath);
         return;
     }
-    classify(out, file, relPath);
+    classify(out, file, relPath, maxBytes);
 }
 
 /**
- * Collect everything a drop event carries, keeping the folder structure the user
- * dragged. Never throws: what cannot be read is reported in `unreadable`.
+ * Collect everything a drop event carries, keeping the folder structure the user dragged. Never throws:
+ * what cannot be read is reported in `unreadable`.
  */
-export async function collectDroppedFiles(dataTransfer: DataTransfer): Promise<DroppedSelection> {
+export async function collectDroppedFiles(
+    dataTransfer: DataTransfer,
+    maxBytes: number = DEFAULT_FILE_SIZE_LIMIT_BYTES,
+): Promise<DroppedSelection> {
     const out: DroppedSelection = { files: [], tooBig: [], unreadable: [], truncated: false };
     const items = Array.from(dataTransfer.items || []);
     const entries: Entry[] = [];
@@ -153,14 +159,14 @@ export async function collectDroppedFiles(dataTransfer: DataTransfer): Promise<D
                 out.truncated = true;
                 break;
             }
-            classify(out, file, file.name);
+            classify(out, file, file.name, maxBytes);
         }
         return out;
     }
 
     for (const entry of entries) {
         if (out.truncated) break;
-        await walk(entry, '', out);
+        await walk(entry, '', out, maxBytes);
     }
     return out;
 }
@@ -169,14 +175,14 @@ export async function collectDroppedFiles(dataTransfer: DataTransfer): Promise<D
  * Files chosen through an `<input type="file">`, in the shape a drop produces. A picker
  * reports bare names, so these land flat — carrying a folder's tree is the drag's job.
  */
-export function collectPickedFiles(files: File[]): DroppedSelection {
+export function collectPickedFiles(files: File[], maxBytes: number = DEFAULT_FILE_SIZE_LIMIT_BYTES): DroppedSelection {
     const out: DroppedSelection = { files: [], tooBig: [], unreadable: [], truncated: false };
     for (const file of files) {
         if (atCap(out)) {
             out.truncated = true;
             break;
         }
-        classify(out, file, file.name);
+        classify(out, file, file.name, maxBytes);
     }
     return out;
 }

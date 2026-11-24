@@ -126,7 +126,7 @@ func TestFSReadAnOversizedFileIsRefusedBySizeFirst(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := f.Truncate(maxFSReadBytes + 1); err != nil {
+	if err := f.Truncate(maxEditorBufferBytes + 1); err != nil {
 		f.Close()
 		t.Fatal(err)
 	}

@@ -7,8 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
+	"mike/backend/startup"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
@@ -157,30 +159,59 @@ func projectDirOf(t *testing.T, s *Server, projectID string) string {
 	return filepath.Clean(p.Path)
 }
 
-// TestTooLargeMessagesNameTheirCaps is the drift gate: every cap that answers 413 has
-// a sentence saying how big it is, and a raised cap left behind its sentence would
-// refuse a file for a size the user was told they could send. The rule is the one the
-// strings were written with — the printed figure is the cap's decimal megabytes.
+// TestTooLargeMessagesNameTheirCaps is the drift gate: every cap that answers 413 has a sentence saying how
+// big it is. Each row states the megabytes its sentence must print, because the two caps are written in
+// different units — the editor's buffer is a decimal byte count, the file limit arrives in MB.
 func TestTooLargeMessagesNameTheirCaps(t *testing.T) {
+	s := testServer(t)
 	cases := []struct {
-		name    string
-		message string
-		bytes   int64
+		name      string
+		message   string
+		megabytes int64
 	}{
-		{"fs read", fsTooLargeMessage, maxFSReadBytes},
-		{"fs write", fsTooLargeMessage, maxFSWriteBytes},
-		{"upload", uploadTooLargeMessage, MaxUploadSize},
-		{"picture read", imageTooLargeMessage, maxImageBytes},
-		{"byte read", extensionReadTooLarge, maxExtensionReadBytes},
+		{"editor buffer", fsTooLargeMessage, maxEditorBufferBytes / 1_000_000},
+		// One sentence at one ceiling, listed twice because the routes are two.
+		{"picture read", s.fileTooLarge(), s.settings.FileSizeLimitMegabytes()},
+		{"byte read", s.fileTooLarge(), s.settings.FileSizeLimitMegabytes()},
+		{"committed archive", s.archiveCommitTooLarge(), s.settings.FileSizeLimitMegabytes()},
 	}
 	for _, tc := range cases {
 		var stated int
-		if _, err := fmt.Sscanf(tc.message, "file too large (max %dMB)", &stated); err != nil {
-			t.Errorf("%s: %q does not read as \"file too large (max NMB)\": %v", tc.name, tc.message, err)
+		prefix := "file too large (max %dMB)"
+		if strings.HasPrefix(tc.message, "archive") {
+			prefix = "archive too large to read from a commit (max %dMB)"
+		}
+		if _, err := fmt.Sscanf(tc.message, prefix, &stated); err != nil {
+			t.Errorf("%s: %q does not read as %q: %v", tc.name, tc.message, prefix, err)
 			continue
 		}
-		if want := int(tc.bytes / 1_000_000); stated != want {
-			t.Errorf("%s cap is %d bytes (%dMB) but the message says %dMB", tc.name, tc.bytes, want, stated)
+		if stated != int(tc.megabytes) {
+			t.Errorf("%s cap is %dMB but the message says %dMB", tc.name, tc.megabytes, stated)
 		}
+	}
+
+	t.Run("a raised limit moves the sentence with it", func(t *testing.T) {
+		raised := testServerWith(t, func(c *startup.Config) { c.FileSizeLimitMB = 60 })
+		if got, want := raised.fileTooLarge(), "file too large (max 60MB)"; got != want {
+			t.Errorf("refusal = %q, want %q", got, want)
+		}
+		if got, want := raised.archiveCommitTooLarge(), "archive too large to read from a commit (max 60MB)"; got != want {
+			t.Errorf("archive refusal = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestConfigServesTheFileLimitTheBrowserCapsItselfAt is the wiring between the refusal and the browser: the
+// resolved limit is what /api/config carries, and a browser left on its default turns away a file this
+// server would have taken.
+func TestConfigServesTheFileLimitTheBrowserCapsItselfAt(t *testing.T) {
+	s := testServerWith(t, func(c *startup.Config) { c.FileSizeLimitMB = 60 })
+	body := mustJSON[map[string]any](t, testResponseAuth(t, s, testRequest(http.MethodGet, "/api/config", nil)).Body)
+	stated, ok := body["file_size_limit_mb"].(float64)
+	if !ok {
+		t.Fatalf("config response names no file limit: %v", body["file_size_limit_mb"])
+	}
+	if want := s.settings.FileSizeLimitMegabytes(); int64(stated) != want {
+		t.Errorf("served file_size_limit_mb = %v, want the %d MB this server refuses at", stated, want)
 	}
 }

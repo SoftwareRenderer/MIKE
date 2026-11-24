@@ -5,14 +5,7 @@
  */
 import type { DraftAttachment } from '$lib/storage';
 import { t } from '$lib/i18n';
-
-/**
- * The intake cap for an image, and it is the upload cap: this mirrors `exec.MaxUploadBytes`
- * (backend/exec/task_files.go), so an image may be as large as any file the same gesture can upload.
- *
- * @knipignore A fixture is built one byte over this cap.
- */
-export const MAX_IMAGE_SIZE = 20 * 1024 * 1024;
+import { DEFAULT_FILE_SIZE_LIMIT_BYTES } from './file-drop';
 
 export const MAX_IMAGES = 4;
 
@@ -286,6 +279,7 @@ export async function readImageAttachments(
     files: FileList | File[],
     remaining: number,
     decode: DecodeImage = decodeImage,
+    maxBytes: number = DEFAULT_FILE_SIZE_LIMIT_BYTES,
 ): Promise<PickedImages> {
     let room = Math.max(0, remaining);
     const accepted: DraftAttachment[] = [];
@@ -295,7 +289,7 @@ export async function readImageAttachments(
     // Whatever is not an attachable image is not this function's business: a picker can be talked past its
     // `accept`, and those files belong to `sortTransferFiles`.
     for (const file of Array.from(files).filter(isAttachableImage)) {
-        if (file.size > MAX_IMAGE_SIZE) asFiles.push({ file, reason: 'oversize' });
+        if (file.size > maxBytes) asFiles.push({ file, reason: 'oversize' });
         else if (room === 0) overflow.push(file);
         else {
             const attachment = await toAttachment(file, decode);
@@ -313,10 +307,14 @@ export async function readImageAttachments(
  * The sentence for a pick that left no image in the tray. `uploaded` is false where there is no task to write
  * into: the file path reports its own refusal there, so claiming an upload would be wrong.
  */
-export function describeRejectedImages(rejected: PickedImages, uploaded = true): string | null {
+export function describeRejectedImages(
+    rejected: PickedImages,
+    uploaded = true,
+    maxBytes: number = DEFAULT_FILE_SIZE_LIMIT_BYTES,
+): string | null {
     const sentences: string[] = [];
     if (uploaded) {
-        const limit = Math.round(MAX_IMAGE_SIZE / (1024 * 1024));
+        const limit = Math.round(maxBytes / (1024 * 1024));
         const oversize = rejected.asFiles.filter(e => e.reason === 'oversize').length;
         const unresizable = rejected.asFiles.filter(e => e.reason === 'unresizable').length;
         if (oversize > 0) sentences.push(t('attachments.sentAsFilesOversize', { count: oversize, limit }));

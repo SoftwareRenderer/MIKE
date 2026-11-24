@@ -9,10 +9,10 @@ import {
     takeTransfer,
     MAX_IMAGES,
     MAX_IMAGE_PIXELS,
-    MAX_IMAGE_SIZE,
     MAX_INLINE_TEXT,
     type DecodeImage,
 } from '../attachments';
+import { DEFAULT_FILE_SIZE_LIMIT_BYTES } from '../file-drop';
 
 const KB = 1024;
 const MB = 1024 * 1024;
@@ -21,10 +21,10 @@ function image(name = 'shot.png', bytes = 2 * KB, type = 'image/png'): File {
     return new File([new Uint8Array(bytes)], name, { type });
 }
 
-// A File whose size is over the cap without allocating 20 MB.
-function oversized(name = 'huge.png'): File {
+// A File whose size is over a cap without allocating the bytes.
+function oversized(name = 'huge.png', cap: number = DEFAULT_FILE_SIZE_LIMIT_BYTES): File {
     const f = image(name);
-    Object.defineProperty(f, 'size', { value: MAX_IMAGE_SIZE + 1 });
+    Object.defineProperty(f, 'size', { value: cap + 1 });
     return f;
 }
 
@@ -58,9 +58,9 @@ function picture(width: number, height: number, writes: Blob | null = encodedBlo
 const undecodable: DecodeImage = async () => null;
 
 describe('the caps', () => {
-    it('lets an image be exactly as large as a file the same gesture uploads', () => {
-        // backend/exec/task_files.go's MaxUploadBytes is the number this mirrors.
-        expect(MAX_IMAGE_SIZE).toBe(20 * MB);
+    it('holds one built-in intake cap for the image and the file the same gesture carries', () => {
+        // The number the server boots to, before /api/config names this deployment's own.
+        expect(DEFAULT_FILE_SIZE_LIMIT_BYTES).toBe(20 * MB);
     });
 });
 
@@ -128,11 +128,18 @@ describe('describeRejectedImages', () => {
     it('names the size limit for an image that went to the task as a file', () => {
         const asFiles = [{ file: oversized(), reason: 'oversize' as const }];
         expect(describeRejectedImages({ ...none, asFiles }))
-            .toBe(`1 image over ${Math.round(MAX_IMAGE_SIZE / MB)} MB attached as a file`);
+            .toBe(`1 image over ${Math.round(DEFAULT_FILE_SIZE_LIMIT_BYTES / MB)} MB attached as a file`);
         expect(describeRejectedImages({
             ...none,
             asFiles: [...asFiles, { file: oversized('b.png'), reason: 'oversize' as const }],
         })).toContain('2 images over');
+    });
+
+    it('names the cap the caller was sorted under, which is the size the server refused at', () => {
+        const raised = 60 * MB;
+        const asFiles = [{ file: oversized('huge.png', raised), reason: 'oversize' as const }];
+        expect(describeRejectedImages({ ...none, asFiles }, true, raised))
+            .toBe(`1 image over ${raised / MB} MB attached as a file`);
     });
 
     it('names the resample, not the size, for an image the browser could not draw smaller', () => {
@@ -358,6 +365,14 @@ describe('readImageAttachments', () => {
         const picked = await readImageAttachments([oversized()], MAX_IMAGES, decode);
         expect(asked).toBe(0);
         expect(picked.asFiles.map((e) => e.reason)).toEqual(['oversize']);
+    });
+
+    it('keeps an image over the built-in cap that the cap the caller named allows', async () => {
+        const raised = 2 * DEFAULT_FILE_SIZE_LIMIT_BYTES;
+        const p = picture(2, 2);
+        const picked = await readImageAttachments([oversized('huge.png')], MAX_IMAGES, p.decode, raised);
+        expect(picked.accepted).toHaveLength(1);
+        expect(picked.asFiles).toEqual([]);
     });
 
     it('never reads more than the room it was given', async () => {

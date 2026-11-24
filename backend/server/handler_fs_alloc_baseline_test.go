@@ -86,26 +86,24 @@ func TestFSReadAllocationBaseline(t *testing.T) {
 			report("bytes, committed", func() *httptest.ResponseRecorder {
 				return bytesGet(t, s, readQuery(id, "notes.md", "HEAD", ""))
 			}, http.StatusOK)
-			// The same committed bytes named by their object id. A pinned id is what lets the answer stream
-			// out of git rather than be held so a refusal can still carry a status, so this row — not the
-			// one above — is the figure the streaming half is judged on.
+			// The same committed bytes named by their object id; both committed readings stream, so this row
+			// sits beside the one above. What the id buys is the cache validator, which no figure here can see.
 			report("bytes, committed by id", func() *httptest.ResponseRecorder {
 				return bytesGet(t, s, readQuery(id, "notes.md", head, ""))
 			}, http.StatusOK)
 
-			// The same committed bytes, streamed, measured against a writer that keeps nothing. The rows
-			// above are answered into httptest.ResponseRecorder, which accumulates whatever it is handed:
-			// a body written in one Write costs it one buffer, and a body streamed in 32 KiB chunks costs it
-			// the growth of one. That growth is the harness, not the route, so the streaming half is also
-			// read here — where the figure is what a socket costs the server.
-			// Two of these, because one figure of this kind is not a measurement: the working tree is the
-			// streaming path this server has always had, and the committed object is the one it just grew.
+			// The same bodies, streamed, measured against a writer that keeps nothing. The rows above are
+			// answered into httptest.ResponseRecorder, which accumulates whatever it is handed, so its growth is
+			// the harness and not the route; here the figure is what a socket costs the server. Three of these,
+			// because one figure of this kind is not a measurement — and the committed name is the reading a
+			// board-level diff panel makes, the one a regression would hold in memory again.
 			for _, row := range []struct {
 				name  string
 				query url.Values
 			}{
 				{"bytes, working tree, socket", readQuery(id, "notes.md", "", "")},
 				{"bytes, committed, socket", readQuery(id, "notes.md", head, "")},
+				{"bytes, committed by name, socket", readQuery(id, "notes.md", "HEAD", "")},
 			} {
 				ask := func() (int, int64) {
 					return getToDiscard(t, s, readKindRequest(fsKindBytes, cloneQuery(row.query)))

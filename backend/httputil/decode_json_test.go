@@ -38,33 +38,42 @@ func TestDecodeJSONBoundsTheBody(t *testing.T) {
 	}
 }
 
-// TestMaxMessageBodyBytesCoversTheLargestRealPayload keeps the cap honest: the biggest thing the UI sends is
-// a user message with four images at the frontend's intake cap, so either constant can break that flow.
+// The message ceiling is sized by the file limit it carries attachments at, so this keeps the derivation
+// honest in both directions: the biggest thing the UI sends fits, and the number stays a bound.
 func TestMaxMessageBodyBytesCoversTheLargestRealPayload(t *testing.T) {
 	const (
-		maxImages     = 4                // frontend/src/lib/utils/attachments.ts MAX_IMAGES
-		maxImageBytes = 20 * 1024 * 1024 // ... and MAX_IMAGE_SIZE, which mirrors exec.MaxUploadBytes
-		base64Slack   = 4                // base64 is 4/3 of the bytes
+		maxImages   = 4                // frontend/src/lib/utils/attachments.ts MAX_IMAGES
+		fileLimit   = 20 * 1024 * 1024 // startup.DefaultFileSizeLimitMB, the browser's intake default
+		base64Slack = 4                // base64 is 4/3 of the bytes
 	)
-	largest := int64(maxImages*maxImageBytes)*int64(base64Slack)/3 + (1 << 20) // + prompt and framing
-	if MaxMessageBodyBytes < largest {
-		t.Errorf("MaxMessageBodyBytes = %d, but a message with %d images of %d bytes needs ~%d",
-			MaxMessageBodyBytes, maxImages, maxImageBytes, largest)
+	largest := int64(maxImages*fileLimit)*int64(base64Slack)/3 + (1 << 20) // + prompt and framing
+	if ceiling := MessageBodyBytes(fileLimit); ceiling < largest {
+		t.Errorf("MessageBodyBytes(%d) = %d, but a message with %d images of %d bytes needs ~%d",
+			fileLimit, ceiling, maxImages, fileLimit, largest)
 	}
-	if MaxMessageBodyBytes > 160<<20 {
-		t.Errorf("MaxMessageBodyBytes = %d is looser than any flow needs; the cap is the point", MaxMessageBodyBytes)
+	if ceiling := MessageBodyBytes(fileLimit); ceiling > 160<<20 {
+		t.Errorf("MessageBodyBytes(%d) = %d is looser than any flow needs; the cap is the point", fileLimit, ceiling)
+	}
+	if MessageBodyBytes(2*fileLimit) <= MessageBodyBytes(fileLimit) {
+		t.Error("doubling the file limit left the message ceiling behind — the drift the derivation exists to prevent")
+	}
+	if MessageBodyBytes(1<<20) <= MaxRequestBodyBytes {
+		t.Errorf("MessageBodyBytes(1MB) = %d is no wider than the general bound %d",
+			MessageBodyBytes(1<<20), MaxRequestBodyBytes)
 	}
 }
 
-// TestGeneralJSONBoundStaysTighterThanTheMessageBound keeps the widening to the routes that need it: only
-// the two message routes decode at MaxMessageBodyBytes.
+// TestGeneralJSONBoundStaysTighterThanTheMessageBound keeps the widening to the routes that need it: the
+// general bound is the tighter of the pair at every limit the ladder can resolve.
 func TestGeneralJSONBoundStaysTighterThanTheMessageBound(t *testing.T) {
 	if MaxRequestBodyBytes > 32<<20 {
 		t.Errorf("MaxRequestBodyBytes = %d: nothing without an attachment needs this much", MaxRequestBodyBytes)
 	}
-	if MaxRequestBodyBytes >= MaxMessageBodyBytes {
-		t.Errorf("MaxRequestBodyBytes = %d is no tighter than the message bound %d, so widening one widened both",
-			MaxRequestBodyBytes, MaxMessageBodyBytes)
+	for _, mb := range []int64{1, 20, 100, 4096} {
+		if ceiling := MessageBodyBytes(mb << 20); MaxRequestBodyBytes >= ceiling {
+			t.Errorf("MaxRequestBodyBytes = %d is no tighter than the message bound %d at a %dMB limit, so widening one widened both",
+				MaxRequestBodyBytes, ceiling, mb)
+		}
 	}
 }
 

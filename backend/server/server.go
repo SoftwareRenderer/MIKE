@@ -380,6 +380,10 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS, author
 		tlsConfig:    tlsCfg,
 		loginLimiter: newLoginRateLimiter(settings.LoginRateLimit),
 	}
+	// Both come from the resolved file limit, recorded before any request can be served.
+	httputil.SetMessageBodyBytes(httputil.MessageBodyBytes(settings.FileSizeLimitBytes()))
+	cfgStore.SetFileSizeLimitMB(settings.FileSizeLimitMegabytes())
+
 	// One answer for the whole process, so an advertised link can never point at a 404.
 	cfgStore.SetTLSCAAvailable(s.localCAvailable())
 	// Built before any step can reference it: a registration reads the method value now, so a component
@@ -585,6 +589,7 @@ func NewServer(settings startup.Config, tlsCfg *tls.Config, assets fs.FS, author
 		RewindConversation: s.rewindConversationForRow,
 
 		AllowPrivateSubmoduleHosts: settings.AllowPrivateSubmoduleHosts,
+		FileSizeLimitBytes:         settings.FileSizeLimitBytes(),
 	})
 	s.executor.SetLLMAdapter(s.llmAdapter)
 	// The budget is measured on the same tick that samples the containers it counts, and reports
@@ -1063,7 +1068,7 @@ func (s *Server) middlewareChain(h http.Handler) http.Handler {
 		s.StatusLogMiddleware,
 		// Before anything that reads a body. The cap is the widest body any route may legitimately carry, so
 		// a message with four attached images is not refused on its way in.
-		MaxBodyMiddleware(httputil.MaxMessageBodyBytes),
+		MaxBodyMiddleware(httputil.MessageBodyLimit()),
 		NonceMiddleware,
 		s.CORSMiddleware,
 		// Before CSRF and the session: a bearer credential carries no cookie to forge, and its

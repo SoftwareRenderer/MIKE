@@ -142,8 +142,8 @@ export class FsReadRefused extends Error {
  * — and the tree it is read from comes from `task`, never from the path. What a caller keys its own
  * records by (an editor buffer, say) is the caller's business and stays out of this request.
  *
- * The size cap is the server's (`maxFSReadBytes`) and it answers 413 from the stat, so a 4 GB file costs
- * one probe rather than a read; a caller that shows files has to treat that as a state.
+ * The size cap is the server's editor buffer, not the tunable file limit, and 413 comes back from the stat:
+ * a 4 GB file costs one probe, and a caller that shows files must treat that refusal as a state.
  */
 export async function readFsFile(params: {
     path: string;

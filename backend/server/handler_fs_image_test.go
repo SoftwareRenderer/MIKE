@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 
-	"mike/backend/exec"
 	"mike/backend/testutil/testgit"
 	"mike/backend/types"
 )
@@ -256,7 +255,7 @@ func TestFSImageRefusalNamesNoHostPath(t *testing.T) {
 func TestFSImageRefBranchRefusesAnOversizedBlob(t *testing.T) {
 	s := testServer(t)
 	id, repo := committedProject(t, s, "p1", map[string][]byte{"logo.png": pngFixture})
-	big := bytes.Repeat([]byte{0x5a}, (exec.MaxUploadBytes)+(1<<20))
+	big := bytes.Repeat([]byte{0x5a}, int(fileLimit(s)+(1<<20)))
 	if err := os.WriteFile(filepath.Join(repo, "big.png"), big, 0o644); err != nil {
 		t.Fatal(err)
 	}

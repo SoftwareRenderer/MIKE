@@ -8,7 +8,8 @@ vi.mock('$lib/storage', () => ({
 
 import { updateTaskInBoard, updateTaskAndSelection, removeTaskFromBoard, appendTaskToBoard, applyResolvedTasksToBoard } from '$lib/stores/app.svelte';
 import { appStore } from '$lib/stores';
-import type { Board, Task } from '$lib/types';
+import type { Board, Config, Task } from '$lib/types';
+import { DEFAULT_FILE_SIZE_LIMIT_BYTES } from '$lib/utils/file-drop';
 
 function makeTask(id: string, over: Partial<Task> = {}): Task {
     return { id, project_id: 'p1', title: id, status: 'backlog', ...over } as Task;
@@ -104,5 +105,25 @@ describe('the one task list', () => {
         appStore.selectedTask = makeTask('a', { status: 'in_progress' });
         updateTaskAndSelection(appStore, makeTask('a', { status: 'review' }));
         expect(appStore.selectedTask?.status).toBe('review');
+    });
+});
+
+describe('the file limit the browser applies', () => {
+    beforeEach(() => {
+        appStore.config = null;
+    });
+
+    it('is the served megabytes as the bytes the server compares', () => {
+        appStore.config = { file_size_limit_mb: 60 } as Config;
+        expect(appStore.fileSizeLimitBytes).toBe(60 * 1024 * 1024);
+    });
+
+    it('is the built-in default while no config has been read, never zero', () => {
+        expect(appStore.fileSizeLimitBytes).toBe(DEFAULT_FILE_SIZE_LIMIT_BYTES);
+    });
+
+    it('is the built-in default for a server that named none, which would refuse every file', () => {
+        appStore.config = { file_size_limit_mb: 0 } as Config;
+        expect(appStore.fileSizeLimitBytes).toBe(DEFAULT_FILE_SIZE_LIMIT_BYTES);
     });
 });

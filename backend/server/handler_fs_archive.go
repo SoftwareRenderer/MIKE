@@ -30,15 +30,17 @@ const (
 	// number of rows.
 	archiveMaxEntries = 20000
 
-	// archiveCommitBufferBytes bounds holding a committed archive in memory: the reader needs bytes it can
-	// seek, so reading one from git means keeping the whole compressed file. A working-tree archive is read
-	// through the open file and has no such ceiling.
-	archiveCommitBufferBytes int64 = 20 << 20
+	// archiveMemberBytes bounds one decompressed member: gzip packs a small container into a great many
+	// more bytes, so this is the bound a bomb would otherwise blow past. A member over it answers
+	// archive.ErrEntryTooLarge.
+	archiveMemberBytes int64 = 1_000_000
 )
 
-// archiveCommitTooLargeMessage names the ceiling it describes.
-var archiveCommitTooLargeMessage = "archive too large to read from a commit (max " +
-	strconv.FormatInt(archiveCommitBufferBytes>>20, 10) + "MB)"
+// archiveCommitTooLarge names the ceiling: a committed archive is held whole because the reader needs bytes it
+// can seek, so the file limit is also this process's heap bound for one such read.
+func (s *Server) archiveCommitTooLarge() string {
+	return "archive too large to read from a commit (max " + strconv.FormatInt(s.settings.FileSizeLimitMegabytes(), 10) + "MB)"
+}
 
 // archiveWalkTimeoutMessage is the answer when the walk ran out of budget before it read anything.
 const archiveWalkTimeoutMessage = "the archive took too long to read"
@@ -47,7 +49,7 @@ const archiveWalkTimeoutMessage = "the archive took too long to read"
 func archiveRequestOptions() archive.Options {
 	return archive.Options{
 		MaxEntries:     archiveMaxEntries,
-		MaxMemberBytes: maxFSReadBytes,
+		MaxMemberBytes: archiveMemberBytes,
 	}
 }
 
@@ -205,14 +207,15 @@ func (s *Server) archiveSource(w http.ResponseWriter, r *http.Request, scope fsS
 	spec := refWhere(ctx, tree, ref) + ":" + filepath.ToSlash(rel)
 	repo := scope.project.Path
 	size, sized := gitBlobSize(gitInDir(ctx, repo), spec)
-	if sized && size > archiveCommitBufferBytes {
-		JSONError(w, http.StatusRequestEntityTooLarge, archiveCommitTooLargeMessage)
+	limit := s.settings.FileSizeLimitBytes()
+	if sized && size > limit {
+		JSONError(w, http.StatusRequestEntityTooLarge, s.archiveCommitTooLarge())
 		return nil, nil, false
 	}
-	data, truncated, err := gitBlobSpool(ctx, repo, spec, archiveCommitBufferBytes, blobHint(size, sized))
+	data, truncated, err := gitBlobSpool(ctx, repo, spec, limit, blobHint(size, sized))
 	switch {
 	case truncated:
-		JSONError(w, http.StatusRequestEntityTooLarge, archiveCommitTooLargeMessage)
+		JSONError(w, http.StatusRequestEntityTooLarge, s.archiveCommitTooLarge())
 		return nil, nil, false
 	case err != nil:
 		logging.For(logging.HTTP).Debugf("committed archive read failed: %v", err)

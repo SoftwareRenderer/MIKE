@@ -91,6 +91,7 @@ type ConfigStore struct {
 	memoryBudgetMB  int64
 	memoryTotalMB   int64
 	memoryBudgetPct int
+	fileSizeLimitMB int64 // set at startup via SetFileSizeLimitMB
 
 	// box opens stored provider keys. Built once at startup: a derivation costs hundreds of
 	// milliseconds, so no read path may pay one.
@@ -139,6 +140,12 @@ func (cs *ConfigStore) SetMemoryBudget(capacityMB, totalMB int64, pct int) {
 	cs.memoryBudgetMB = capacityMB
 	cs.memoryTotalMB = totalMB
 	cs.memoryBudgetPct = pct
+}
+
+// SetFileSizeLimitMB records the file size this server was started with, so the browser caps what it offers
+// a person at the size a refusal quotes: the byte it compares a File against is this << 20.
+func (cs *ConfigStore) SetFileSizeLimitMB(megabytes int64) {
+	cs.fileSizeLimitMB = megabytes
 }
 
 // WorkspaceDir returns the worktrees directory, made absolute. GetConfig carries the same value; ask
@@ -445,6 +452,9 @@ type configResponse struct {
 	MemoryBudgetMB  int64 `json:"memory_budget_mb"`
 	MemoryTotalMB   int64 `json:"memory_total_mb"`
 	MemoryBudgetPct int   `json:"memory_budget_pct"`
+	// FileSizeLimitMB is the ceiling one file moves under here, in megabytes: the figure a too-large
+	// refusal quotes and what the browser multiplies by 1<<20. A 0 means no decision was injected.
+	FileSizeLimitMB int64 `json:"file_size_limit_mb"`
 	// The extensions whose contributed tools reach the network from this process. Read-only: a project's
 	// isolation bounds its container, and these calls never enter it.
 	ServerNetworkExtensions []types.NetworkedExtension `json:"server_network_extensions,omitempty"`
@@ -556,6 +566,7 @@ func (cs *ConfigStore) buildConfigResponse(cfg *types.Config) configResponse {
 		KeyboardShortcuts:             normalizeKeyboardShortcuts(cfg.KeyboardShortcuts),
 		EncryptionEnabled:             cs.box != nil,
 		TLSCAAvailable:                cs.tlsCAAvailable,
+		FileSizeLimitMB:               cs.fileSizeLimitMB,
 		MemoryBudgetMB:                cs.memoryBudgetMB,
 		MemoryTotalMB:                 cs.memoryTotalMB,
 		MemoryBudgetPct:               cs.memoryBudgetPct,

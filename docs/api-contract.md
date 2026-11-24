@@ -638,9 +638,13 @@ An attached image is decided once, in the browser, before a byte of it is stored
 IndexedDB draft, the POST body, the `attachments` column and the `image_url` part are one picture. Nothing
 downstream resamples, and no Go code decodes an image.
 
-**Two caps decide it.** The byte cap is `MAX_IMAGE_SIZE` in `frontend/src/lib/utils/attachments.ts`, and it
-is the size of an uploaded file: the constant mirrors `exec.MaxUploadBytes`, which is what the upload handler
-enforces. The pixel cap is `MAX_IMAGE_PIXELS`, and `scaledImageDimensions` answers the largest integer pair
+**Two caps decide it.** The byte cap is the server's file limit — `MIKE_FILE_SIZE_LIMIT_MB`,
+**`docs/configuration.md`** — served on `/api/config` as `file_size_limit_mb` and read as
+`appStore.fileSizeLimitBytes`, so the size the browser turns away is the size a route refuses. It is the size
+an uploaded file may be, so an image may be as large as any file the same gesture drops. A config that names
+none — the offline mirror's copy, or a server that never resolved one — means the built-in default
+(`DEFAULT_FILE_SIZE_LIMIT_BYTES`, `frontend/src/lib/utils/file-drop.ts`), never zero, which would refuse every
+file. The pixel cap is `MAX_IMAGE_PIXELS`, and `scaledImageDimensions` answers the largest integer pair
 on the source's ratio that fits it, or nothing when the source already fits. `MAX_IMAGES` bounds how many a
 message carries.
 
@@ -655,7 +659,10 @@ would write a PNG where a GIF was asked for reports nothing.
 the task's `.mike-uploads/` and inserts the path, exactly as a dropped archive does. A toast names the reason.
 Where the surface has no task to write into, that is the sentence instead — an upload was not claimed.
 
-**The bound that follows is the message bound.** Four images at the byte cap are ~107 MB of base64. Every route
+**The bound that follows is the message bound.** `httputil.MaxMessageBodyBytes` is *derived* from the file
+limit — four attachments, plus the third base64 adds — never written beside it. A raised limit that left a
+hand-written body cap behind refuses the attachment in `MaxBodyMiddleware` before any handler sees it, with no
+route naming the cause. Every route
 that carries a user message therefore reads at `httputil.MaxMessageBodyBytes`. There are four: creating a task
 with a first prompt, `POST …/tasks/{taskID}/send`, `PATCH …/messages/{messageID}`, and
 `POST …/tasks/{taskID}/threads/fork`. The last two are what an edit writes, the fork being where an edited
@@ -964,13 +971,16 @@ the size, then the bytes.
   suffix list on an enabled row — see *The bytes an extension previews*.
 - **Neither byte answer waits on the bytes for its status.** The type came from the name, the length from
   the stat or the object probe, and the refusal for an oversized file from the same probe. So the working
-  tree streams from the opened file and a committed object streams out of git, neither held in memory
-  first.
+  tree streams from the opened file and a committed object streams out of git. A read streams only where the
+  probe named a length, because streaming needs a number to promise and a ceiling to stop at. A name no tree
+  resolved has neither, so that one answer is buffered: there the hold is what makes the ceiling a bound.
+  `handler_fs_alloc_baseline_test.go` measures the streamed answer against the held one, and
+  `TestFSBytesAnswersARefThatNamedNoObject` that both answer the same bytes.
 - **A working-tree answer is `Cache-Control: no-store`**, because the same URL answers differently after the
   next edit. A `?ref=` answer carries `ETag: <object id>` with `private, max-age=31536000, immutable`, since
   an object id never names different bytes, and a matching `If-None-Match` answers 304 before the object is
-  read. Only an object id earns either: a ref no tree names is kept as written, answers with no validator,
-  and is held whole rather than streamed, because its length is not known. `nosniff` and the
+  read. Only an object id earns either: a ref no tree names is kept as written and answers with no
+  validator. `nosniff` and the
   `img-src 'self'` CSP come from `CORSMiddleware` like everywhere else.
 - **No `Content-Disposition` on a byte answer.** The name comes from the repository, and putting it in a
   header makes a crafted filename a header writer; `inline` is the default the route wants anyway. A
@@ -993,10 +1003,10 @@ the size, then the bytes.
   the checkout's answer. A ref is any rev that database resolves — a branch, a commit, a bare object id —
   so this half is jailed to the **project**, and is not limited to commits reachable from whatever `?task=`
   says. `?task=` is still bound to `?project=` before the read, so another project's task gets nothing.
-- **Each kind prices its own ceiling before any byte is read**: `maxFSReadBytes` for text,
-  `maxImageBytes` (the upload cap) for a picture, `maxExtensionReadBytes` for bytes. The stat prices a
-  working tree and `git cat-file -s` a `ref`, and the read that follows is bounded too — `io.CopyN` on the
-  file, `io.LimitReader` plus a process kill on the object.
+- **Every kind prices its ceiling before any byte is read**: `maxEditorBufferBytes` for the editor's text,
+  this server's one file limit for a picture and for an extension's bytes. The stat prices a working tree and
+  `git cat-file -s` a `ref`, and the read that follows is bounded too — `io.CopyN` on the file,
+  `io.LimitReader` plus a process kill on the object.
 
 Tests: `backend/server/handler_fs_read_text_test.go` (the kind vocabulary and the text half),
 `backend/server/handler_fs_image_test.go`, `backend/server/handler_fs_bytes_test.go`,
@@ -1020,11 +1030,12 @@ picture, or bytes* above. This section holds only what the byte kind adds.
   global) and no subresource loads it, so a per-file type buys nothing. A map here would be a second list to
   keep beside `imageTypes`, and every entry in it a claim about a format the core must not know.
 - **The handler owns its validators**, because the middleware's digest of the body is the wrong answer for
-  both halves. Hashing 8 MiB to answer a GET costs memory the route's own cap stops bounding, and brotli over
+  both halves. Hashing a file's worth of bytes to answer a GET costs memory the route's own cap stops bounding, and brotli over
   bytes a parser will decode again is a pass nobody asked for.
-- **One ceiling, applied before any byte is read**: `maxExtensionReadBytes`, 8 MiB. It is a render ceiling,
-  deliberately not `maxImageBytes`: a file a person can commit is far larger than a browser tab should
-  hold while it renders one.
+- **One ceiling, this server's file limit** (`MIKE_FILE_SIZE_LIMIT_MB`), applied before any byte is read: the
+  same number a picture read and an upload answer to, because what a person may commit is what this route may
+  hand back. The refusal quotes the megabytes it enforced, so a raised limit never refuses a file for a size
+  nobody chose.
 - **The frame chooses only `side`** — `working` or `base` — between two versions of the one file its mount
   names. Nothing on the host caches a response, so the only cache in the system is the one the response
   earns from its own validator.
@@ -1059,8 +1070,9 @@ disk.
   validation, same `project.Path` object database, same `refWhere` resolution in the worktree `?task=`
   names. The panel that offers the button shows a side that may not be in the worktree at all.
 - **The refusals are the whole vocabulary.** 415 is `not a readable archive` or `not a text file`, 404 is
-  `no such file in the archive`, and 413 is a member over `maxFSReadBytes` or a committed archive over
-  `archiveCommitBufferBytes`. 504 means the walk ran out of `archiveWalkBudget` before it could say
+  `no such file in the archive`, and 413 is a member over `archiveMemberBytes`. A committed archive is refused
+  over this server's file limit, which its sentence quotes. 504 means the walk ran out of `archiveWalkBudget`
+  before it could say
   anything. A walk cut short after it had read rows is not a fault: it answers those rows with
   `truncated: true`, because they are true.
 
@@ -1131,7 +1143,7 @@ Tests: `backend/server/handler_fs_download_test.go`, `backend/fsutil/tar_test.go
 byte count, permissions, modified instant and MIME type come from.
 
 - **The row is a stat and nothing more.** `os.Lstat` on the jailed host path; no file is opened, so
-  `maxFSReadBytes` and the read routes' caps have no part here. The folder walk below is the only bound.
+  the editor's buffer and the read routes' caps have no part here. The folder walk below is the only bound.
 - **One row per asked path, in the request's own order,** and `path` repeats the spelling the caller sent
   rather than the host path it resolved to. A sandboxed project's rows are container paths, and
   `docs/confinement.md → File endpoints: the project plus the task the request names` is why.

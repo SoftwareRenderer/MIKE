@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strconv"
 	"sync"
+	"sync/atomic"
 
 	"mike/backend/errs"
 	"mike/backend/types"
@@ -78,12 +79,27 @@ func MethodNotAllowed(w http.ResponseWriter) {
 // can make the server read JSON into memory until it dies.
 const MaxRequestBodyBytes int64 = 32 << 20
 
-// MaxMessageBodyBytes bounds the two bodies that carry a user message's attachments, the only place an
-// image travels: four images at the frontend's intake cap (MAX_IMAGE_SIZE in
-// frontend/src/lib/utils/attachments.ts, mirroring exec.MaxUploadBytes) are about 107 MB once base64 adds a
-// third. MaxBodyMiddleware carries this number so the largest legitimate message arrives, and a route with
-// no attachments stays at MaxRequestBodyBytes.
-const MaxMessageBodyBytes int64 = 128 << 20
+const (
+	// messageAttachmentCount is the frontend's MAX_IMAGES (utils/attachments.ts), the multiplier the
+	// body ceiling is sized by.
+	messageAttachmentCount = 4
+	// messageBodySlack is the JSON, the field names and the prompt around the attachments.
+	messageBodySlack = 24 << 20
+	// minMessageBodyCeiling is the floor: a small file limit must not make a message body cheaper than
+	// an ordinary JSON request.
+	minMessageBodyCeiling = MaxRequestBodyBytes * 2
+)
+
+// MessageBodyBytes is the ceiling a message body earns from the file limit: attachments at the limit, the
+// third base64 adds, and the framing. It is computed rather than declared so a raised limit cannot leave a
+// body cap behind that refuses the attachment before a handler sees it.
+func MessageBodyBytes(fileLimitBytes int64) int64 {
+	need := fileLimitBytes*messageAttachmentCount + fileLimitBytes*messageAttachmentCount/3 + messageBodySlack
+	if need <= MaxRequestBodyBytes {
+		return minMessageBodyCeiling
+	}
+	return need
+}
 
 // DecodeJSON decodes the JSON request body into v, bounded by MaxRequestBodyBytes. On failure
 // it writes 400, or 413 when the body was simply too big, and returns false so handlers read as
@@ -99,10 +115,25 @@ func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return decodeJSON(w, r, v, MaxRequestBodyBytes, false)
 }
 
-// DecodeMessageJSON is DecodeJSON at MaxMessageBodyBytes, for the routes that carry a user message. A route
+// messageBodyCeiling is the one message ceiling this process enforces.
+var messageBodyCeiling atomic.Int64
+
+// SetMessageBodyBytes records the one ceiling the message routes enforce. NewServer calls it once, from the
+// value the body middleware is built with.
+func SetMessageBodyBytes(limit int64) { messageBodyCeiling.Store(limit) }
+
+// MessageBodyLimit is the recorded ceiling, or the floor for a process that never recorded one.
+func MessageBodyLimit() int64 {
+	if n := messageBodyCeiling.Load(); n > 0 {
+		return n
+	}
+	return minMessageBodyCeiling
+}
+
+// DecodeMessageJSON is DecodeJSON at MessageBodyLimit, for the routes that carry a user message. A route
 // may not pick its own bound.
 func DecodeMessageJSON(w http.ResponseWriter, r *http.Request, v any) bool {
-	return decodeJSON(w, r, v, MaxMessageBodyBytes, false)
+	return decodeJSON(w, r, v, MessageBodyLimit(), false)
 }
 
 // DecodeJSONOrEmpty is DecodeJSON for a route whose fields are all optional: a request with no body
@@ -137,11 +168,11 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any, limit int64, empt
 	return true
 }
 
-// MessageBody reads a whole body at MaxMessageBodyBytes for a handler that decodes the bytes more than once
-// and so cannot hand the read to DecodeMessageJSON. It answers 413 over the cap and 400 for a body that
-// failed to arrive.
+// MessageBody reads a whole body at MessageBodyLimit for a handler that decodes the bytes more than once and
+// so cannot hand the read to DecodeMessageJSON. It answers 413 over the cap and 400 for a body that failed
+// to arrive.
 func MessageBody(w http.ResponseWriter, r *http.Request) ([]byte, bool) {
-	return readBody(w, r, MaxMessageBodyBytes)
+	return readBody(w, r, MessageBodyLimit())
 }
 
 // readBody is the bounded read behind both, and behind decodeJSON with the general cap.

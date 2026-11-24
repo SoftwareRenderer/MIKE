@@ -5,8 +5,8 @@ import {
     collectDroppedFiles,
     collectPickedFiles,
     dragCarriesFiles,
+    DEFAULT_FILE_SIZE_LIMIT_BYTES,
     MAX_DROP_FILES,
-    MAX_UPLOAD_BYTES,
 } from '$lib/utils/file-drop';
 
 // The entry API is browser-internal; these build just enough of it to drive the
@@ -129,7 +129,7 @@ describe('collectDroppedFiles', () => {
 
     it('splits files over the byte cap out, so they are never sent', async () => {
         const big = new File([], 'big.bin');
-        Object.defineProperty(big, 'size', { value: MAX_UPLOAD_BYTES + 1 });
+        Object.defineProperty(big, 'size', { value: DEFAULT_FILE_SIZE_LIMIT_BYTES + 1 });
         const dir = dirEntry('bundle', [fileEntry('small.txt')]);
         const items = [
             { kind: 'file', webkitGetAsEntry: () => dir },
@@ -138,6 +138,27 @@ describe('collectDroppedFiles', () => {
         const selection = await collectDroppedFiles({ items, files: [] } as unknown as DataTransfer);
         expect(relPaths(selection)).toEqual(['bundle/small.txt']);
         expect(selection.tooBig.map((f) => f.relPath)).toEqual(['big.bin']);
+    });
+
+    it('sorts by the cap the caller names, so a raised server limit reaches the file it would take', async () => {
+        const raised = DEFAULT_FILE_SIZE_LIMIT_BYTES + (8 << 20);
+        const entryNamed = (name: string, size: number) => ({
+            isFile: true,
+            isDirectory: false,
+            name,
+            file: (ok: (f: File) => void) => {
+                const file = new File([], name);
+                Object.defineProperty(file, 'size', { value: size });
+                ok(file);
+            },
+        });
+        const items = [
+            { kind: 'file', webkitGetAsEntry: () => entryNamed('over-built-in.bin', DEFAULT_FILE_SIZE_LIMIT_BYTES + 1) },
+            { kind: 'file', webkitGetAsEntry: () => entryNamed('over-named.bin', raised + 1) },
+        ];
+        const selection = await collectDroppedFiles({ items, files: [] } as unknown as DataTransfer, raised);
+        expect(relPaths(selection)).toEqual(['over-built-in.bin']);
+        expect(selection.tooBig.map((f) => f.relPath)).toEqual(['over-named.bin']);
     });
 
     it('stops at the ceiling and says it was truncated', async () => {
@@ -170,14 +191,24 @@ describe('collectPickedFiles', () => {
     });
 
     it('splits a picked file over the byte cap out, as a drop does', () => {
-        const selection = collectPickedFiles([picked('small.txt'), picked('big.bin', MAX_UPLOAD_BYTES + 1)]);
+        const selection = collectPickedFiles([picked('small.txt'), picked('big.bin', DEFAULT_FILE_SIZE_LIMIT_BYTES + 1)]);
         expect(relPaths(selection)).toEqual(['small.txt']);
         expect(selection.tooBig.map((f) => f.relPath)).toEqual(['big.bin']);
     });
 
+    it('splits a picked file by the cap the caller names, never by its own', () => {
+        const raised = 2 * DEFAULT_FILE_SIZE_LIMIT_BYTES;
+        const selection = collectPickedFiles([
+            picked('over-built-in.bin', DEFAULT_FILE_SIZE_LIMIT_BYTES + 1),
+            picked('over-named.bin', raised + 1),
+        ], raised);
+        expect(relPaths(selection)).toEqual(['over-built-in.bin']);
+        expect(selection.tooBig.map((f) => f.relPath)).toEqual(['over-named.bin']);
+    });
+
     it('counts oversize picks toward the ceiling, so the cap bounds the whole run', () => {
         const files = Array.from({ length: MAX_DROP_FILES + 5 }, (_, i) =>
-            picked(`f${i}.bin`, i % 2 ? MAX_UPLOAD_BYTES + 1 : 1),
+            picked(`f${i}.bin`, i % 2 ? DEFAULT_FILE_SIZE_LIMIT_BYTES + 1 : 1),
         );
         const selection = collectPickedFiles(files);
         expect(selection.files.length + selection.tooBig.length).toBe(MAX_DROP_FILES);

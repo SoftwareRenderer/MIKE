@@ -183,7 +183,7 @@ func TestWriteTaskFileRefusesAnEmptyFileAndOneOverTheLimit(t *testing.T) {
 	if _, err := te.WriteTaskFile("p1", "t1", "empty.bin", nil); err == nil {
 		t.Error("an empty upload was accepted")
 	}
-	oversize := make([]byte, MaxUploadBytes+1)
+	oversize := make([]byte, te.fileSizeLimitBytes+1)
 	if _, err := te.WriteTaskFile("p1", "t1", "big.bin", oversize); err == nil {
 		t.Error("an upload over the limit was accepted")
 	}

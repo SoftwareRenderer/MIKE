@@ -322,7 +322,7 @@ func TestFSUploadCapsFileSize(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < MaxUploadSize/(1<<20)+2; i++ {
+	for i := 0; i < int(fileLimit(s)/(1<<20))+2; i++ {
 		if _, err := part.Write(chunk); err != nil {
 			t.Fatal(err)
 		}

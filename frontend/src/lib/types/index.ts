@@ -310,6 +310,8 @@ export interface Config {
     memory_budget_mb?: number;
     memory_total_mb?: number;
     memory_budget_pct?: number;
+    // The server's per-file ceiling in megabytes; absent means the browser's own default.
+    file_size_limit_mb?: number;
     keyboard_shortcuts?: KeyboardShortcuts;
 /** The extensions whose contributed tools reach the network from the server process. Read-only: a PUT
      *  naming this key writes nothing. */

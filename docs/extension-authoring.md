@@ -189,7 +189,7 @@ declaration and one call, and `references/manifest.md` in the authoring skill ho
   `docs/api-contract.md → The bytes an extension previews` and
   `docs/ui-extensions.md → Bytes Across the Channel`; this half has no test but yours.
 - **What the host refuses, and how it says so.** A suffix no enabled row declared is 403, and a file over
-  `maxExtensionReadBytes` is 413. `.git` and anything outside the project-plus-task jail are refused too.
+  this server's file limit (`MIKE_FILE_SIZE_LIMIT_MB`) is 413. `.git` and anything outside the project-plus-task jail are refused too.
   Each refusal reaches the frame as a rejected promise carrying the server's sentence. Nothing in that list
   is format-aware.
 

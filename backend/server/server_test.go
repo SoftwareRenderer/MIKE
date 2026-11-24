@@ -33,6 +33,9 @@ func testServer(t *testing.T) *Server {
 	return testServerWith(t, nil)
 }
 
+// fileLimit is the ceiling this server moves a file at, so a test builds one byte over what is enforced.
+func fileLimit(s *Server) int64 { return s.settings.FileSizeLimitBytes() }
+
 // testServerWith builds a server with one test's change to the resolved configuration. The mutate hook
 // is how a test pins a decision that would otherwise come from the environment: a refusal test asks
 // for DangerZone=false, a jail test for AllowRootFS=false, a proxy test for TrustProxy=true.
