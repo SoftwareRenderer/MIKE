@@ -35,6 +35,12 @@ Adding a project navigates to it, and to its board: `handleSelectProjectPath` an
 left. Switching between two projects the person has seen keeps that screen (the `view` `currentView()`
 answers), so `board` is the caller's decision, not a rule inside `selectProject`.
 
+**A created extension stops one screen further.** `handleOpenCreatedExtension` selects the project with
+`board: true` and then writes the address naming its first task and awaits `restoreTaskFromUrl()`, so the
+detail arrives over the board and Back returns to the board. The row shown is the board's, never the
+create's response: a task the board does not hold is fetched for rather than rendered from memory.
+`frontend/tests/e2e/create-extension-opens-task.spec.ts` fails when the screen stops being the task.
+
 **A clone's row is selected before its project exists.** The placeholder id (`clone-pending-…`) is this
 browser's own, so for a project whose `cloning` is set `selectProject` asks the server nothing: no board,
 no cached mirror, no project subscription, no `last_project` setting. When the clone answers, the real

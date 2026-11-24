@@ -188,6 +188,10 @@ make test-podman-state                                   # the image entrypoint'
   placeholder address is never a Back entry. While that row holds the screen, the backlog column's
   add-task slot holds the add's bar and nothing may create a task; a clone that fails keeps the screen
   with git's output until it is dismissed. `docs/link-rows.md → A project the app just made`.
+- **A created extension opens its first task**, one screen past the board, and its project's two sandbox
+  recommendations (network, Docker's default capabilities) are asked *before* the project exists — a
+  running task locks them, so answering afterwards costs a stopped turn.
+  `docs/extension-authoring.md → Creating`.
 - **Shortcuts and UI preferences ride the shared Settings Save/Cancel flow**, and `PUT /api/config` replaces
   the whole `keyboard_shortcuts` object, so always send every binding. `docs/adding-a-preference.md`.
 - **CJK typography is scoped to `:lang()`.** `docs/typography.md`.
