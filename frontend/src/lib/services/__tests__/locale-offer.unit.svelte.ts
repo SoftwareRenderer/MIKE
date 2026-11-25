@@ -99,10 +99,8 @@ describe('localeOffer.detect', () => {
         // MIKE_REGISTRY_URL is a local fixture path in tests and unreachable
         // offline: this is the normal case, not a failure to report.
         api.getRegistryIndex.mockRejectedValue(new Error('open file /nope/registry.json: no such file'));
-        const info = vi.spyOn(console, 'info').mockImplementation(() => {});
         await expect(localeOffer.detect('ja')).resolves.toBeUndefined();
         expect(localeOffer.state.phase).toBe('idle');
-        info.mockRestore();
     });
 
     it('does not even read the registry once the answer is on record', async () => {
