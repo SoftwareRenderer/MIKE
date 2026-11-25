@@ -192,9 +192,8 @@ sharing a published name is listed as updatable and the update it invites is ref
 ## A byte read is consented as a suffix list
 
 `fs.getBytes` is the one capability whose grant is a file format the core has never heard of. It is
-classified dangerous (`DANGEROUS_PERMISSIONS` in `frontend/src/lib/utils/extension-permissions.ts`) and
-described in `permissionDescriptions()`. The install dialog therefore says what it opens before a person
-says yes: the whole bytes of the file the person has open, including one the editor refuses to show as text.
+described in `permissionDescriptions()` and deliberately left out of `DANGEROUS_PERMISSIONS`: it asks for
+nothing the person did not put on screen, so it opens no install dialog and refuses no development load.
 
 - **What is consented is the list, not the file.** `capabilities.ui.file_suffixes` is validated at install
   (`UIConfig.Validate`, `backend/extensions/manifest_validate.go`): a bare lowercase suffix — no dot, no
@@ -208,9 +207,18 @@ says yes: the whole bytes of the file the person has open, including one the edi
   The project-plus-task jail and the `.git` refusal still hold; per-file consent does not exist. Neither does
   a host-side sanity check on a format header — that is the extension's duty, and it is written down in
   `docs/extension-authoring.md`.
+- **Which file is answered is the host's rule, not the route's.** `fs.getBytes` takes `side` alone; the
+  project, task, path and ref come off the mount the person's click built
+  (`frontend/src/lib/extensions/handlers/fs.ts`). The route asks only the suffix, the jail and the size,
+  and never whether a preview is open. The frame is an opaque origin under `connect-src 'self'`, so it
+  sends nothing out by itself — that needs a permission this section does not cover (`network.proxy`, or a
+  preview page served with `preview.serveNetwork`).
 
 Tests: `frontend/src/lib/extensions/__tests__/capability-consent.unit.ts` for the classification, and
-`backend/server/handler_fs_bytes_test.go` for the refusal a suffix no enabled row declares.
+`backend/server/handler_fs_bytes_test.go` for the refusal a suffix no enabled row declares. That the byte
+read asks nothing is a fixture in each half of the paired consent test (`backend/extensions/consent_test.go`,
+`frontend/src/lib/utils/__tests__/extension-consent-gate.unit.ts`). Those two are what fails if one side's
+dangerous list drifts from the other's.
 
 ## LSP capability gates
 

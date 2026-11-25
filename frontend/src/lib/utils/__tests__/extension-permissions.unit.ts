@@ -20,10 +20,10 @@ import {
 
 describe('isDangerousPermission (permissions that cross the frame\'s wall)', () => {
     it('flags the permissions that cross it, in either direction', () => {
-        for (const perm of ['network.proxy', 'preview.serveScripts', 'preview.serveNetwork', 'fs.getBytes']) {
+        for (const perm of ['network.proxy', 'preview.serveScripts', 'preview.serveNetwork']) {
             expect(isDangerousPermission(perm)).toBe(true);
         }
-        expect(DANGEROUS_PERMISSIONS.size).toBe(4);
+        expect(DANGEROUS_PERMISSIONS.size).toBe(3);
     });
 
     it('does not flag sandbox-contained permissions', () => {
@@ -33,6 +33,8 @@ describe('isDangerousPermission (permissions that cross the frame\'s wall)', () 
             'editor.save',
             'editor.setOverlay',
             'editor.contentChange',
+            // Its grant is the mount, which only the person's click builds.
+            'fs.getBytes',
             'preview.serve',
             'preview.release',
             'ui.status',

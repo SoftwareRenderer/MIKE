@@ -754,7 +754,7 @@ const catalog = {
     'settings.extensions.perm.networkProxy.label': 'Reach external services',
     'settings.extensions.perm.networkProxy.description': 'Can make requests to external services through the server, limited to the allowed domains of its Network capability.',
     'settings.extensions.perm.fsGetBytes.label': 'Read a file as bytes',
-    'settings.extensions.perm.fsGetBytes.description': 'Can ask for the raw bytes of the file it is showing, in whatever file types it declared when installed — including ones the editor never opens as text. It cannot name a file: only the one the person opened is reachable.',
+    'settings.extensions.perm.fsGetBytes.description': 'Can read the file you opened in the file explorer or diff view.',
     'settings.extensions.perm.uiSetSize.label': 'Resize its own panel',
     'settings.extensions.perm.uiSetSize.description': 'Can change the height of the space it occupies on the page.',
     'settings.extensions.perm.uiModal.label': 'Show a modal',

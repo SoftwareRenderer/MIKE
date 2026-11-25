@@ -31,6 +31,8 @@ var consentFixtures = []struct {
 		`{"capabilities":{"ui":{"permissions":["preview.serveNetwork"]}}}`, true},
 	{"a page served with scripts",
 		`{"capabilities":{"ui":{"permissions":["preview.serveScripts"]}}}`, true},
+	{"a byte read of the opened file",
+		`{"capabilities":{"ui":{"injection_points":["binaryPreview"],"file_suffixes":["stl"],"permissions":["fs.getBytes"]}}}`, false},
 	{"a declared dependency directory",
 		`{"capabilities":{"lsp":{"sandbox":{"dependency_cache":{"container_path":"/go/pkg/mod","env":"GOMODCACHE"}}}}}`, true},
 	{"a suggested agent folder",

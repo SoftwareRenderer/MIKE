@@ -15,6 +15,9 @@ const CONSENT_FIXTURES: { name: string; capabilities: Record<string, any>; want:
     { name: 'a proxy call from the frame', capabilities: { ui: { permissions: ['editor.getContent', 'network.proxy'] } }, want: true },
     { name: 'a page served with network', capabilities: { ui: { permissions: ['preview.serveNetwork'] } }, want: true },
     { name: 'a page served with scripts', capabilities: { ui: { permissions: ['preview.serveScripts'] } }, want: true },
+    // Reads only the file the person mounted, so it asks nothing — the byte read stays out of the
+    // shared list `consent.go` mirrors.
+    { name: 'a byte read of the opened file', capabilities: { ui: { injection_points: ['binaryPreview'], file_suffixes: ['stl'], permissions: ['fs.getBytes'] } }, want: false },
     {
         name: 'a declared dependency directory',
         capabilities: { lsp: { sandbox: { dependency_cache: { container_path: '/go/pkg/mod', env: 'GOMODCACHE' } } } },

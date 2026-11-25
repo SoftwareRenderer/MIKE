@@ -1,10 +1,7 @@
 /**
  * Permission display helpers for Settings -> Extensions. "Dangerous" is a permission that
  * escapes the sandbox or loosens its isolation (external requests, running a page's
- * scripts, page network egress) or the manifest-level `network` capability. A byte read is listed
- * beside them because it reaches what the text endpoints withhold. File-mutating permissions
- * (editor.setContent / editor.save) are deliberately not flagged: they are the obvious
- * contract of an editor extension, not an escape.
+ * scripts, page network egress) or the manifest-level `network` capability.
  *
  * `lib/extensions/__tests__/capability-consent.unit.ts` checks these lists against the capability
  * catalog.
@@ -16,7 +13,6 @@ export const DANGEROUS_PERMISSIONS: ReadonlySet<string> = new Set([
     'network.proxy',
     'preview.serveScripts',
     'preview.serveNetwork',
-    'fs.getBytes',
 ]);
 
 export function isDangerousPermission(perm: string): boolean {

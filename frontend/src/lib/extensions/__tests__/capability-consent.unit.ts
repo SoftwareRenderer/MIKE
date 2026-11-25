@@ -73,7 +73,6 @@ describe('capability consent catalog', () => {
         // Names the boundary in both directions: what crosses it is flagged, and what
         // stops doing so should stop being flagged. `preview.serve` is strict CSP with no egress.
         expect([...DANGEROUS_PERMISSIONS].sort()).toEqual([
-            'fs.getBytes',
             'network.proxy',
             'preview.serveNetwork',
             'preview.serveScripts',

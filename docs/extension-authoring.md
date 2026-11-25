@@ -189,7 +189,8 @@ declaration and one call, and `references/manifest.md` in the authoring skill ho
 - **Declare the suffix, then ask for the bytes.** `capabilities.ui.file_suffixes` (`["stl"]`, lowercase, no
   dot) is the whole grant: the host mounts the frame for a file whose suffix it names, and
   `GET /api/fs/read?kind=bytes` answers a file only when an enabled row declares its suffix. `fs.getBytes` is the
-  capability that calls it, and it is classified dangerous because the bytes are the file as it is on disk.
+  capability that calls it; it is described in the install dialog but not flagged dangerous, because the
+  mount names the file and the frame cannot name one.
 - **The mount names the file, not the frame.** `extHost.fs.getBytes(side)` takes `'working'` or `'base'` and
   nothing else; project, task, path and base ref come from the mount context the person's screen built. A
   frame that could name a path would not need anyone to open anything.
