@@ -419,6 +419,14 @@ This section is the mechanism.
   `TestBuildOutputLimitMBRefusesAnythingButWholeMegabytes`. `make build-probe` (`scripts/sandboxprobe --build`) re-measures the grant
   and sweeps its own `mike-build-probe-*` family, since it deliberately lives outside the product's sweep.
 
+- **The project's image retires with its folder.** `SandboxManager.RemoveProjectImage` drops the name
+  `ProjectImageName` carries when a deletion takes the checkout that image was built from, so an artifact no
+  row can boot from is not left in the store. `images -q` is asked first: most projects never ran a
+  Dockerfile build, and their deletion is ordinary. A project configured with an image of its own keeps it —
+  that name was chosen outside MIKE and may be shared. The refusal half of the rule is
+  `docs/api-contract.md → A project deletion may take the folder`; the tests are
+  `backend/sandbox/remove_project_image_test.go`.
+
 ## A container's memory record, and what the user is told
 
 - **Held memory is `anon + shmem` from `memory.stat`** — `sandboxruntime.CgroupMemory.HeldBytes`, the

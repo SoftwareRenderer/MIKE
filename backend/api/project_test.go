@@ -116,6 +116,9 @@ func TestHandleCreateClone(t *testing.T) {
 	if !git.IsGitRepo(expectedPath) {
 		t.Fatal("cloned path is not a git repository")
 	}
+	if !proj.Cloned {
+		t.Error("a folder this server cloned answered as though the person already had it")
+	}
 }
 
 // makeCommittedRepo creates a non-bare git repo with `commits` commits at
@@ -480,8 +483,10 @@ func TestHandleSandboxBuildNoDockerfilePath(t *testing.T) {
 // the result or the failure the test put in it.
 type recordingSandbox struct {
 	stoppedProjects []string
-	result          *sandbox.BuildResult
-	err             error
+	// removedImages names each project whose image a deletion retired.
+	removedImages []string
+	result        *sandbox.BuildResult
+	err           error
 	// watching says whether a preparation is in flight. watch is the queue a viewer is handed.
 	watching bool
 	watch    chan types.SandboxImageStatus
@@ -508,6 +513,11 @@ func (r *recordingSandbox) CancelImagePreparation(*types.Project) bool {
 
 func (r *recordingSandbox) StopProjectContainers(projectID string, _ []string) {
 	r.stoppedProjects = append(r.stoppedProjects, projectID)
+}
+
+func (r *recordingSandbox) RemoveProjectImage(projectName string) error {
+	r.removedImages = append(r.removedImages, projectName)
+	return nil
 }
 
 // sseDataFrames is the payload of every `data:` frame of an SSE body, in the order they were written.
@@ -663,7 +673,7 @@ func TestProjectWritesRefuseAnUnqualifiedSandboxImage(t *testing.T) {
 					SandboxEnabled:          true,
 					SandboxNetworkIsolation: &isolation,
 					SandboxImage:            image,
-				})
+				}, false)
 				stored := ""
 				if proj != nil {
 					stored = proj.SandboxImage
@@ -761,7 +771,7 @@ func TestProjectWritesValidateAndCanonicalizeForwardPorts(t *testing.T) {
 					SandboxEnabled:          true,
 					SandboxNetworkIsolation: &isolation,
 					SandboxForwardPorts:     ports,
-				})
+				}, false)
 				if proj == nil {
 					return code, msg, nil
 				}

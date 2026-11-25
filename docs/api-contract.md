@@ -458,6 +458,29 @@ WebSocket upgrades, whose URL is built from `window.location.origin`, and
 `GET /api/preview/{token}/{path...}`, whose sub-resource URLs the server writes into the document it
 serves (`rewriteRootRelative`). Gate: `scripts/archgate` `apiroutes`.
 
+## A project deletion may take the folder
+
+`DELETE /api/projects/{projectID}` asks for no body and answers 204. The Remove dialog's folder checkbox
+adds `{"delete_data": true, "confirm_name": "<folder>"}`. Three refusals come back **before any teardown**,
+so a request that is told "no" has stopped no container and deleted no row. They are 404 when no row names
+that project, 400 when the row was not written by a clone (`projects.cloned`), and 400 when `confirm_name`
+is not the basename of the row's own `path`.
+
+- The browser disables the destructive button until the name matches; this route is where the name is
+  checked. A client that skips the dialog gets the same refusal.
+- The person's refusal answers MIKE's own sentence, and a failed removal answers `httputil.Fault` with its
+  cause in the log — the two are never mixed (`→ Errors`).
+- The folder is removed **before** the row, so a failure leaves the project on the board to retry rather
+  than a checkout no row owns: `docs/storage.md → The one folder a deletion may also take`.
+- A queued offline deletion carries both fields, because the replay must be the request that was made and
+  not a lesser one that quietly keeps the folder (`docs/reconnection.md`).
+- The image built from that project's Dockerfile retires with the folder — the mechanism and why an image
+  the person chose are both `docs/sandbox-runtime.md → A project image builds inside a sandbox container`.
+
+Tests: `backend/api/project_delete_data_test.go`, `backend/api/project_cloned_test.go`,
+`backend/sandbox/remove_project_image_test.go`,
+`frontend/src/lib/api/__tests__/project-delete.unit.ts`.
+
 ## A send may take the thread back before it lands
 
 `POST /api/projects/{projectID}/tasks/{taskID}/send` carries one field the executor never reads:

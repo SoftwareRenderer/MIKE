@@ -56,6 +56,7 @@ type projectSandboxOps interface {
 	WatchImagePreparation(ctx context.Context, project *types.Project) (<-chan types.SandboxImageStatus, bool)
 	CancelImagePreparation(project *types.Project) bool
 	StopProjectContainers(projectID string, taskIDs []string)
+	RemoveProjectImage(projectName string) error
 }
 
 type ProjectDeps struct {
@@ -197,7 +198,7 @@ func (h *ProjectHandler) HandleCreate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Submodules come down once the row exists; see importSubmodules.
-	p, code, msg := h.createProjectFromRequest(req)
+	p, code, msg := h.createProjectFromRequest(req, req.GitURL != "")
 	if p == nil {
 		httputil.JSONError(w, code, msg)
 		return
@@ -250,8 +251,9 @@ func (h *ProjectHandler) prepareCloneTarget(req types.CreateProjectRequest) (str
 	return targetPath, nil
 }
 
-// createProjectFromRequest validates path as git repo and persists the project.
-func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest) (*types.Project, int, string) {
+// createProjectFromRequest validates path as git repo and persists the project. folderWritten says this
+// server wrote the directory at req.Path; no request field reaches it.
+func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest, folderWritten bool) (*types.Project, int, string) {
 	req.Path = strings.TrimSpace(req.Path)
 	if req.Path == "" {
 		return nil, http.StatusBadRequest, "path is required"
@@ -358,6 +360,7 @@ func (h *ProjectHandler) createProjectFromRequest(req types.CreateProjectRequest
 		SandboxMounts:           req.SandboxMounts,
 		SandboxEnvs:             req.SandboxEnvs,
 		SandboxCapabilities:     req.SandboxCapabilities,
+		Cloned:                  folderWritten,
 		CreatedAt:               now,
 		UpdatedAt:               now,
 	}
@@ -426,7 +429,7 @@ func (h *ProjectHandler) HandleClone(w http.ResponseWriter, r *http.Request) {
 	})
 
 	req.Path = targetPath
-	if p, _, msg := h.createProjectFromRequest(req); p != nil {
+	if p, _, msg := h.createProjectFromRequest(req, true); p != nil {
 		sendEvent(map[string]any{"type": string(types.SSETypeDone), "project": p})
 	} else {
 		sendEvent(map[string]any{"type": string(types.SSETypeError), "message": msg})
@@ -678,7 +681,11 @@ func (h *ProjectHandler) HandleByID(w http.ResponseWriter, r *http.Request) {
 		h.handleUpdateProject(w, r, id)
 
 	case http.MethodDelete:
-		h.handleDeleteProject(w, id)
+		var req types.DeleteProjectRequest
+		if !httputil.DecodeJSONOrEmpty(w, r, &req) {
+			return
+		}
+		h.handleDeleteProject(w, id, req)
 
 	default:
 		httputil.MethodNotAllowed(w)
@@ -933,8 +940,25 @@ func (h *ProjectHandler) stopProjectSandbox(projectID string) {
 	}
 }
 
-// handleDeleteProject deletes project by tearing down tasks, then project resources.
-func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, id string) {
+// handleDeleteProject deletes project by tearing down tasks, then project resources. req.DeleteData adds
+// the folder at Path to what goes, and every refusal is answered before anything is torn down.
+func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, id string, req types.DeleteProjectRequest) {
+	var project *types.Project
+	if req.DeleteData {
+		p, ok := httputil.ResolveProjectID(w, h.store, id)
+		if !ok {
+			return
+		}
+		if !p.Cloned {
+			httputil.JSONError(w, http.StatusBadRequest, "only a folder MIKE cloned can be deleted with the project")
+			return
+		}
+		if strings.TrimSpace(req.ConfirmName) != filepath.Base(p.Path) {
+			httputil.JSONError(w, http.StatusBadRequest, "the name typed does not match the project's folder")
+			return
+		}
+		project = p
+	}
 	tasks, err := h.store.GetTasksByProject(id)
 	if err != nil {
 		httputil.JSONError(w, http.StatusInternalServerError, "failed to list tasks for cleanup")
@@ -953,6 +977,18 @@ func (h *ProjectHandler) handleDeleteProject(w http.ResponseWriter, id string) {
 	if h.worktreeMgr != nil {
 		if err := h.worktreeMgr.RemoveProjectWorktrees(id); err != nil {
 			logging.For(logging.Managers).Warnf("project %s: worktree directory cleanup failed: %v", id, err)
+		}
+	}
+	if project != nil {
+		h.retireProjectImage(project)
+		// The folder goes while the row can still name it, so a failed removal stays retryable.
+		if err := h.removeProjectFolder(project); err != nil {
+			if fsutil.IsHostRootRefusal(err) {
+				httputil.JSONError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			httputil.Fault(w, "delete the project folder", err)
+			return
 		}
 	}
 	if err := h.store.DeleteProject(id); err != nil {
@@ -979,6 +1015,54 @@ func rootTaskIDs(tasks []types.Task) []string {
 		}
 	}
 	return roots
+}
+
+// removeProjectFolder deletes the checkout a cloned project's row stood for. The jail is asked again
+// rather than assumed: docs/storage.md → The one folder a deletion may also take.
+func (h *ProjectHandler) removeProjectFolder(p *types.Project) error {
+	path := filepath.Clean(p.Path)
+	if err := h.checkHostPath(path); err != nil {
+		return err
+	}
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		// A retry after a removal that answered an error has nothing left to take.
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	// A link is not the folder whose name was typed.
+	if info.Mode()&os.ModeSymlink != 0 {
+		return fmt.Errorf("%s is a link rather than a folder", path)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s is not a folder", path)
+	}
+	return fsutil.RemoveTree(path, h.protectedRoots())
+}
+
+// protectedRoots are the trees this server owns: a folder holding one must not go with a project.
+func (h *ProjectHandler) protectedRoots() []string {
+	roots := h.hostRoot.Roots()
+	if h.configStore != nil {
+		roots = append(roots, h.configStore.WorkspaceDir(), h.configStore.DatabaseDir())
+	}
+	if cwd, err := os.Getwd(); err == nil {
+		roots = append(roots, cwd)
+	}
+	return roots
+}
+
+// retireProjectImage drops the image MIKE built under its own name for this project, and never one the
+// person chose.
+func (h *ProjectHandler) retireProjectImage(p *types.Project) {
+	if h.sandboxMgr == nil || p.SandboxDockerfilePath == "" {
+		return
+	}
+	if err := h.sandboxMgr.RemoveProjectImage(p.Name); err != nil {
+		logging.For(logging.Managers).Warnf("project %s: project image cleanup failed: %v", p.ID, err)
+	}
 }
 
 // repoNameFromGitURL extracts repository name from git URL.

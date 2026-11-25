@@ -423,6 +423,9 @@ Enforced by the server process, so it holds for non-sandboxed projects too.
   directory and the development extension rows beside its repository: the startup sweep skips running
   containers, so nothing else removes them.
 - **Cleanup failures are reported, not fatal**, and the leftover is logged by name.
+- **A project's folder goes with it only when the row says MIKE cloned it and the person typed that
+  folder's name** — the name is checked on the server, and a folder that was already there is never
+  deleted. `docs/api-contract.md → A project deletion may take the folder`.
 
 ## Extensions
 

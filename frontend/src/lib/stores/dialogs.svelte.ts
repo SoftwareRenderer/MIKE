@@ -67,6 +67,23 @@ interface PendingConfirmation extends ConfirmationRequest {
     okText?: string;
 }
 
+/** What the delete-project dialog is asked to put up, all of it read off the row the person clicked. */
+interface DeleteProjectRequest {
+    /** The project's display name, which may differ from the folder's name. */
+    name: string;
+    /** The folder's name — the one string that has to be typed to give the folder up. */
+    folder: string;
+    path: string;
+    /** Whether this server wrote that folder. Only then is giving it up a choice at all. */
+    cloned: boolean;
+}
+
+/** The dialog's answer: `null` when the person walked away; otherwise what to do with the folder. */
+export interface ProjectDeletionChoice {
+    deleteData: boolean;
+    confirmName: string;
+}
+
 interface CommitDialogRequest {
     message: string;
     confirmText?: string;
@@ -96,6 +113,7 @@ export class DialogStore {
     public toast = $state<{ message: string; type: 'error' | 'success' } | null>(null);
 
     public readonly confirmationSlot = new PromiseSlot<PendingConfirmation, boolean>(false);
+    public readonly deleteProjectSlot = new PromiseSlot<DeleteProjectRequest, ProjectDeletionChoice | null>(null);
     public readonly commitDialogSlot = new PromiseSlot<CommitDialogRequest, string | null>(null);
     public readonly compressContextDialogSlot = new PromiseSlot<CompressContextRequest, boolean>(false);
 
@@ -139,6 +157,14 @@ export class DialogStore {
             okText: options.okText ?? t('app.ok'),
             variant: 'default',
         }).then(() => undefined);
+    }
+
+    /**
+     * Ask whether a project leaves the board, and for a folder this server cloned whether the folder
+     * leaves the disk with it. The destructive answer needs the folder's name typed.
+     */
+    public showDeleteProject(options: DeleteProjectRequest): Promise<ProjectDeletionChoice | null> {
+        return this.deleteProjectSlot.open({ ...options });
     }
 
     /**

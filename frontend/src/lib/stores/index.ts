@@ -8,4 +8,4 @@ export const uiStore = new UiStore();
 export const dialogStore = new DialogStore();
 
 export { updateTaskInBoard, updateTaskAndSelection, removeTaskFromBoard, appendTaskToBoard, applyResolvedTasksToBoard } from './app.svelte';
-export type { DialogVariant } from './dialogs.svelte';
+export type { DialogVariant, ProjectDeletionChoice } from './dialogs.svelte';

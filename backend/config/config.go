@@ -164,6 +164,12 @@ func (cs *ConfigStore) WorkspaceDir() string {
 	return dir
 }
 
+// DatabaseDir returns the directory holding this server's SQLite file, which a project deletion has to
+// keep out of its way.
+func (cs *ConfigStore) DatabaseDir() string {
+	return filepath.Dir(cs.dbPath)
+}
+
 // SetAgentRegistry wires the agent registry so dynamically-discovered agent
 // providers (e.g. agent://pi → 'Pi Coding Agent') are included in the
 // config API response without being persisted to the database.

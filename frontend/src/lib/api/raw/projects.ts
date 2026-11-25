@@ -138,8 +138,20 @@ export async function cancelSandboxImageBuild(id: string): Promise<boolean> {
     return body?.cancelled === true;
 }
 
-export async function deleteProjectRaw(id: string): Promise<void> {
-    const res = await apiFetch(`${API_BASE}/projects/${id}`, { method: 'DELETE' });
+/**
+ * What a deletion may give up besides the rows. The server checks `confirm_name` against its own row, so
+ * this records a decision rather than carrying a check the browser is trusted with.
+ */
+export interface ProjectDeletion {
+    delete_data: boolean;
+    confirm_name: string;
+}
+
+export async function deleteProjectRaw(id: string, deletion?: ProjectDeletion): Promise<void> {
+    const res = await apiFetch(`${API_BASE}/projects/${id}`, {
+        method: 'DELETE',
+        ...(deletion ? { headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(deletion) } : {}),
+    });
     if (!res.ok) throw await apiError(res, t('api.deleteProject'));
 }
 

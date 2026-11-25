@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS projects (
     mcp_server_ids           TEXT DEFAULT NULL,
     git_author_name          TEXT DEFAULT NULL,
     git_author_email         TEXT DEFAULT NULL,
+    cloned                   INTEGER NOT NULL DEFAULT 0,
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );

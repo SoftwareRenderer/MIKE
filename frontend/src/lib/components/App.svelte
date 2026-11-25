@@ -17,6 +17,7 @@
     import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
     import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
+    import { folderName } from '$lib/utils/path';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
@@ -49,6 +50,7 @@
     import FileBrowser from './FileBrowser.svelte';
     import Toast from './Toast.svelte';
     import ConfirmationDialog from './ConfirmationDialog.svelte';
+    import DeleteProjectDialog from './DeleteProjectDialog.svelte';
     import CommitDialog from './Chat/CommitDialog.svelte';
     import CompressContextDialog from './Chat/CompressContextDialog.svelte';
     import LoginModal from './LoginModal.svelte';
@@ -1181,15 +1183,17 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
             discardPendingProject(p);
             return;
         }
-        const confirmed = await dialogStore.showConfirm({
-            title: t('app.project.removeTitle'),
-            message: t('app.project.removeMessage', { name: p.name }),
-            confirmText: t('app.remove'),
-            cancelText: t('app.cancel'),
+        const choice = await dialogStore.showDeleteProject({
+            name: p.name,
+            folder: folderName(p.path),
+            path: p.path,
+            cloned: p.cloned === true,
         });
-        if (!confirmed) return;
+        if (!choice) return;
         try {
-            await deleteProject(p.id);
+            await deleteProject(p.id, choice.deleteData
+                ? { delete_data: true, confirm_name: choice.confirmName }
+                : undefined);
             const index = appStore.projects.findIndex(x => x.id === p.id);
             appStore.projects = appStore.projects.filter(x => x.id !== p.id);
             const rest = appStore.projects;
@@ -1544,6 +1548,7 @@ let scrollToColumn = $state<string | null>(null); // column to scroll to on mobi
     {/if}
     <Toast />
     <ConfirmationDialog />
+    <DeleteProjectDialog />
     <CommitDialog />
     <CompressContextDialog />
     <LocaleOffer />

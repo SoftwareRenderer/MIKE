@@ -10,6 +10,7 @@ import {
     updateProjectRaw,
     deleteProjectRaw,
     resetProjectStatsRaw,
+    type ProjectDeletion,
 } from './raw/projects';
 import { setBoardCache, getBoardCache, boardCacheKey } from '../storage';
 import { markCached } from './cache';
@@ -222,13 +223,16 @@ export async function updateProject(id: string, updates: ProjectUpdates): Promis
     return updateProjectRaw(id, updates);
 }
 
-/** Delete a project and all its tasks. Queued when offline. */
-export async function deleteProject(id: string): Promise<void> {
+/**
+ * Delete a project and all its tasks. Queued when offline with the folder decision attached, so the replay
+ * is the request that was made and not a lesser one.
+ */
+export async function deleteProject(id: string, deletion?: ProjectDeletion): Promise<void> {
     if (getOfflineStatus()) {
-        await enqueueAction({ type: 'deleteProject', params: { id } });
+        await enqueueAction({ type: 'deleteProject', params: { id, deletion } });
         return;
     }
-    return deleteProjectRaw(id);
+    return deleteProjectRaw(id, deletion);
 }
 
 // -- Board endpoints --

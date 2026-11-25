@@ -52,6 +52,30 @@ CASCADE is the **row** story only. `api.handleDeleteProject` deletes the project
 upload directories that keep running with no row left to name them, and `staleContainerNames` skips
 running containers — nothing else would ever remove them.
 
+### The one folder a deletion may also take
+
+`project.Path` is a directory this server reads but does not own, so the teardown above stops at its edge.
+The exception is a checkout this server wrote itself: `projects.cloned` says which rows those are, and only
+their folder may be given up with the project. The column is written by the two clone paths in
+`backend/api/project.go` and by nothing else — no request field reaches it. A project added from a folder
+the person already had, and a development repository under `extensions/_dev/` (whose author deletes it,
+`docs/extension-authoring.md`), have no answer that removes their bytes. A file this build inherited gets
+`cloned = 0` from the shape pass: this build cannot know which of its folders a clone wrote, and the honest
+answer is the one that deletes nothing. The shape pass adds the column and no `schemaStep` exists for it —
+an older build reads the file with the column present and ignores it.
+
+- `api.removeProjectFolder` asks the boot's `HostRoot` again before it removes anything: the row's path is
+  bytes in a database, and only the jail says where this server may write. A link or a non-directory at the
+  name is refused — deleting a link is not deleting the folder whose name was typed.
+- `protectedRoots` is what the tree may not hold: the jail's own roots, the worktrees directory, the
+  directory holding this server's SQLite file (`config.ConfigStore.DatabaseDir()`) and the working
+  directory. `fsutil.RemoveTree` refuses a folder holding any of them.
+- The folder goes **before** the row, so a removal that fails leaves the project on the board to retry
+  rather than a checkout no row owns and no screen can reach.
+
+Tests: `backend/api/project_delete_data_test.go` (the refusals and the removal),
+`backend/store/projects_cloned_test.go` (the column reads back as it was written).
+
 ## The schema is created whole, and an older file is completed
 
 - `baseSchemaSQL` (`backend/store/migrations.go`) declares every table, column and index the task, project,

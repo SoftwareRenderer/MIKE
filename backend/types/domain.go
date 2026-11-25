@@ -343,10 +343,13 @@ type Project struct {
 	// GitAuthorName and GitAuthorEmail are this project's own commit identity. Each half that is set
 	// outranks the identity this server was stamped with at boot, and each half that is not is left to
 	// it; git.ProjectIdentity is where the two are layered.
-	GitAuthorName  string    `json:"git_author_name,omitempty"`
-	GitAuthorEmail string    `json:"git_author_email,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	GitAuthorName  string `json:"git_author_name,omitempty"`
+	GitAuthorEmail string `json:"git_author_email,omitempty"`
+	// Cloned says the folder at Path is one this server wrote. It is the only grant a project deletion has
+	// to remove that folder, and nothing sets it for a folder that already existed.
+	Cloned    bool      `json:"cloned,omitzero"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // AssistedByEnabled says whether this project's commit messages credit the models that contributed.

@@ -73,6 +73,8 @@ export interface Project {
     cloneProgress?: number;
     cloneLog?: string[];
     cloneFailure?: CloneFailureInfo;
+    /** The folder at `path` is one this server wrote. Only then may deleting the project delete it too. */
+    cloned?: boolean;
     origin_branch?: string;
     sandbox_enabled?: boolean;
     sandbox_network_isolation?: boolean;

@@ -670,7 +670,7 @@ async function executeQueuedAction(action: QueuedAction, idMap: Map<string, stri
             await updateProjectRaw(p.id, p.updates);
             break;
         case 'deleteProject':
-            await deleteProjectRaw(p.id);
+            await deleteProjectRaw(p.id, p.deletion);
             break;
         case 'switchTaskThread':
             await switchTaskThreadRaw(p.projectId, taskId, p.threadId);

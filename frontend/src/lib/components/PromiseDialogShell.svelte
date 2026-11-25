@@ -20,6 +20,7 @@
         cancelLabel,
         confirmLabel,
         dismissOnly = false,
+        confirmDisabled = false,
         variant = 'default',
         onConfirm,
         onCancel,
@@ -35,6 +36,8 @@
         confirmLabel: string;
         /** Show only the confirm button: the dialog reports something rather than asking. */
         dismissOnly?: boolean;
+        /** Grey the confirm button out: the answer is not reachable until the body is filled in. */
+        confirmDisabled?: boolean;
         variant?: DialogVariant;
         onConfirm: () => void;
         onCancel: () => void;
@@ -57,6 +60,7 @@
             class:btn-primary={variant !== 'destructive'}
             class:btn-danger={variant === 'destructive'}
             class:destructive={variant === 'destructive'}
+            disabled={confirmDisabled}
             onclick={onConfirm}
         >
             {confirmLabel}

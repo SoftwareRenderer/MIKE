@@ -44,7 +44,7 @@ func TestCreateProjectRefusesWideningSandboxSettings(t *testing.T) {
 				SandboxNetworkIsolation: &isolation,
 				SandboxMounts:           tt.mounts,
 				SandboxCapabilities:     tt.caps,
-			})
+			}, false)
 			if code != http.StatusBadRequest {
 				t.Fatalf("status = %d (%s), want %d", code, msg, http.StatusBadRequest)
 			}
@@ -73,7 +73,7 @@ func TestCreateProjectRefusesWideningSandboxSettings(t *testing.T) {
 		SandboxNetworkIsolation: &isolation,
 		SandboxMounts:           []types.SandboxMount{{HostPath: "/go", ContainerPath: "/go", Mode: "ro"}, {HostPath: "/etc", ContainerPath: "/etc"}},
 		SandboxCapabilities:     []string{"NET_RAW", "SYS_ADMIN", "cap_sys_ptrace"},
-	})
+	}, false)
 	if code != http.StatusCreated {
 		t.Fatalf("a legitimate sandbox configuration was refused: %d (%s)", code, msg)
 	}

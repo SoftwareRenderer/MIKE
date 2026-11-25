@@ -74,6 +74,9 @@ const RAISE: Record<string, () => void> = {
     'uiStore.showSandboxConfig': () => { uiStore.showSandboxConfig = true; },
     'appStore.showEditTask': () => { appStore.showEditTask = true; },
     'dialogStore.confirmationSlot': () => { void dialogStore.showConfirm({ title: 'T', message: 'M' }); },
+    'dialogStore.deleteProjectSlot': () => {
+        void dialogStore.showDeleteProject({ name: 'n', folder: 'f', path: '/home/dev/f', cloned: true });
+    },
     'dialogStore.commitDialogSlot': () => { void dialogStore.showCommitDialog({ message: 'm' }); },
     'dialogStore.compressContextDialogSlot': () => { void dialogStore.showCompressContextDialog({}); },
 };

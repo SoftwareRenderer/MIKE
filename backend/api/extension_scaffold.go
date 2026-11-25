@@ -132,13 +132,15 @@ func (h *ExtensionScaffoldHandler) HandleScaffold(w http.ResponseWriter, r *http
 	if req.SandboxNetworkIsolation != nil {
 		networkIsolation = *req.SandboxNetworkIsolation
 	}
+	// Stamped uncloned: the author deletes the development folder, not this server
+	// (docs/extension-authoring.md).
 	project, code, msg := h.projects.createProjectFromRequest(types.CreateProjectRequest{
 		Path:                    repo,
 		Name:                    filepath.Base(repo),
 		SandboxEnabled:          true,
 		SandboxNetworkIsolation: &networkIsolation,
 		SandboxCapabilities:     req.SandboxCapabilities,
-	})
+	}, false)
 	if project == nil {
 		// The project path answered its own sentence; only the directory it refused is ours to undo.
 		if leftover := h.ext.RemoveDevRepo(repo); leftover != "" {

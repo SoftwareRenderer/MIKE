@@ -47,8 +47,8 @@ func (s *Store) CreateProject(p *types.Project) error {
 		assistedBy = 1 // the trailer is stored only where a person asked for it
 	}
 	_, err := s.db.Exec(
-		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), ptrStr(p.SandboxBuildContext), p.SandboxMemoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, assistedBy, mcpIDsJSON, ptrStr(p.GitAuthorName), ptrStr(p.GitAuthorEmail), p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
+		`INSERT INTO projects (`+projectColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		p.ID, p.Name, p.Path, ptrStr(p.OriginBranch), B2I(p.SandboxEnabled), B2I(p.SandboxNetworkIsolation), ptrStr(p.SandboxImage), ptrStr(p.SandboxDockerfilePath), ptrStr(p.SandboxBuildContext), p.SandboxMemoryLimit, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, assistedBy, mcpIDsJSON, ptrStr(p.GitAuthorName), ptrStr(p.GitAuthorEmail), B2I(p.Cloned), p.CreatedAt.Format(time.RFC3339), p.UpdatedAt.Format(time.RFC3339),
 	)
 	return err
 }
@@ -56,21 +56,22 @@ func (s *Store) CreateProject(p *types.Project) error {
 // projectColumns lists the projects table columns in the exact order scanProject
 // reads them. Keep the two in step — a SELECT built from anything else will scan
 // silently wrong values, not fail.
-const projectColumns = `id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_build_context, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, commit_assisted_by, mcp_server_ids, git_author_name, git_author_email, created_at, updated_at`
+const projectColumns = `id, name, path, origin_branch, sandbox_enabled, sandbox_network_isolation, sandbox_image, sandbox_dockerfile_path, sandbox_build_context, sandbox_memory_limit, sandbox_forward_ports, sandbox_mounts, sandbox_envs, sandbox_capabilities, commit_assisted_by, mcp_server_ids, git_author_name, git_author_email, cloned, created_at, updated_at`
 
 // scanProject reads one project row from either a *sql.Row or an *sql.Rows cursor
 // and applies the column conventions (NULL-able text columns collapse to "",
 // 0/1 integers to bools, JSON columns unmarshal best-effort).
 func scanProject(s scanner, p *types.Project) error {
 	var originBranch, sandboxImage, sandboxDockerfilePath, buildContext, forwardPortsJSON, mountsJSON, envsJSON, capsJSON, mcpIDsJSON, gitAuthorName, gitAuthorEmail sql.NullString
-	var sandboxEnabled, sandboxNetworkIsolation, commitAssistedBy int
+	var sandboxEnabled, sandboxNetworkIsolation, commitAssistedBy, cloned int
 	var createdAt, updatedAt string
-	if err := s.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &buildContext, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &commitAssistedBy, &mcpIDsJSON, &gitAuthorName, &gitAuthorEmail, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&p.ID, &p.Name, &p.Path, &originBranch, &sandboxEnabled, &sandboxNetworkIsolation, &sandboxImage, &sandboxDockerfilePath, &buildContext, &p.SandboxMemoryLimit, &forwardPortsJSON, &mountsJSON, &envsJSON, &capsJSON, &commitAssistedBy, &mcpIDsJSON, &gitAuthorName, &gitAuthorEmail, &cloned, &createdAt, &updatedAt); err != nil {
 		return err
 	}
 	p.OriginBranch = originBranch.String
 	p.SandboxEnabled = I2B(sandboxEnabled)
 	p.SandboxNetworkIsolation = I2B(sandboxNetworkIsolation)
+	p.Cloned = I2B(cloned)
 	assistedBy := I2B(commitAssistedBy)
 	p.CommitAssistedBy = &assistedBy
 	p.SandboxImage = sandboxImage.String

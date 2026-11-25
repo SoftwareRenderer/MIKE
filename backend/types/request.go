@@ -22,6 +22,13 @@ type CreateProjectRequest struct {
 	SandboxCapabilities     []string       `json:"sandbox_capabilities,omitempty"`
 }
 
+// DeleteProjectRequest is the optional body of a project deletion. delete_data is the person's decision to
+// give up the folder as well; confirm_name is that folder's name typed back, which this server checks.
+type DeleteProjectRequest struct {
+	DeleteData  bool   `json:"delete_data,omitzero"`
+	ConfirmName string `json:"confirm_name,omitzero"`
+}
+
 // UpdateProjectRequest is the request body for updating a project.
 type UpdateProjectRequest struct {
 	Name                    string         `json:"name,omitempty"`

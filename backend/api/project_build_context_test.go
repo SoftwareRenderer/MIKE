@@ -22,7 +22,7 @@ func TestProjectWritesValidateTheBuildContextAsARepositoryPath(t *testing.T) {
 		_, code, msg := h.createProjectFromRequest(types.CreateProjectRequest{
 			Path: repo, Name: "ctx-reject-proj", SandboxEnabled: true,
 			SandboxNetworkIsolation: &isolation, SandboxBuildContext: bad,
-		})
+		}, false)
 		if code != http.StatusBadRequest {
 			t.Errorf("create with context %q: status %d (%s), want %d", bad, code, msg, http.StatusBadRequest)
 		}
@@ -34,7 +34,7 @@ func TestProjectWritesValidateTheBuildContextAsARepositoryPath(t *testing.T) {
 	created, code, msg := h.createProjectFromRequest(types.CreateProjectRequest{
 		Path: repo, Name: "ctx-ok-proj", SandboxEnabled: true,
 		SandboxNetworkIsolation: &isolation, SandboxBuildContext: "services/api",
-	})
+	}, false)
 	if code != http.StatusCreated {
 		t.Fatalf("status = %d (%s), want %d", code, msg, http.StatusCreated)
 	}
@@ -47,7 +47,7 @@ func TestProjectWritesValidateTheBuildContextAsARepositoryPath(t *testing.T) {
 	spelling, code, msg := h.createProjectFromRequest(types.CreateProjectRequest{
 		Path: secondRepo(t), Name: "ctx-spelling-proj", SandboxEnabled: true,
 		SandboxNetworkIsolation: &isolation, SandboxBuildContext: "./services/api/",
-	})
+	}, false)
 	if code != http.StatusCreated {
 		t.Fatalf("status = %d (%s), want %d", code, msg, http.StatusCreated)
 	}

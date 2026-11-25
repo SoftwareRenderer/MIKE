@@ -26,6 +26,7 @@ export const MODAL_FLAGS: readonly ModalFlag[] = [
     { store: 'uiStore', field: 'showSandboxConfig', open: () => uiStore.showSandboxConfig },
     { store: 'appStore', field: 'showEditTask', open: () => appStore.showEditTask },
     { store: 'dialogStore', field: 'confirmationSlot', open: () => dialogStore.confirmationSlot.pending !== null },
+    { store: 'dialogStore', field: 'deleteProjectSlot', open: () => dialogStore.deleteProjectSlot.pending !== null },
     { store: 'dialogStore', field: 'commitDialogSlot', open: () => dialogStore.commitDialogSlot.pending !== null },
     { store: 'dialogStore', field: 'compressContextDialogSlot', open: () => dialogStore.compressContextDialogSlot.pending !== null },
 ];

@@ -1380,6 +1380,23 @@ func ProjectImageName(projectName string) string {
 	return sandboxruntime.QualifyLocalImageRef(fmt.Sprintf("%s-%s", ProjectImagePrefix, safeName))
 }
 
+// RemoveProjectImage retires the name ProjectImageName gives a project's own build. `images -q` is asked
+// first because most projects never built one; a podman that cannot answer is a failure.
+func (sm *SandboxManager) RemoveProjectImage(projectName string) error {
+	ref := ProjectImageName(projectName)
+	out, err := sm.podmanExec("images", "-q", ref)
+	if err != nil {
+		return fmt.Errorf("look up project image %s: %w", ref, err)
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return nil
+	}
+	if out, err := sm.podmanExec("rmi", ref); err != nil {
+		return fmt.Errorf("remove project image %s: %w (%s)", ref, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // StopProjectContainers stops all sandbox containers associated with a project.
 // This includes task-level containers (identified by taskIDs) and the project-level
 // container (identified by ProjectKey). Used when sandbox settings change
