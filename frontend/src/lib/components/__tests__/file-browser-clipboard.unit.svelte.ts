@@ -374,3 +374,102 @@ describe('the file list keyboard, wherever the panel holds focus', () => {
         expect(posts).toEqual([]);
     });
 });
+
+describe('the clipboard says what it took', () => {
+    // The keyboard describe above leaves the module's listing as its own, so this one names the
+    // listing it needs rather than inheriting whichever ran last.
+    beforeEach(() => {
+        LISTING = {
+            [ROOT]: [
+                { name: 'a.txt', isDir: false, path: `${ROOT}/a.txt` },
+                { name: 'b.txt', isDir: false, path: `${ROOT}/b.txt` },
+            ],
+        };
+    });
+
+    const menuNamed = (container: HTMLElement, label: string) =>
+        [...container.querySelectorAll<HTMLElement>('.file-context-menu .menu-item')]
+            .find(el => el.textContent?.trim() === label)!;
+    const barButton = (container: HTMLElement, label: string) =>
+        container.querySelector<HTMLElement>(`.file-selection-bar .selection-btn[aria-label="${label}"]`)!;
+
+    it.each([
+        { key: 'c', toast: 'Copied 1 item' },
+        { key: 'x', toast: 'Cut 1 item' },
+    ])('announces a Ctrl+$key over one row as $toast', async ({ key, toast }) => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!);
+        await fireEvent.keyDown(listEl(container), { key, ctrlKey: true });
+
+        expect(dialogStore.toast?.type).toBe('success');
+        expect(dialogStore.toast?.message).toBe(toast);
+    });
+
+    it('counts every row a Ctrl+C took', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!);
+        await fireEvent.click(rowEl(container, `${ROOT}/b.txt`)!, { ctrlKey: true });
+        await fireEvent.keyDown(listEl(container), { key: 'x', ctrlKey: true });
+
+        expect(dialogStore.toast?.message).toBe('Cut 2 items');
+    });
+
+    it.each([
+        { label: 'Copy', toast: 'Copied 2 items' },
+        { label: 'Cut', toast: 'Cut 2 items' },
+    ])('announces the action bar\'s $label button', async ({ label, toast }) => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!);
+        await fireEvent.click(rowEl(container, `${ROOT}/b.txt`)!, { ctrlKey: true });
+        await fireEvent.click(barButton(container, label));
+
+        expect(dialogStore.toast?.message).toBe(toast);
+    });
+
+    it.each([
+        { label: 'Copy', toast: 'Copied 1 item' },
+        { label: 'Cut', toast: 'Cut 1 item' },
+    ])('announces the context menu\'s $label item', async ({ label, toast }) => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!);
+        await fireEvent.contextMenu(rowEl(container, `${ROOT}/a.txt`)!, { clientX: 60, clientY: 120 });
+        await fireEvent.click(menuNamed(container, label));
+
+        expect(dialogStore.toast?.message).toBe(toast);
+    });
+
+    // The key belongs to the browser's own copy whenever no row is held, so nothing was taken and
+    // there is nothing to announce.
+    it('announces nothing when a Ctrl+C holds no row', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await fireEvent.keyDown(listEl(container), { key: 'c', ctrlKey: true });
+
+        expect(dialogStore.toast).toBeNull();
+    });
+
+    // Both announcements share one toast, so the operation's own answer outranks the claim that
+    // started it.
+    it('leaves the paste\'s toast up over the copy that preceded it', async () => {
+        const { container } = openBrowser();
+        await loadRoot(container);
+
+        await fireEvent.click(rowEl(container, `${ROOT}/a.txt`)!);
+        await fireEvent.keyDown(listEl(container), { key: 'c', ctrlKey: true });
+        expect(dialogStore.toast?.message).toBe('Copied 1 item');
+
+        await fireEvent.keyDown(listEl(container), { key: 'v', ctrlKey: true });
+        await waitFor(() => expect(dialogStore.toast?.message).toBe('Pasted 1 item'));
+        await new Promise(r => setTimeout(r, 100));
+        expect(dialogStore.toast?.message).toBe('Pasted 1 item');
+    });
+});

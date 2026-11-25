@@ -139,6 +139,8 @@ const catalog = {
     'explorer.shared.deleteMore': '{count} more',
     'explorer.shared.deletedCount': { one: 'Deleted {count} item', other: 'Deleted {count} items' },
     'explorer.shared.pastedCount': { one: 'Pasted {count} item', other: 'Pasted {count} items' },
+    'explorer.shared.copiedCount': { one: 'Copied {count} item', other: 'Copied {count} items' },
+    'explorer.shared.cutCount': { one: 'Cut {count} item', other: 'Cut {count} items' },
     'explorer.shared.pasteRenamedTitle': 'Pasted under other names',
     'explorer.shared.pasteRenamedMessage': 'That folder already held these names:',
     'explorer.shared.pasteRenamedEntry': '{from} → {to}',

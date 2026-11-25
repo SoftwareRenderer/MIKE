@@ -506,6 +506,7 @@
     function setClipboard(mode: 'copy' | 'cut', paths: string[]): void {
         if (paths.length === 0) return;
         clipboard = { mode, paths };
+        dialogStore.showToast(t(mode === 'copy' ? 'explorer.shared.copiedCount' : 'explorer.shared.cutCount', { count: paths.length }), 'success');
     }
 
     /**
