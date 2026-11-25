@@ -78,13 +78,7 @@ class LocaleOfferStore {
             extensions: extensionManager.state.extensions,
             record,
         });
-        if (!decision.offer) {
-            // Every "no" is legitimate, so it is a log line and not a message:
-            // the reason is what you would want when an offer that should have
-            // appeared did not (or one that should not have, did).
-            console.info(`[i18n] no language pack offered (${decision.reason})`);
-            return;
-        }
+        if (!decision.offer) return;
         this.state = {
             phase: 'offered',
             entry: decision.entry,
@@ -169,8 +163,7 @@ async function readRegistry(): Promise<RegistryEntry[] | null> {
     try {
         const index = await getRegistryIndex();
         return Array.isArray(index) ? index : null;
-    } catch (e) {
-        console.info('[i18n] registry index unavailable; no language pack offered', e);
+    } catch {
         return null;
     }
 }

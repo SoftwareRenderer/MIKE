@@ -206,15 +206,21 @@ Each `properties` entry is keyed by `key`, shown under `title` and `description`
 - `number` — a number field. `minimum` and `maximum` travel with the declaration; the form bounds
   nothing, so a tool that needs a cap must apply one itself.
 - `boolean` — a switch.
-- `string`, `url`, `text`, or anything unrecognised — a text field.
+- `string`, `url`, `text`, or anything unrecognised — a text field, unless it declares `enum`.
 - `mount`, `env` — the folder list and the variable list an `agent` extension declares its default
   host mounts and environment through; see `agent.md`.
 - A `url` property is a **grant**: a contributed tool may only be pointed at one, its `default` must
   be empty (a pre-filled one is refused wherever tools are declared), and the person types the
   address themselves. The value is read as an address when it is saved, so a typo answers with a
   sentence instead of a tool that never gets an answer. Never pre-fill one.
-- `enum` on a `string` is the list of values to write in the `description` as well — the form shows a
-  text field, not a choice, so the person has to know the words.
+- `enum` on a `string` is its whole value space: the person picks one of the entries from a drop-down,
+  and a save refuses any other word. `default` is required and has to be one of the entries, because
+  the pick-list always shows a value. A stored value the list does not declare — one from before the
+  list existed — opens the field on the default, and the next save replaces it. At most 64 entries; past
+  that, write the values in the `description` beside a text field. Only a `string` property is offered
+  this way: a list beside a `number` or a `boolean` decides nothing, and each keeps its own control.
 - `sensitive` — set it to `true` and the value is encrypted where it is stored, the field is a
   password field, and the answer to a read is a mask rather than the token. Anything that holds a
-  token, a key or a cookie sets it.
+  token, a key or a cookie sets it. Beside `enum` the field stays a pick-list and the read answers with
+  the value plainly: a list published in the manifest holds no secret, and a masked choice is one the
+  form cannot show.

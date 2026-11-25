@@ -34,7 +34,8 @@ export interface LocaleOfferRecord {
 }
 
 /**
- * Why nothing is offered. Kept in the decision so a caller can log the reason.
+ * Why nothing is offered. A refusal is named, not shown: nothing renders or logs it,
+ * and it is what the resolver's tests assert against.
  *
  * @knipignore A refusal is asserted by its reason, which the decision narrows to this set.
  */
