@@ -361,6 +361,9 @@ func (h *ExtensionHandler) validateLoadedManifest(name string, manifest *Extensi
 	if err := validateTools(manifest.Capabilities, manifest.ConfigSchema); err != nil {
 		return sandboxCfg, fmt.Errorf("extension %s declares an unusable tool: %w", name, err)
 	}
+	if err := manifest.ConfigSchema.validateChoiceProperties(); err != nil {
+		return sandboxCfg, fmt.Errorf("extension %s declares an unusable configuration: %w", name, err)
+	}
 	return sandboxCfg, nil
 }
 

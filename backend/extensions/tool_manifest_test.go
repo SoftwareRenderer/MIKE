@@ -298,6 +298,84 @@ func TestValidateConfigValues(t *testing.T) {
 	}
 }
 
+// A list the form could not offer, or the save could not honour, is refused where the manifest is stored.
+func TestChoicePropertyRefusals(t *testing.T) {
+	withLevel := func(mutate func(*SchemaProp)) *ConfigSchema {
+		s := &ConfigSchema{Properties: []SchemaProp{{Key: "level", Type: "string", Enum: []any{"off", "verbose"}, Default: "off"}}}
+		mutate(&s.Properties[0])
+		return s
+	}
+
+	if err := withLevel(func(*SchemaProp) {}).validateChoiceProperties(); err != nil {
+		t.Fatalf("a declared list was refused: %v", err)
+	}
+	// A property that declares no type reads as a string, so its list is checked the same way.
+	if err := (&ConfigSchema{Properties: []SchemaProp{{Key: "level", Enum: []any{"off"}, Default: "off"}}}).validateChoiceProperties(); err != nil {
+		t.Fatalf("a list on a property with no type was refused: %v", err)
+	}
+	// Only a string property is a pick-list, so a list on another type decides nothing.
+	if err := (&ConfigSchema{Properties: []SchemaProp{{Key: "port", Type: "number", Enum: []any{8080, 9090}}}}).validateChoiceProperties(); err != nil {
+		t.Fatalf("a number property's list was refused: %v", err)
+	}
+
+	for _, tt := range []struct {
+		name   string
+		mutate func(*SchemaProp)
+		want   string
+	}{
+		{"a choice that is not written out", func(p *SchemaProp) { p.Enum = []any{"off", 7} }, "is not a string"},
+		{"an empty choice", func(p *SchemaProp) { p.Enum = []any{"off", "  "} }, "a choice is empty"},
+		{"a default outside the list", func(p *SchemaProp) { p.Default = "chatty" }, "not one of the declared choices"},
+		{"a default that is not a string", func(p *SchemaProp) { p.Default = 3 }, "write one of the values as the default"},
+		{"a list with no default to open on", func(p *SchemaProp) { p.Default = nil }, "write one of the values as the default"},
+		{"a list longer than a pick-list", func(p *SchemaProp) {
+			var values []any
+			for i := 0; i <= maxEnumChoices; i++ {
+				values = append(values, fmt.Sprintf("v%d", i))
+			}
+			p.Enum = values
+			p.Default = "v0"
+		}, "at most"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			err := withLevel(tt.mutate).validateChoiceProperties()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("err = %v, want it to say %q", err, tt.want)
+			}
+			if !strings.Contains(err.Error(), "config_schema.level") {
+				t.Fatalf("err = %v, want it to name config_schema.level", err)
+			}
+		})
+	}
+}
+
+// The list is the save's rule, not only the form's.
+func TestValidateConfigValuesHoldsAChoiceToItsList(t *testing.T) {
+	schema := &ConfigSchema{Properties: []SchemaProp{
+		{Key: "level", Type: "string", Enum: []any{"off", "verbose"}, Default: "off"},
+		{Key: "port", Type: "number", Enum: []any{8080}},
+	}}
+	if err := ValidateConfigValues(schema, map[string]any{"level": "verbose"}); err != nil {
+		t.Fatalf("a declared choice was refused: %v", err)
+	}
+	// Unset is not a wrong value: the person has not picked yet.
+	if err := ValidateConfigValues(schema, map[string]any{}); err != nil {
+		t.Fatalf("an unset choice was refused: %v", err)
+	}
+	if err := ValidateConfigValues(schema, map[string]any{"level": nil}); err != nil {
+		t.Fatalf("a nil choice was refused: %v", err)
+	}
+	if err := ValidateConfigValues(schema, map[string]any{"port": 4000}); err != nil {
+		t.Fatalf("a number outside its declared list was refused: %v", err)
+	}
+	for _, bad := range []any{"chatty", 7, []any{"off"}} {
+		err := ValidateConfigValues(schema, map[string]any{"level": bad})
+		if err == nil || !strings.Contains(err.Error(), "level") {
+			t.Fatalf("err = %v, want a refusal naming level for %v", err, bad)
+		}
+	}
+}
+
 // A stored row that no longer passes is refused by name, and the rest survive.
 func TestUsableContributedTools(t *testing.T) {
 	schema := searxngLikeSchema()

@@ -388,6 +388,68 @@ func (s *ConfigSchema) validateURLProperties() error {
 	return nil
 }
 
+// holdsChoice reports whether the list declares this exact value. An entry that is not a string, from a
+// row stored before entries were checked, matches nothing.
+func (p *SchemaProp) holdsChoice(text string) bool {
+	if p == nil {
+		return false
+	}
+	for _, v := range p.Enum {
+		if s, ok := v.(string); ok && s == text {
+			return true
+		}
+	}
+	return false
+}
+
+// isChoice reports whether the declared values are the property's whole value space: a string property
+// with a list. Every other type keeps the control its type names, and an absent type reads as a string.
+// `isChoiceField` holds the same rule in the client.
+func (p *SchemaProp) isChoice() bool {
+	if p == nil || len(p.Enum) == 0 {
+		return false
+	}
+	return p.Type == "" || p.Type == "string"
+}
+
+// maxEnumChoices is the most list someone can pick from; past it the values belong in a description.
+const maxEnumChoices = 64
+
+// validateChoiceProperties refuses a list the form could not offer or the save could not honour: an
+// entry that is not a string, a list longer than maxEnumChoices, and a default that is not one of the
+// entries. A pick-list always shows a value, and an unrecognized stored value falls back to the default.
+func (s *ConfigSchema) validateChoiceProperties() error {
+	if s == nil {
+		return nil
+	}
+	for i := range s.Properties {
+		p := &s.Properties[i]
+		if !p.isChoice() {
+			continue
+		}
+		if len(p.Enum) > maxEnumChoices {
+			return fmt.Errorf("config_schema.%s: %d choices declared, at most %d — past that the values belong in the description beside a text field", p.Key, len(p.Enum), maxEnumChoices)
+		}
+		for _, v := range p.Enum {
+			text, ok := v.(string)
+			if !ok {
+				return fmt.Errorf("config_schema.%s: choice %v is not a string — the values a person picks are written out", p.Key, v)
+			}
+			if strings.TrimSpace(text) == "" {
+				return fmt.Errorf("config_schema.%s: a choice is empty — an option has to say what it is", p.Key)
+			}
+		}
+		def, ok := p.Default.(string)
+		if !ok {
+			return fmt.Errorf("config_schema.%s: its default is %v, and a pick-list opens on a declared choice — write one of the values as the default", p.Key, p.Default)
+		}
+		if !p.holdsChoice(def) {
+			return fmt.Errorf("config_schema.%s: the default %q is not one of the declared choices", p.Key, def)
+		}
+	}
+	return nil
+}
+
 // ValidateConfigValues checks only a property type with a shape.
 func ValidateConfigValues(schema *ConfigSchema, config map[string]any) error {
 	if schema == nil {
@@ -395,11 +457,20 @@ func ValidateConfigValues(schema *ConfigSchema, config map[string]any) error {
 	}
 	for i := range schema.Properties {
 		p := &schema.Properties[i]
-		if p.Type != SchemaTypeURL {
-			continue
-		}
-		if _, err := ConfiguredURLOf(p.Key, config); err != nil {
-			return fmt.Errorf("config %s: %w", p.Key, err)
+		switch {
+		case p.Type == SchemaTypeURL:
+			if _, err := ConfiguredURLOf(p.Key, config); err != nil {
+				return fmt.Errorf("config %s: %w", p.Key, err)
+			}
+		case p.isChoice():
+			raw, ok := config[p.Key]
+			if !ok || raw == nil {
+				continue // unset is not a wrong value; the person has not picked yet
+			}
+			text, ok := raw.(string)
+			if !ok || !p.holdsChoice(text) {
+				return fmt.Errorf("config %s: %v is not one of the declared choices", p.Key, raw)
+			}
 		}
 	}
 	return nil

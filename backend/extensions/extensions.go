@@ -592,6 +592,18 @@ func (s *ConfigSchema) GetProperty(key string) *SchemaProp {
 	return nil
 }
 
+// choiceAnswersPublicly reports whether a stored value is one the manifest publishes itself. The list
+// is public, so the value is no secret and the form has to be able to show which one was chosen. A
+// value the list does not declare is masked like any other.
+func (s *ConfigSchema) choiceAnswersPublicly(key string, value any) bool {
+	p := s.GetProperty(key)
+	if !p.isChoice() {
+		return false
+	}
+	text, ok := value.(string)
+	return ok && p.holdsChoice(text)
+}
+
 // IsSensitive reports whether this schema declares the key to hold a secret. A key it does not list,
 // or no schema at all, declares none.
 func (s *ConfigSchema) IsSensitive(key string) bool {

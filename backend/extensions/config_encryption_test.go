@@ -298,3 +298,38 @@ func TestMaskConfig_PreservedOnUpdate(t *testing.T) {
 		t.Errorf("username = %v, want bob", got.Config["username"])
 	}
 }
+
+// A value the manifest publishes is no secret, and a masked one leaves the pick-list unable to say
+// which option was chosen. An unlisted value stays masked, and both stay sealed in the row.
+func TestMaskConfig_PublishedChoiceIsNotMasked(t *testing.T) {
+	es := testStore(t)
+	schema := &ConfigSchema{Properties: []SchemaProp{
+		{Key: "region", Type: "string", Sensitive: true, Enum: []any{"frankfurt", "ashburn"}, Default: "frankfurt"},
+		{Key: "token", Type: "string", Sensitive: true},
+	}}
+
+	ext := makeTestExtWithConfig(t, "choice-ext", "choice-ext", map[string]any{
+		"region": "ashburn", "token": "ghp_secret123",
+	}, schema)
+	if err := es.Create(ext); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	assertRowHoldsNoPlaintext(t, es, "choice-ext", "ashburn")
+
+	stored, err := es.GetByID("choice-ext")
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	masked := maskConfig(stored.Config, schema)
+	if masked["region"] != "ashburn" {
+		t.Errorf("region = %v, want the published choice the form has to show", masked["region"])
+	}
+	if masked["token"] != types.MaskedSecret {
+		t.Errorf("token = %v, want the mask: a list decides nothing about a free-typed secret", masked["token"])
+	}
+
+	// An unlisted value predates the list, so nothing published explains it.
+	if got := maskConfig(map[string]any{"region": "walldorf"}, schema)["region"]; got != types.MaskedSecret {
+		t.Errorf("region = %v, want the mask for a value no list declares", got)
+	}
+}
