@@ -7,10 +7,12 @@
     import closeIcon from '$lib/assets/icons/close.svg?raw';
     import plusIcon from '$lib/assets/icons/plus.svg?raw';
     import {
+        configChoiceValue,
         configNumberInput,
         configNumberValue,
         effectiveConfigFields,
         HOST_OWNED_LSP_CONFIG_KEY,
+        isChoiceField,
     } from '$lib/utils/extension-config';
 
     /**
@@ -72,6 +74,19 @@
                         {/if}
                         <button type="button" class="btn-add" onclick={() => { config[field.key] = [...envs, { key: '', value: '' }]; }} title={t('settings.extensions.addVariable')}><Icon src={plusIcon} width={14} height={14} /></button>
                     </div>
+                {:else if isChoiceField(field)}
+                    <!-- Always one of the entries: the load refuses a list whose default is not one, and
+                         the draft is normalized the same way. -->
+                    <select
+                        id="edit-config-{field.key}"
+                        class="config-input"
+                        value={configChoiceValue(config, field)}
+                        onchange={(e) => config[field.key] = (e.target as HTMLSelectElement).value}
+                    >
+                        {#each field.enum ?? [] as choice}
+                            <option value={choice}>{choice}</option>
+                        {/each}
+                    </select>
                 {:else if field.type === 'number'}
                     <input
                         id="edit-config-{field.key}"
@@ -219,5 +234,10 @@
         color: var(--color-text-tertiary);
         font-size: var(--text-base);
         margin-bottom: 1.5rem;
+    }
+
+    /* A select keeps the browser's own font unless it is told otherwise. */
+    select.config-input {
+        font-family: inherit;
     }
 </style>

@@ -30,6 +30,25 @@ export function isLspExtension(ext: Extension | null | undefined): boolean {
     return ext?.type === 'lsp';
 }
 
+/**
+ * Whether the declared values are the field's whole value space: a string field with a list. An absent
+ * type was already read as a string by `effectiveConfigFields`. `SchemaProp.isChoice` holds the same
+ * rule in Go.
+ */
+export function isChoiceField(field: ConfigField): boolean {
+    return field.type === 'string' && !!field.enum?.length;
+}
+
+/**
+ * The choice a field shows: the stored value when the list declares it, otherwise the schema default,
+ * which the load guarantees is one of the entries. `initialEditConfig` writes it into the draft too, so
+ * what the field shows is what Save sends.
+ */
+export function configChoiceValue(config: Record<string, any>, field: ConfigField): any {
+    const stored = config[field.key];
+    return field.enum?.includes(stored) ? stored : field.default;
+}
+
 function isAgentExtension(ext: Extension | null | undefined): boolean {
     return ext?.type === 'agent';
 }
@@ -69,6 +88,12 @@ export function initialEditConfig(ext: Extension): Record<string, any> {
     if (isAgentExtension(ext)) {
         // Deleted, not just hidden: sending the field back counts as a write, which the server refuses.
         delete config[HOST_OWNED_AGENT_CONFIG_KEY];
+    }
+    // A stored word the list no longer declares is written back as the default, or Save would refuse it.
+    for (const field of effectiveConfigFields(ext)) {
+        if (isChoiceField(field) && field.key in config) {
+            config[field.key] = configChoiceValue(config, field);
+        }
     }
     return config;
 }

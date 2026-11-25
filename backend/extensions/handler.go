@@ -452,6 +452,10 @@ func (h *ExtensionHandler) HandleUpdate(w http.ResponseWriter, r *http.Request, 
 		http.Error(w, "extension declares an unusable tool: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	if err := ext.Manifest.ConfigSchema.validateChoiceProperties(); err != nil {
+		http.Error(w, "extension declares an unusable configuration: "+err.Error(), http.StatusBadRequest)
+		return
+	}
 
 	if err := h.store.Update(id, ext); err != nil {
 		httputil.Fault(w, "update extension", err)
@@ -1549,6 +1553,10 @@ func (h *ExtensionHandler) updateImageInBackground(id, name, url string, ackNewD
 				fail(fmt.Errorf("extension %s declares an unusable tool: %w", entry.Name, err))
 				return
 			}
+			if err := m.ConfigSchema.validateChoiceProperties(); err != nil {
+				fail(fmt.Errorf("extension %s declares an unusable configuration: %w", entry.Name, err))
+				return
+			}
 			if len(merged.Envs) > len(before.Envs) || len(merged.Mounts) > len(before.Mounts) ||
 				len(merged.Capabilities) > len(before.Capabilities) {
 				logging.For(logging.Extensions).Infof("ext=%s update added %d env, %d mount, %d capability declaration(s) from the manifest", id, len(merged.Envs)-len(before.Envs), len(merged.Mounts)-len(before.Mounts), len(merged.Capabilities)-len(before.Capabilities))
@@ -1899,8 +1907,11 @@ type ExtensionUpdate struct {
 // maskConfig replaces every schema-declared sensitive value with the mask. An empty
 // value passes through — a mask in a blank field reads as if a secret were set.
 func maskConfig(config map[string]any, schema *ConfigSchema) map[string]any {
-	return mapSensitiveConfig(config, schema, func(_ string, v any) (any, bool) {
+	return mapSensitiveConfig(config, schema, func(key string, v any) (any, bool) {
 		if fmt.Sprintf("%v", v) == "" {
+			return nil, false
+		}
+		if schema.choiceAnswersPublicly(key, v) {
 			return nil, false
 		}
 		return types.MaskedSecret, true

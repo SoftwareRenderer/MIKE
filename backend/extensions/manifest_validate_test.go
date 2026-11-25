@@ -845,3 +845,17 @@ func TestUIConfigValidate(t *testing.T) {
 		t.Errorf("nil UI capability refused: %v", err)
 	}
 }
+
+// A load applies a manifest no person installed, so a list the form cannot offer is refused there too.
+func TestLoadRefusesAnUnusableChoiceList(t *testing.T) {
+	h, _, _ := devHandler(t)
+	dir := t.TempDir()
+	manifest := &ExtensionManifest{
+		DisplayName:  "Levels",
+		Version:      "1.0.0",
+		ConfigSchema: &ConfigSchema{Properties: []SchemaProp{{Key: "level", Type: "string", Enum: []any{"off", "verbose"}, Default: "chatty"}}},
+	}
+	if _, err := h.validateLoadedManifest("levels", manifest, dir); err == nil || !strings.Contains(err.Error(), "config_schema.level") {
+		t.Fatalf("err = %v, want the load to refuse the default naming config_schema.level", err)
+	}
+}

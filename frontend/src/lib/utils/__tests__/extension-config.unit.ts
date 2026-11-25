@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import {
+    configChoiceValue,
     effectiveConfigFields,
     HOST_OWNED_LSP_CONFIG_KEY,
     initialEditConfig,
+    isChoiceField,
     isLspExtension,
+    type ConfigField,
 } from '../extension-config';
-import type { Extension, ExtensionType } from '$lib/types';
+import type { Extension, ExtensionType, SchemaProperty } from '$lib/types';
 
 function makeExt(overrides: Partial<Extension> = {}): Extension {
     return {
@@ -146,5 +149,59 @@ describe('initialEditConfig', () => {
         const config = initialEditConfig(ext);
         config.memory_limit = 999;
         expect(ext.config).toEqual({ tsserver_log: 'off' });
+    });
+});
+
+describe('choice fields', () => {
+    const levelField: ConfigField = {
+        key: 'level',
+        type: 'string',
+        title: 'Verbosity',
+        enum: ['off', 'terse', 'verbose'],
+        default: 'off',
+    };
+
+    function withSchema(properties: object[], config: Record<string, any>): Extension {
+        return makeExt({
+            type: 'ui',
+            config,
+            // One fixture declares no type at all, which the form reads as a string.
+            manifest: { display_name: 'T', description: '', author: '', version: '1.0.0', config_schema: { properties: properties as unknown as SchemaProperty[] } },
+        });
+    }
+
+    const levelSchema = [{ key: 'level', type: 'string', enum: ['off', 'terse'], default: 'off' }];
+
+    it('offers a string list as a pick-list and every other type as its own field', () => {
+        expect(isChoiceField(levelField)).toBe(true);
+        expect(isChoiceField({ ...levelField, enum: [] })).toBe(false);
+        expect(isChoiceField({ ...levelField, enum: undefined })).toBe(false);
+        expect(isChoiceField({ ...levelField, type: 'number' })).toBe(false);
+        expect(isChoiceField({ ...levelField, type: 'url' })).toBe(false);
+    });
+
+    it('shows the stored choice, and the schema default when the list no longer declares it', () => {
+        expect(configChoiceValue({ level: 'terse' }, levelField)).toBe('terse');
+        expect(configChoiceValue({ level: 'chatty' }, levelField)).toBe('off');
+        expect(configChoiceValue({ level: null }, levelField)).toBe('off');
+        expect(configChoiceValue({}, levelField)).toBe('off');
+    });
+
+    it('writes the fallback into the draft, so Save is never refused for a word nobody typed', () => {
+        expect(initialEditConfig(withSchema(levelSchema, { level: 'chatty' }))).toEqual({ level: 'off' });
+    });
+
+    it('leaves a choice nobody has made out of the draft, where the server reads it as unset', () => {
+        expect(initialEditConfig(withSchema(levelSchema, {}))).not.toHaveProperty('level');
+    });
+
+    it('reads a property that declares no type as a string', () => {
+        const untyped = [{ key: 'level', enum: ['off', 'terse'], default: 'off' }];
+        expect(initialEditConfig(withSchema(untyped, { level: 'chatty' }))).toEqual({ level: 'off' });
+    });
+
+    it('holds a list on a number to nothing — the field keeps the control its type names', () => {
+        const numbers = [{ key: 'port', type: 'number', enum: [8080], default: 8080 }];
+        expect(initialEditConfig(withSchema(numbers, { port: 9090 }))).toEqual({ port: 9090 });
     });
 });
