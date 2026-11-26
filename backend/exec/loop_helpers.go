@@ -323,36 +323,19 @@ func (te *TaskExecutor) checkAndBroadcastDiff(projectID, taskID string, task *ty
 	if err != nil || (diffResult.Diff == "" && len(diffResult.Untracked) == 0) {
 		return
 	}
-	hash := stream.DiffHash(diffResult)
+	event := stream.BuildDiffStatsEvent(projectID, taskID, diffResult)
 	// Skip if hash unchanged — fsnotify already broadcast this state
-	if hash == state.lastDiffHash {
+	if event.DiffHash == state.lastDiffHash {
 		return
 	}
-	state.lastDiffHash = hash
-	fileHashes := diffResult.GetPerFileHashes()
-	stats := stream.ComputeDiffStats(diffResult)
-	filesN := stats.VisibleTracked + stats.VisibleUntracked
+	state.lastDiffHash = event.DiffHash
 	// Check if task branch commits are already merged into the target branch.
 	if targetBranch, ok := stream.CheckAlreadyMerged(*task); ok {
 		if project, err := te.store.GetProject(projectID); err == nil && project.Path != "" {
-			stats.AlreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+			event.AlreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
 		}
 	}
-	te.appStreamMgr.BroadcastDiffStats(stream.DiffStatsEvent{
-		ProjectID:           projectID,
-		TaskID:              taskID,
-		DiffHash:            hash,
-		ShortStat:           diffResult.ShortStat,
-		FilesN:              filesN,
-		UntrackedN:          stats.VisibleUntracked,
-		UntrackedLines:      stats.UntrackedLines,
-		TrackedAdd:          stats.TrackedAdd,
-		TrackedDel:          stats.TrackedDel,
-		ChangedHashes:       fileHashes,
-		StagedPaths:         diffResult.StagedPaths,
-		HasCommittedChanges: diffResult.HasCommittedWork(),
-		AlreadyMerged:       stats.AlreadyMerged,
-	})
+	te.appStreamMgr.BroadcastDiffStats(event)
 }
 
 // computeTaskDiffStats computes the current diff stats broadcast payload.
@@ -380,26 +363,12 @@ func (te *TaskExecutor) computeTaskDiffStats(projectID, taskID string) *stream.D
 	if !diffResult.HasChanges() {
 		return nil
 	}
-	stats := stream.ComputeDiffStats(diffResult)
+	event := stream.BuildDiffStatsEvent(projectID, taskID, diffResult)
 	// Check if task branch commits are already merged into the target branch.
 	if targetBranch, ok := stream.CheckAlreadyMerged(*task); ok {
-		stats.AlreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
+		event.AlreadyMerged = te.worktreeMgr.IsMergedInto(project.Path, task.Branch, targetBranch)
 	}
-	return &stream.DiffStatsEvent{
-		ProjectID:           projectID,
-		TaskID:              taskID,
-		DiffHash:            stream.DiffHash(diffResult),
-		ShortStat:           diffResult.ShortStat,
-		FilesN:              stats.VisibleTracked + stats.VisibleUntracked,
-		UntrackedN:          stats.VisibleUntracked,
-		UntrackedLines:      stats.UntrackedLines,
-		TrackedAdd:          stats.TrackedAdd,
-		TrackedDel:          stats.TrackedDel,
-		ChangedHashes:       diffResult.GetPerFileHashes(),
-		StagedPaths:         diffResult.StagedPaths,
-		HasCommittedChanges: diffResult.HasCommittedWork(),
-		AlreadyMerged:       stats.AlreadyMerged,
-	}
+	return &event
 }
 
 // broadcastParentDiffStats recomputes and broadcasts the parent task's diff stats

@@ -481,23 +481,19 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 		return
 	}
 
-	stats := ComputeDiffStats(diffResult)
-	untrackedN := stats.VisibleUntracked
-	filesN := stats.VisibleTracked + untrackedN
-
-	hash := DiffHash(diffResult)
-	if hash != "" {
+	// Built once: the hash check and the delta below reuse what this counted.
+	event := BuildDiffStatsEvent(projectID, taskID, diffResult)
+	if event.DiffHash != "" {
 		if prevRaw, ok := ww.diffCache.Load(taskID); ok {
 			prevDiff := prevRaw.(*git.TaskDiff)
 			prevHash := DiffHash(prevDiff)
-			if hash == prevHash {
+			if event.DiffHash == prevHash {
 				return
 			}
 		}
 	}
 
-	newHashes := diffResult.GetPerFileHashes()
-	changedHashes, removedFiles := computeDiffDelta(taskID, newHashes, diffResult, &ww.diffCache)
+	changedHashes, removedFiles := computeDiffDelta(taskID, event.ChangedHashes, diffResult, &ww.diffCache)
 	// A done task's diff is BaseCommit..BranchTip, not the working tree, so it is not the answer the
 	// per-file route should give.
 	if ww.updateCache != nil && headRef == "" {
@@ -506,33 +502,23 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 
 	// The merge check runs against the target branch name (BaseRef), not the fixed BaseCommit SHA, so
 	// it reflects the current state of the target branch.
+	var alreadyMerged bool
 	if task != nil {
 		ww.mu.Lock()
 		worktreePath := ww.worktrees[taskID].path
 		ww.mu.Unlock()
 		if targetBranch, ok := CheckAlreadyMerged(*task); ok {
-			stats.AlreadyMerged = ww.worktreeMgr.IsMergedInto(worktreePath, task.Branch, targetBranch)
+			alreadyMerged = ww.worktreeMgr.IsMergedInto(worktreePath, task.Branch, targetBranch)
 		}
 	}
 
-	if diffResult.Diff != "" || untrackedN > 0 || diffResult.HasCommittedWork() {
-		ww.broadcast(DiffStatsEvent{
-			ProjectID:           projectID,
-			TaskID:              taskID,
-			DiffHash:            hash,
-			ShortStat:           diffResult.ShortStat,
-			FilesN:              filesN,
-			UntrackedN:          untrackedN,
-			UntrackedLines:      stats.UntrackedLines,
-			TrackedAdd:          stats.TrackedAdd,
-			TrackedDel:          stats.TrackedDel,
-			ChangedHashes:       changedHashes,
-			RemovedFiles:        removedFiles,
-			StagedPaths:         diffResult.StagedPaths,
-			HasCommittedChanges: diffResult.HasCommittedWork(),
-			AlreadyMerged:       stats.AlreadyMerged,
-		})
-		logging.For(logging.Watcher).With(logging.TaskID, taskID).Infof("diff changed: %s (untracked: %d files)", diffResult.ShortStat, untrackedN)
+	if diffResult.Diff != "" || event.UntrackedN > 0 || diffResult.HasCommittedWork() {
+		// This producer counts the delta since the last frame it sent, not the whole diff.
+		event.ChangedHashes = changedHashes
+		event.RemovedFiles = removedFiles
+		event.AlreadyMerged = alreadyMerged
+		ww.broadcast(event)
+		logging.For(logging.Watcher).With(logging.TaskID, taskID).Infof("diff changed: %s (untracked: %d files)", diffResult.ShortStat, event.UntrackedN)
 	} else if len(changedHashes) > 0 || len(removedFiles) > 0 {
 		ww.broadcast(DiffStatsEvent{
 			ProjectID:           projectID,
@@ -541,7 +527,7 @@ func (ww *WorktreeWatcher) computeAndBroadcast(taskID, projectID string) {
 			RemovedFiles:        removedFiles,
 			StagedPaths:         diffResult.StagedPaths,
 			HasCommittedChanges: diffResult.HasCommittedWork(),
-			AlreadyMerged:       stats.AlreadyMerged,
+			AlreadyMerged:       alreadyMerged,
 		})
 	}
 }

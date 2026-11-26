@@ -786,9 +786,11 @@ worktree-gone path, has the same rule, so a task with no worktree answers the sa
 **One diff answers one hash.** `stream.DiffHash` takes the whole `git.TaskDiff` rather than four strings, so
 no producer picks its own answer to "what counts as committed work": `git.TaskDiff.CommittedHalf` is the
 overlay for a working-tree comparison and the comparison itself for a ref comparison, and
-`has_committed_changes` comes from the same method (`HasCommittedWork`). The stored done-task snapshot
-(`backend/stream/done_snapshot.go`), the worktree watcher and the executor all build `task_diff_stats` that
-way. Two producers describing one diff with two hashes is what makes every client refetch a diff that never
+`has_committed_changes` comes from the same method (`HasCommittedWork`). Every producer assembles the frame
+through one function, `stream.BuildDiffStatsEvent`. The stored done-task snapshot
+(`backend/stream/done_snapshot.go`), the worktree watcher and the executor (both of its paths) call it, then
+add what only they hold: a watcher's removed-files delta, and `already_merged`, which needs the target branch.
+Two producers describing one diff with two hashes is what makes every client refetch a diff that never
 changed; a false `has_committed_changes` drops a card's mark for work that is committed but unmerged.
 Tests: `backend/stream/diff_stats_producers_test.go`.
 

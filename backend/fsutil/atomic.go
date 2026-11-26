@@ -2,66 +2,21 @@ package fsutil
 
 import (
 	"os"
-	"path/filepath"
-	"strings"
+
+	"mike/pkg/atomicfile"
 )
 
-// AtomicTempPrefix is used by WriteFileAtomic; watchers ignore these files to avoid reporting temporary names during renames.
-const AtomicTempPrefix = ".mike-tmp-"
-
-// Capped to ensure temporary filenames stay within NAME_MAX.
-const tempNameBaseMaxLen = 180
-
-// IsAtomicTemp reports whether path is one of WriteFileAtomic's temporary files.
+// IsAtomicTemp reports whether path is one of atomicfile's temporary files, the name a write carries
+// while it is in flight.
 func IsAtomicTemp(path string) bool {
-	return strings.HasPrefix(filepath.Base(path), AtomicTempPrefix)
+	return atomicfile.IsTemp(path)
 }
 
-// WriteFileAtomic replaces the file contents via a temporary file in the same directory to ensure atomicity. Existing files keep their mode; new files are 0644. Symlinks are refused to prevent redirection of containment-checked paths. The file is synced before renaming.
+// WriteFileAtomic replaces the file contents via a temporary file in the same directory to ensure atomicity. Existing files keep their mode; new files are 0644. The bytes are synced before renaming. Symlinks are refused here, before anything is opened, to prevent redirection of containment-checked paths — the write itself is atomicfile's.
 func WriteFileAtomic(path string, content []byte) error {
-	dir := filepath.Dir(path)
-
-	mode := os.FileMode(0644)
-	if fi, err := os.Lstat(path); err == nil {
-		if fi.Mode()&os.ModeSymlink != 0 {
-			return &os.PathError{Op: "write", Path: path, Err: os.ErrInvalid}
-		}
-		mode = fi.Mode().Perm()
+	if fi, err := os.Lstat(path); err == nil && fi.Mode()&os.ModeSymlink != 0 {
+		return &os.PathError{Op: "write", Path: path, Err: os.ErrInvalid}
 	}
-
-	pattern := AtomicTempPrefix
-	if base := filepath.Base(path); len(base) <= tempNameBaseMaxLen {
-		pattern += base + "-"
-	}
-	tmp, err := os.CreateTemp(dir, pattern)
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	// Best-effort removal of temporary files on failure to avoid hiding the primary error.
-	defer func() {
-		if err != nil {
-			_ = os.Remove(tmpName)
-		}
-	}()
-
-	if _, err = tmp.Write(content); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Chmod(mode); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err = tmp.Close(); err != nil {
-		return err
-	}
-	if err = os.Rename(tmpName, path); err != nil {
-		return err
-	}
-	return nil
+	_, err := atomicfile.Write(path, content, 0o644)
+	return err
 }

@@ -136,6 +136,54 @@ func TestProviderUnmarshalNormalizesReasoningEffort(t *testing.T) {
 	}
 }
 
+// TestProviderUnmarshalAcceptsAProviderWithNoModelList: an agent extension's row carries no model
+// list, so a provider whose `models` key is absent or null is a provider, not a malformed one.
+func TestProviderUnmarshalAcceptsAProviderWithNoModelList(t *testing.T) {
+	cases := []struct {
+		name    string
+		models  string
+		wantN   int
+		wantErr bool
+	}{
+		{name: "key absent", models: "", wantN: 0},
+		{name: "null", models: `,"models":null`, wantN: 0},
+		{name: "empty list", models: `,"models":[]`, wantN: 0},
+		{name: "one model", models: `,"models":[{"name":"gpt"}]`, wantN: 1},
+		{name: "names as strings", models: `,"models":["a","b"]`, wantN: 2},
+		{name: "a bare string", models: `,"models":"gpt"`, wantErr: true},
+		{name: "a model row nobody named", models: `,"models":[{"reasoning_effort":"low"}]`, wantErr: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"name":"p1","kind":"agent","url":"agent://pi"` + tc.models + `}`
+			var p Provider
+			err := json.Unmarshal([]byte(body), &p)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("a %s model list was accepted; refusing it is what stops a typo reading as no models", tc.name)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if len(p.Models) != tc.wantN {
+				t.Errorf("models = %d, want %d", len(p.Models), tc.wantN)
+			}
+
+			// The config body is a list of providers; the row has to read back inside one.
+			var list []Provider
+			if err := json.Unmarshal([]byte("["+body+"]"), &list); err != nil {
+				t.Fatalf("unmarshal as a config body: %v", err)
+			}
+			if len(list) != 1 || len(list[0].Models) != tc.wantN {
+				t.Errorf("config body read back %d provider(s) with %d model(s)", len(list), len(list[0].Models))
+			}
+		})
+	}
+}
+
 // TestKeyboardShortcutsEmptyCoversEveryField walks KeyboardShortcuts instead of naming its bindings:
 // a binding that joins the struct and stays out of Empty() makes an all-default set answer
 // "keyboard_shortcuts": {} instead of omitting the key. Each field is set on its own and must make

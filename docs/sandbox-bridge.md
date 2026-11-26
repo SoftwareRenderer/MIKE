@@ -50,9 +50,14 @@ Files pasted or dropped into a message are written to the task's worktree at `.m
 - **Stream Completeness**: Read results are only dispatched after the stream is fully drained or the context expires, preventing partial reads.
 - **Symmetry**: The host treats a closed LSP notification channel as a dead server and retires the session.
 
+### One writer, one grammar
+- **`write_file` and `edit_file` have one implementation each half runs.** A non-sandboxed task has the server hold the file; a sandboxed one has the bridge hold it. Both halves meet at `pkg/atomicfile` (temp name, chmod, sync, rename) and `pkg/textedit` (locate every replacement, refuse the whole call, build in one pass). The refusal sentences are what the model rewrites from, and an existing file's mode is what the task commits. A second copy of either is the copy nobody tests.
+- **The temporary name is a cross-boundary contract.** The bridge writes `atomicfile.TempPrefix` into a task's worktree, and the host's filters drop it by that same constant — `git.ShouldIgnoreFile`, the worktree watch, the fs_event route. A second prefix would broadcast a half-written file as a change and list it among the task's untracked files. Test: `backend/stream/atomic_write_watch_test.go`.
+
 ## Verification
 
 - **Bridge Logic**: `pkg/bridge/protocol/protocol_test.go` and `pkg/bridge/agent/committed_bridge_test.go`.
 - **Limits**: `pkg/bridge/protocol/frame_limit_test.go`, `pkg/bridge/client_limit_test.go`, `pkg/bridge/agent/read_limit_test.go`.
 - **File Uploads**: `backend/exec/task_files_test.go`, `backend/server/handler_task_upload_test.go`, `backend/git/exclude_test.go`.
 - **Symmetry/Race**: `backend/stream/app_stream_subscribe_race_test.go`.
+- **The writer and the grammar**: `pkg/atomicfile/atomicfile_test.go`, `pkg/textedit/textedit_test.go`, `backend/stream/atomic_write_watch_test.go`.

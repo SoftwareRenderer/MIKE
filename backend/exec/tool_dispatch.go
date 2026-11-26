@@ -1,7 +1,6 @@
 package exec
 
 import (
-	"cmp"
 	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
@@ -17,9 +16,9 @@ import (
 	"mike/backend/types"
 	"mike/pkg/bridge/protocol"
 	"mike/pkg/logging"
+	"mike/pkg/textedit"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 )
 
@@ -308,39 +307,26 @@ func (r *toolRunner) runWriteFile(ctx context.Context, args map[string]any, env 
 	return fmt.Sprintf("Wrote %d bytes to %s", len(content), path), true
 }
 
-// textEdit is one edit_file replacement as the provider sends it.
-type textEdit struct {
-	OldText string `json:"oldText"`
-	NewText string `json:"newText"`
-}
-
 func (r *toolRunner) runEditFile(ctx context.Context, args map[string]any, env *toolEnv) (string, bool) {
 	path, _ := args["path"].(string)
 	editsRaw, ok := args["edits"].(jsontext.Value)
 	if !ok {
-		// Try to marshal from the interface{}
 		editsRaw, _ = json.Marshal(args["edits"])
 	}
-	var edits []textEdit
+	var edits []protocol.Edit
 	if err := json.Unmarshal(editsRaw, &edits); err != nil {
 		return failed(fmt.Errorf("failed to parse edits: %v", err))
 	}
 	if len(edits) == 0 {
-		return failed(errors.New("no edits provided"))
+		return failed(textedit.ErrNoEdits)
 	}
 
-	// In sandbox mode, delegate the read-modify-write to the sandbox agent via MethodEdit. This
-	// keeps the file content inside the container and applies the replacements atomically under a
-	// per-file lock. The edit callback is nil in non-sandbox mode, falling back to read+edit+write
-	// below.
+	// A sandboxed task has the bridge hold the file, so the content stays inside the container and
+	// the replacement runs under its per-file lock. The callback is nil when the task is not sandboxed.
 	if edit := env.sb.edit; edit != nil {
-		editsProto := make([]protocol.Edit, len(edits))
-		for i, e := range edits {
-			editsProto[i] = protocol.Edit{OldText: e.OldText, NewText: e.NewText}
-		}
-		if err := edit(ctx, path, editsProto); err != nil {
+		if err := edit(ctx, path, edits); err != nil {
 			if env.recoverBridge(err.Error()) {
-				if err := edit(ctx, path, editsProto); err != nil {
+				if err := edit(ctx, path, edits); err != nil {
 					return failed(err)
 				}
 			} else {
@@ -362,9 +348,13 @@ func (r *toolRunner) runEditFile(ctx context.Context, args map[string]any, env *
 			return failed(err)
 		}
 	}
-	result, refuse := applyEditReplacements(string(data), edits)
-	if refuse != "" {
-		return refuse, false
+	replacements := make([]textedit.Edit, len(edits))
+	for i, e := range edits {
+		replacements[i] = textedit.Edit{OldText: e.OldText, NewText: e.NewText}
+	}
+	result, err := textedit.Apply(string(data), replacements)
+	if err != nil {
+		return failed(err)
 	}
 	write := env.writer()
 	if err := write(ctx, path, result); err != nil {
@@ -378,52 +368,6 @@ func (r *toolRunner) runEditFile(ctx context.Context, args map[string]any, env *
 		}
 	}
 	return fmt.Sprintf("Edited %s (%d edit(s) applied)", path, len(edits)), true
-}
-
-// applyEditReplacements applies every edit to content in one pass. A non-empty second result is the
-// message naming the edit it refused, and nothing was written.
-//
-// Positions are all found in the original content, so an oldText must be present exactly once and no
-// two edits may overlap. Building the result once is O(file size); rebuilding a full string per edit
-// would be O(edits × file size).
-func applyEditReplacements(content string, edits []textEdit) (string, string) {
-	type editPos struct {
-		index   int
-		start   int
-		end     int
-		newText string
-	}
-	var positions []editPos
-	for i, e := range edits {
-		if e.OldText == "" {
-			return "", fmt.Sprintf("Error: edits[%d].oldText is empty", i)
-		}
-		idx := strings.Index(content, e.OldText)
-		if idx == -1 {
-			return "", fmt.Sprintf("Error: edits[%d].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got %d lines in file.", i, len(strings.Split(content, "\n")))
-		}
-		if strings.Contains(content[idx+1:], e.OldText) {
-			return "", fmt.Sprintf("Error: edits[%d].oldText appears multiple times in file. Make it more specific by including surrounding context.", i)
-		}
-		positions = append(positions, editPos{index: i, start: idx, end: idx + len(e.OldText), newText: e.NewText})
-	}
-	slices.SortFunc(positions, func(a, b editPos) int { return cmp.Compare(a.start, b.start) })
-	for i := range len(positions) - 1 {
-		if positions[i].end > positions[i+1].start {
-			return "", fmt.Sprintf("Error: edits[%d] and edits[%d] overlap. Merge them into a single edit or ensure they don't overlap.", positions[i].index, positions[i+1].index)
-		}
-	}
-
-	var b strings.Builder
-	b.Grow(len(content) + 64)
-	prev := 0
-	for _, p := range positions {
-		b.WriteString(content[prev:p.start])
-		b.WriteString(p.newText)
-		prev = p.end
-	}
-	b.WriteString(content[prev:])
-	return b.String(), ""
 }
 
 func (r *toolRunner) runBash(ctx context.Context, args map[string]any, env *toolEnv) (string, bool) {

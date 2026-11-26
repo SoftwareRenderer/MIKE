@@ -1417,7 +1417,7 @@ func (asm *AppStreamManager) sendInitialProjectData(ctx context.Context, client 
 			asm.WatchWorktree(task.ID, projectID)
 		}
 		if diffResult, err := asm.worktreeMgr.GetTaskDiff(task.ID, baseRef, ""); err == nil && diffResult.HasChanges() {
-			event := diffStatsOf(diffResult)
+			event := BuildDiffStatsEvent(projectID, task.ID, diffResult)
 			// Check if task branch commits are already merged into the target branch.
 			event.AlreadyMerged = asm.computeAlreadyMerged(projectID, task)
 			fields := diffStatsKeys(event)

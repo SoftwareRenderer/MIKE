@@ -54,7 +54,7 @@ func ValidateRelPath(rel string) error {
 			return fmt.Errorf("path segment is too long (max %d characters)", MaxRelSegmentLen)
 		}
 	}
-	if strings.HasPrefix(rel[strings.LastIndex(rel, "/")+1:], AtomicTempPrefix) {
+	if IsAtomicTemp(rel) {
 		return fmt.Errorf("file name is reserved")
 	}
 	return nil

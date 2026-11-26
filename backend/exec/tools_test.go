@@ -14,6 +14,7 @@ import (
 
 	"mike/backend/types"
 	"mike/pkg/bridge/protocol"
+	"mike/pkg/textedit"
 )
 
 // --- tool families ---
@@ -477,7 +478,9 @@ func TestExecuteTool_CallbackFailureIsTheAnswer(t *testing.T) {
 				return &executionState{
 					projectName: "test",
 					sandboxEdit: func(_ context.Context, path string, edits []protocol.Edit) error {
-						return fmt.Errorf("edits[0].oldText not found in file. Ensure it matches exactly (whitespace, indentation). Got 1 lines in file.")
+						// The bridge's answer is textedit's sentence, not one retyped here.
+						_, err := textedit.Apply("hello world", []textedit.Edit{{OldText: "nope", NewText: "x"}})
+						return err
 					},
 				}
 			},

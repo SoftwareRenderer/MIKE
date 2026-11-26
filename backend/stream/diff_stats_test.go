@@ -1,6 +1,6 @@
 package stream
 
-// ComputeDiffStats is the one place the diff panel's numbers are computed: every producer of a
+// computeDiffStats is the one place the diff panel's numbers are computed: every producer of a
 // task_diff_stats frame (the worktree watcher, the executor, the done-task snapshot) reads them from
 // here, so a field must mean the same thing whichever of them sent it.
 
@@ -10,7 +10,7 @@ import (
 	"mike/backend/git"
 )
 
-func TestComputeDiffStatsCountsVisibleFilesOnly(t *testing.T) {
+func TestDiffStatsCountsVisibleFilesOnly(t *testing.T) {
 	tests := []struct {
 		name                 string
 		tracked              map[string]*git.TrackedDiffFile
@@ -91,7 +91,7 @@ func TestComputeDiffStatsCountsVisibleFilesOnly(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ComputeDiffStats(&git.TaskDiff{Tracked: tt.tracked, Untracked: tt.untracked})
+			got := computeDiffStats(&git.TaskDiff{Tracked: tt.tracked, Untracked: tt.untracked})
 			if got.TrackedAdd != tt.wantTracked || got.TrackedDel != tt.wantUntracked {
 				t.Errorf("tracked add/del = %d/%d, want %d/%d",
 					got.TrackedAdd, got.TrackedDel, tt.wantTracked, tt.wantUntracked)

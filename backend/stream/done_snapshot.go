@@ -73,7 +73,7 @@ func MaterializeDoneTaskDiff(st *store.Store, wm *git.WorktreeManager, projectID
 
 	// A stored snapshot holds the shared keys only. It belongs to no connection, and already_merged is
 	// recomputed when the snapshot is replayed.
-	statsJSON, err := json.Marshal(diffStatsKeys(diffStatsOf(diffResult)))
+	statsJSON, err := json.Marshal(diffStatsKeys(BuildDiffStatsEvent(projectID, task.ID, diffResult)))
 	if err != nil {
 		return nil, err
 	}

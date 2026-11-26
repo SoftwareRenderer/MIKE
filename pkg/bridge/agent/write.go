@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"mike/pkg/atomicfile"
 	"mike/pkg/bridge/protocol"
 )
 
@@ -16,18 +17,16 @@ func handleWrite(h *handler, out io.Writer, req *protocol.Request) error {
 		return err
 	}
 
-	// Create parent directories
 	dir := filepath.Dir(p.Path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("mkdir %s: %w", dir, err)
 	}
 
-	n, err := writeAtomic(p.Path, p.Content)
+	n, err := atomicfile.Write(p.Path, []byte(p.Content), 0o644)
 	if err != nil {
 		return err
 	}
 
-	// Send result with bytes written
 	result := protocol.NewResult(req.MsgID, protocol.NewUint64Result(uint64(n)))
 	return h.writeFrame(out, result)
 }

@@ -8,6 +8,7 @@ import (
 
 	"mike/backend/fsutil"
 	"mike/backend/git"
+	"mike/pkg/atomicfile"
 )
 
 type fsEvent struct{ op, path string }
@@ -61,7 +62,7 @@ func TestProjectWatcherIgnoresAtomicTempFiles(t *testing.T) {
 	dir := t.TempDir()
 	events := watcherRecorder(t, dir)
 
-	temp := filepath.Join(dir, fsutil.AtomicTempPrefix+"notes.txt-4028137")
+	temp := filepath.Join(dir, atomicfile.TempPrefix+"notes.txt-4028137")
 	if err := os.WriteFile(temp, []byte("half-written"), 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -109,11 +110,12 @@ func TestProjectWatcherReportsAtomicSave(t *testing.T) {
 	}
 }
 
-// TestAtomicTempNameIsFilteredByEveryRule checks every filter against a name made
-// by the same os.CreateTemp call and pattern the writer uses, not one guessed.
+// TestAtomicTempNameIsFilteredByEveryRule checks every host-side filter against a name
+// made by the writer's own pattern: the guest writes this name into a task's worktree, and a filter
+// that stops matching it broadcasts a half-written file as a change.
 func TestAtomicTempNameIsFilteredByEveryRule(t *testing.T) {
 	dir := t.TempDir()
-	f, err := os.CreateTemp(dir, fsutil.AtomicTempPrefix+"main.go-")
+	f, err := os.CreateTemp(dir, atomicfile.TempPrefix+"main.go-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +123,7 @@ func TestAtomicTempNameIsFilteredByEveryRule(t *testing.T) {
 	_ = f.Close()
 
 	if !fsutil.IsAtomicTemp(name) {
-		t.Errorf("fsutil.IsAtomicTemp does not recognise the name it generates: %s", filepath.Base(name))
+		t.Errorf("fsutil.IsAtomicTemp does not recognise the writer's name: %s", filepath.Base(name))
 	}
 	// The worktree watcher's gate.
 	if !git.ShouldIgnoreFile(name) {

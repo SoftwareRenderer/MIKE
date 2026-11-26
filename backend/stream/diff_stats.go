@@ -7,20 +7,16 @@ import (
 	"mike/backend/types"
 )
 
-// DiffStats holds computed diff statistics for a task.
-type DiffStats struct {
+// diffStats counts what a task's reader sees, internal files excluded.
+type diffStats struct {
 	VisibleTracked   int
 	VisibleUntracked int
 	UntrackedLines   int
 	TrackedAdd       int
 	TrackedDel       int
-	AlreadyMerged    bool
 }
 
-// ComputeDiffStats computes diff statistics from a task diff result, excluding internal files.
-//
-// AlreadyMerged defaults to false; the caller sets it after verifying with worktreeMgr.IsMergedInto().
-func ComputeDiffStats(diffResult *git.TaskDiff) *DiffStats {
+func computeDiffStats(diffResult *git.TaskDiff) *diffStats {
 	var untrackedLines, trackedAdd, trackedDel, visibleTracked, visibleUntracked int
 	for path, f := range diffResult.Tracked {
 		if git.IsInternalFile(path) {
@@ -42,7 +38,7 @@ func ComputeDiffStats(diffResult *git.TaskDiff) *DiffStats {
 		}
 	}
 
-	return &DiffStats{
+	return &diffStats{
 		VisibleTracked:   visibleTracked,
 		VisibleUntracked: visibleUntracked,
 		UntrackedLines:   untrackedLines,
@@ -51,11 +47,14 @@ func ComputeDiffStats(diffResult *git.TaskDiff) *DiffStats {
 	}
 }
 
-// diffStatsOf counts one computed diff into what a producer publishes. It leaves out already_merged,
-// because only the caller holds the target branch to check the task against.
-func diffStatsOf(diffResult *git.TaskDiff) DiffStatsEvent {
-	stats := ComputeDiffStats(diffResult)
+// BuildDiffStatsEvent assembles the shared task_diff_stats keys from one computed diff. A producer
+// adds only what it alone holds: a watcher's removed_files delta, and already_merged, which needs the
+// target branch.
+func BuildDiffStatsEvent(projectID, taskID string, diffResult *git.TaskDiff) DiffStatsEvent {
+	stats := computeDiffStats(diffResult)
 	return DiffStatsEvent{
+		ProjectID:           projectID,
+		TaskID:              taskID,
 		DiffHash:            DiffHash(diffResult),
 		ShortStat:           diffResult.ShortStat,
 		FilesN:              stats.VisibleTracked + stats.VisibleUntracked,
@@ -69,8 +68,7 @@ func diffStatsOf(diffResult *git.TaskDiff) DiffStatsEvent {
 	}
 }
 
-// diffStatsKeys are the task_diff_stats keys every producer shares. Each producer adds what only it
-// knows: a watcher's removed_files delta, a frame's task_id, and already_merged, which a snapshot omits.
+// diffStatsKeys is the frame map of the keys every producer shares.
 func diffStatsKeys(ev DiffStatsEvent) map[string]any {
 	return map[string]any{
 		"hash":                  ev.DiffHash,

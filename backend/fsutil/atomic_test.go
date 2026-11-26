@@ -114,30 +114,6 @@ func TestWriteFileAtomicRefusesSymlinkTarget(t *testing.T) {
 	assertNoTempLeft(t, dir)
 }
 
-func TestIsAtomicTemp(t *testing.T) {
-	cases := []struct {
-		path string
-		want bool
-	}{
-		{".mike-tmp-foo.go-1234", true},
-		{"/work/proj/.mike-tmp-foo.go-1234", true},
-		// The names a user could plausibly have are not ours.
-		{"foo.go", false},
-		{".mike-tmp", false},
-		{"mike-tmp-foo.go-1", false},
-		{"foo.mike-tmp.go", false},
-		{".mike-tmp-notes.md", true}, // ours: the prefix is the contract
-	}
-	for _, tc := range cases {
-		if got := IsAtomicTemp(tc.path); got != tc.want {
-			t.Errorf("IsAtomicTemp(%q) = %v, want %v", tc.path, got, tc.want)
-		}
-	}
-}
-
-// The name/filter coupling is proven where it bites:
-// backend/stream/atomic_write_watch_test.go runs a real watcher over a real write.
-
 func mustRead(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

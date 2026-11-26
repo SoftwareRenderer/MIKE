@@ -3,6 +3,8 @@ package fsutil
 import (
 	"strings"
 	"testing"
+
+	"mike/pkg/atomicfile"
 )
 
 // ValidateRelPath decides whether a client-supplied relative path may be joined
@@ -25,8 +27,8 @@ func TestValidateRelPathRejects(t *testing.T) {
 		"newline":            "a\nb",
 		"tab":                "a\tb",
 		"del":                "a\x7fb",
-		"reserved temp name": AtomicTempPrefix + "x",
-		"nested temp name":   "tmp/" + AtomicTempPrefix + "x",
+		"reserved temp name": atomicfile.TempPrefix + "x",
+		"nested temp name":   "tmp/" + atomicfile.TempPrefix + "x",
 		"over-long path":     strings.Repeat("a", MaxRelPathLen+1),
 		"over-long segment":  strings.Repeat("a", MaxRelSegmentLen+1),
 	}
