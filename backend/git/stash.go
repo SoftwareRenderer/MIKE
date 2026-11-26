@@ -17,6 +17,10 @@ func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("stash list: %w", err)
 	}
+	// `git stash push` refuses a tree with unmerged paths; the index, not git's wording, says so.
+	if paths := wm.unmergedPaths(repoPath); len(paths) > 0 {
+		return "", &PushConflictError{Paths: paths}
+	}
 	if out, err := wm.gitRunInGitDir(repoPath, "stash", "push", "-u", "-m", message); err != nil {
 		return "", fmt.Errorf("stash push: %s", gitMessage(out, err))
 	}
@@ -51,8 +55,8 @@ func (wm *WorktreeManager) PushStash(repoPath, message string) (string, error) {
 // it, so on a shared stack one merge restores another's work and keeps its own entry, with no error
 // on either side — hence identity by hash. A failed apply leaves the entry on the stack: dropping
 // what could not be applied turns a resolvable conflict into lost work. When the failure left unmerged
-// paths the error is a *RestoreConflictError naming them, which is how a caller tells a conflict it must
-// report from a refusal that left the tree alone.
+// paths the error is a *RestoreConflictError naming them; a refusal that left the tree alone is a
+// *RestoreRefusedError carrying git's reason.
 //
 // The restore keeps the pushed work's staged/unstaged split: a plain apply returns a modification
 // unstaged, and commit-and-done commits the index only.
@@ -85,7 +89,7 @@ func (wm *WorktreeManager) PopStashByHash(dir, hash string) (bool, error) {
 		if paths := wm.unmergedPaths(dir); len(paths) > 0 {
 			return true, &RestoreConflictError{Hash: hash, Paths: paths, GitMessage: gitMessage(out, err)}
 		}
-		return true, fmt.Errorf("stash apply %s: %s", shortHash(hash), gitMessage(out, err))
+		return true, &RestoreRefusedError{Hash: hash, GitMessage: gitMessage(out, err)}
 	}
 	if err := wm.DropStashByHash(dir, hash); err != nil {
 		// The work is already restored; a leftover entry is cosmetic, not data loss.

@@ -95,3 +95,32 @@ func TestPushStashCarriesGitReason(t *testing.T) {
 		t.Errorf("error %q does not say why git refused", err)
 	}
 }
+
+// A checkout left holding conflict markers cannot be parked — `git stash push` refuses a tree with unmerged
+// paths. The refusal is read from the index rather than from git's stderr, and it names the files: the
+// bracket that follows opens with `git checkout -f`, and only the person can resolve them.
+func TestPushStashRefusesADirectoryMidConflict(t *testing.T) {
+	repoDir, _, _, _, _, wm := setupStashTest(t)
+	writeFile(t, repoDir, "shared.txt", "the original\n")
+	runGit(t, repoDir, "add", "shared.txt")
+	runGit(t, repoDir, "commit", "-qm", "shared")
+	runGit(t, repoDir, "checkout", "-qb", "side")
+	writeFile(t, repoDir, "shared.txt", "the side's wording\n")
+	runGit(t, repoDir, "commit", "-qam", "side")
+	runGit(t, repoDir, "checkout", "master")
+	writeFile(t, repoDir, "shared.txt", "the person's wording\n")
+	runGit(t, repoDir, "commit", "-qam", "mine")
+	_ = wm.gitRun(repoDir, "merge", "side", "--no-edit") // conflicts; left open the way a restore leaves it
+
+	_, err := wm.PushStash(repoDir, StashMessageForAutoMerge("mid-conflict-task"))
+	var blocked *PushConflictError
+	if !errors.As(err, &blocked) {
+		t.Fatalf("PushStash = %v, want *PushConflictError", err)
+	}
+	if strings.Join(blocked.Paths, ",") != "shared.txt" {
+		t.Errorf("Paths = %v, want the file left unmerged", blocked.Paths)
+	}
+	if n := countStashEntries(t, repoDir); n != 0 {
+		t.Errorf("%d entries on the stack, want 0 — the refusal took the tree anyway", n)
+	}
+}

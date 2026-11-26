@@ -13,12 +13,14 @@ import (
 
 	"github.com/google/uuid"
 
+	"mike/backend/errs"
 	"mike/backend/git"
 	"mike/backend/httputil"
 	"mike/backend/store"
 	"mike/backend/stream"
 	"mike/backend/types"
 	"mike/pkg/logging"
+	"mike/pkg/subproc"
 )
 
 // mergeOrchestrator owns what happens to a task's commits after a turn ends: branch, merge,
@@ -485,7 +487,7 @@ func (m *mergeOrchestrator) CommitAndMerge(projectID, taskID, worktreePath, comm
 		task, _ := m.store.GetTaskByID(taskID)
 		if err := m.MergeBranch(projectID, taskID, task); err != nil {
 			if !MergedDelivered(err) {
-				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", err)
+				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("merge failed: %v", MergeCause(err))
 			}
 			return err
 		}
@@ -501,7 +503,7 @@ func (m *mergeOrchestrator) CommitAndMerge(projectID, taskID, worktreePath, comm
 func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Task) error {
 	project, err := m.store.GetProject(projectID)
 	if err != nil {
-		return fmt.Errorf("get project: %w", err)
+		return mergeFault("read the project", err)
 	}
 
 	taskBranch := task.Branch
@@ -532,7 +534,7 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent_task_id=%s not found: %v, aborting merge", task.ParentTaskID, err)
 			m.logSystemMessage(taskID, task.CurrentThreadID, "error",
 				fmt.Sprintf("Error: parent task %s not found — merge aborted.", task.ParentTaskID))
-			return fmt.Errorf("parent task %s not found", task.ParentTaskID)
+			return errs.Conflict(fmt.Sprintf("parent task %s no longer exists, so this task has no branch to merge into", task.ParentTaskID))
 		}
 		if parent.Branch == "" {
 			logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("parent %s has no branch, creating it now", parent.ID)
@@ -540,7 +542,7 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 				logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create parent branch: %v, aborting merge", err)
 				m.logSystemMessage(taskID, task.CurrentThreadID, "error",
 					fmt.Sprintf("Error: could not create branch for parent task %q — merge aborted: %v", parent.Title, err))
-				return fmt.Errorf("create parent branch: %w", err)
+				return mergeFault("create the parent task's branch", err)
 			}
 			parent, _ = m.store.GetTaskByID(task.ParentTaskID)
 		}
@@ -607,7 +609,7 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 					logging.For(logging.Merge).With(logging.TaskID, taskID).Warnf("failed to create branch %q from %q: %s", targetBranch, startPoint, string(out))
 					m.logSystemMessage(taskID, task.CurrentThreadID, "error",
 						fmt.Sprintf("Error: could not create branch %q from %q — merge skipped.", targetBranch, startPoint))
-					return fmt.Errorf("create branch %q: %w", targetBranch, err)
+					return mergeFault(fmt.Sprintf("create branch %s from %s", targetBranch, startPoint), err)
 				}
 			} else {
 				logging.For(logging.Merge).With(logging.TaskID, taskID).Infof("created branch %q from %q", targetBranch, startPoint)
@@ -622,7 +624,7 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 
 	// Sync target branch into task branch first (catches conflicts early).
 	if syncErr := m.syncTargetIntoTask(projectID, taskID, targetBranch, taskBranch, task); syncErr != nil {
-		return fmt.Errorf("sync target into task: %w", syncErr)
+		return mergeFault(fmt.Sprintf("merge %s into the task branch %s", targetBranch, taskBranch), syncErr)
 	}
 	task, _ = m.store.GetTaskByID(taskID)
 	if task.HasMergeConflict {
@@ -631,7 +633,8 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 	}
 
 	if mergeInWorktree != "" {
-		err := m.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID, task.ParentTaskID)
+		err := mergeFault(fmt.Sprintf("merge %s into %s", taskBranch, targetBranch),
+			m.mergeInWorktree(projectID, mergeInWorktree, targetBranch, taskBranch, taskID, task.ParentTaskID))
 		if err == nil && task.ParentTaskID != "" {
 			m.broadcastDiffStats(projectID, task.ParentTaskID)
 		}
@@ -640,7 +643,8 @@ func (m *mergeOrchestrator) MergeBranch(projectID, taskID string, task *types.Ta
 	// Root tasks only reach mergeInProject (child tasks always merge into the
 	// parent's worktree above). The worktree routing for the target branch
 	// happens inside it, under the project merge lock.
-	err = m.mergeInProject(projectID, targetBranch, taskBranch, taskID)
+	err = mergeFault(fmt.Sprintf("merge %s into %s", taskBranch, targetBranch),
+		m.mergeInProject(projectID, targetBranch, taskBranch, taskID))
 	if err == nil && task.ParentTaskID != "" {
 		m.broadcastDiffStats(projectID, task.ParentTaskID)
 	}
@@ -702,7 +706,75 @@ func (m *mergeOrchestrator) mergeInto(projectID, dir, targetBranch, taskBranch, 
 		m.logConflictedRestore(taskID, targetBranch, conflict)
 		return fmt.Errorf("%w: %w", errMergedWithConflictedRestore, bracketErr)
 	}
+	if bracketErr != nil {
+		if refusal := parkedWorkRefusal(m.workingCopyName(projectID, dir), targetBranch, git.StashMessageForAutoMerge(taskID), landed, bracketErr); refusal != nil {
+			return refusal
+		}
+	}
 	return bracketErr
+}
+
+// The two bounds below keep a refusal readable. The whole of what git said is in the log line the click
+// writes, and the count of conflicted files is stated beside the list, so neither has to be complete.
+const (
+	refusalReasonMax = 160
+	refusalPathsMax  = 5
+)
+
+// parkedWorkRefusal is the person's own state stopping a stash bracket: the working copy is already
+// conflicted so nothing could be parked, or the work the bracket parked cannot be put back. Neither is a
+// server fault, so both answer 409 naming what to open — the conflicted files, or the stash entry that
+// still holds the parked work. subject names whose working copy it is, because that is the directory to
+// open. It returns nil when err holds neither refusal, leaving the failure to mergeFault.
+func parkedWorkRefusal(subject, targetBranch, stashLabel string, landed bool, err error) error {
+	var push *git.PushConflictError
+	if errors.As(err, &push) {
+		listed := push.Paths
+		if len(listed) > refusalPathsMax {
+			listed = listed[:refusalPathsMax]
+		}
+		return errs.Conflict(fmt.Sprintf(
+			"%s has unresolved conflicts in %d file(s): %s — resolve them there, then click Commit and move to Done again",
+			subject, len(push.Paths), strings.Join(listed, ", ")))
+	}
+	var refused *git.RestoreRefusedError
+	if errors.As(err, &refused) {
+		failure := fmt.Sprintf("%s could not take back its parked work", subject)
+		if landed {
+			failure = fmt.Sprintf("merged into %s, but %s could not take back its parked work", targetBranch, subject)
+		}
+		return errs.Conflict(fmt.Sprintf("%s: %s — it is still in the stash (%s)",
+			failure, subproc.Summarize([]byte(refused.GitMessage), refusalReasonMax), stashLabel))
+	}
+	return nil
+}
+
+// workingCopyName names whose working copy a directory is, for the sentence a refused bracket writes.
+func (m *mergeOrchestrator) workingCopyName(projectID, dir string) string {
+	if project, err := m.store.GetProject(projectID); err == nil && project.Path == dir {
+		return "the project's checkout"
+	}
+	return "the task's worktree"
+}
+
+// mergeFault is the classification a merge failure carries to the transport: one that already states its
+// class passes through, and anything else becomes a server fault whose browser text is MIKE's sentence for
+// what it was doing, with git's reason kept for the log. A merge that delivered is never re-written —
+// errs.Operation unwraps only to its class, which would hide the sentinel MergedDelivered reads.
+func mergeFault(operation string, err error) error {
+	if err == nil || MergedDelivered(err) || errs.Message(err) != "" {
+		return err
+	}
+	return errs.Operation(operation, err)
+}
+
+// MergeCause is what a failed merge logs: an operation keeps its cause beside the sentence the browser
+// reads, and an unclassified error is its own cause.
+func MergeCause(err error) error {
+	if cause := errs.Cause(err); cause != nil {
+		return cause
+	}
+	return err
 }
 
 // errMergedWithConflictedRestore is a merge that delivered the work to the target branch,
@@ -889,6 +961,9 @@ func (m *mergeOrchestrator) syncTargetIntoTask(projectID, taskID, targetBranch, 
 	})
 	if errors.Is(syncErr, git.ErrKeepStash) {
 		return nil
+	}
+	if refusal := parkedWorkRefusal("the task's worktree", targetBranch, git.StashMessageForSyncMerge(taskID), false, syncErr); refusal != nil {
+		return refusal
 	}
 	return syncErr
 }

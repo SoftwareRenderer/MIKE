@@ -275,8 +275,15 @@ neither of the project's switches is what refused it, and that the person's own 
   git's phrasing does not tell them apart. What a caller does with it is
   `docs/commit-and-done.md → Commit and Move to Done` — the merge paths finish the task on it, which is why the git layer states
   it separately instead of returning one error for the bracket.
-- Tests: `backend/git/stash_identity_test.go` (identity, the staged split, the conflicted restore),
-  `push_stash_test.go`, `stash_bracket_test.go`, `backend/exec/sync_merge_test.go`.
+- **A refused apply is the other answer, and it is typed too.** `PopStashByHash` returns
+  `*RestoreRefusedError` (the entry's hash and git's one-line reason) when the apply left the tree alone:
+  the person looks in the stash, not at the files.
+- **A directory already holding unmerged paths cannot be parked.** `git stash push` refuses it, printing
+  one filename on stderr and exiting 1, so `PushStash` reads the same unmerged index *before* the push and
+  returns `*PushConflictError` naming the files. The bracket must not proceed on that refusal — it opens
+  with `git checkout -f` — and the person, not the server, is the only one who can clear it.
+- Tests: `backend/git/stash_identity_test.go` (identity, the staged split, the conflicted restore, the
+  typed refusal), `push_stash_test.go`, `stash_bracket_test.go`, `backend/exec/sync_merge_test.go`.
   The last uses its stash-ref injection instead of an index lock: a locked index blocks the forced
   checkout too, so the loss never happens and the test passes vacuously.
 

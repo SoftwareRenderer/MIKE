@@ -1433,6 +1433,143 @@ func TestHandleCommitAndDone_DoneWhenOnlyTheProjectOwnsTheConflict(t *testing.T)
 	}
 }
 
+// commitError reads the sentence the click answered with. "internal error" is what an unclassified failure
+// reads as, which is the regression these two tests exist to keep out.
+func commitError(t *testing.T, rr *httptest.ResponseRecorder) string {
+	t.Helper()
+	var body map[string]string
+	if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode body %s: %v", rr.Body.String(), err)
+	}
+	return body["error"]
+}
+
+// leaveProjectCheckoutMidConflict leaves the project's own checkout holding an unresolved merge — what a
+// parked-work restore that conflicted leaves behind, and the state the next click has to park.
+func leaveProjectCheckoutMidConflict(t *testing.T, dir string) {
+	t.Helper()
+	write := func(content string) {
+		if err := os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		testgit.Git(t, dir, "add", "conflict.txt")
+	}
+	write("the original\n")
+	testgit.Git(t, dir, "commit", "-m", "shared line")
+	testgit.Git(t, dir, "checkout", "-qb", "conflicting-side")
+	write("the side's wording\n")
+	testgit.Git(t, dir, "commit", "-m", "the side's wording")
+	testgit.Git(t, dir, "checkout", "master")
+	write("the person's wording\n")
+	testgit.Git(t, dir, "commit", "-m", "the person's wording")
+	if _, err := git.Run(dir, "merge", "conflicting-side", "--no-edit"); err == nil {
+		t.Fatal("the fixture must leave the checkout mid-merge")
+	}
+}
+
+// TestHandleCommitAndDoneNamesTheCheckoutThatCannotBeParked: the click's merge has to park the project's own
+// in-progress work, and a checkout already holding conflict markers cannot be parked. The person has to be
+// told which files to resolve — "internal error" sends them looking for a server fault they did not cause.
+func TestHandleCommitAndDoneNamesTheCheckoutThatCannotBeParked(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	h.commitQueue = exec.NewCommitQueue()
+	proj, err := s.GetProject(projID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaveProjectCheckoutMidConflict(t, proj.Path)
+
+	task := &types.Task{ID: "park-blocked", ProjectID: projID, Title: "park blocked", Prompt: "work",
+		Status: types.StatusReview, Branch: "task/park-blocked", CurrentThreadID: "th-park-blocked"}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, _, err := h.worktreeMgr.CreateWorktree(projID, task.ID, task.Branch, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "task_note.md"), []byte("task work\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testgit.Git(t, wtPath, "add", "task_note.md")
+
+	rr := postCommitAndDone(t, h, projID, task.ID)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("commit-and-done status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	answer := commitError(t, rr)
+	if !strings.Contains(answer, "conflict.txt") {
+		t.Errorf("the answer does not name the file to resolve: %q", answer)
+	}
+	if strings.Contains(answer, "internal error") {
+		t.Errorf("the person's own checkout is reported as a server fault: %q", answer)
+	}
+	updated, err := s.GetTask(projID, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status == types.StatusDone {
+		t.Error("the task is Done although its branch never reached the target")
+	}
+	if out := testgit.GitOutput(t, proj.Path, "ls-tree", "--name-only", "master"); strings.Contains(out, "task_note.md") {
+		t.Error("the task's work was merged onto master despite the refused park")
+	}
+}
+
+// TestHandleCommitAndDoneNamesTheStrandedParkedWork: the merge landed, but the person's own untracked file
+// sits at a path the task also writes, so the stash restore is refused and their work stays on the stack.
+// The answer has to say where it is; the task itself waits in Review for that to be settled.
+func TestHandleCommitAndDoneNamesTheStrandedParkedWork(t *testing.T) {
+	h, s, projID := newTaskHandlerWithExecutor(t)
+	h.commitQueue = exec.NewCommitQueue()
+	proj, err := s.GetProject(projID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	task := &types.Task{ID: "park-stranded", ProjectID: projID, Title: "park stranded", Prompt: "work",
+		Status: types.StatusReview, Branch: "task/park-stranded", CurrentThreadID: "th-park-stranded"}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	wtPath, _, err := h.worktreeMgr.CreateWorktree(projID, task.ID, task.Branch, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wtPath, "notes.md"), []byte("the task's notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	testgit.Git(t, wtPath, "add", "notes.md")
+	// The person's in-progress work: the same path, untracked, so nothing can merge the two.
+	if err := os.WriteFile(filepath.Join(proj.Path, "notes.md"), []byte("the person's notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	rr := postCommitAndDone(t, h, projID, task.ID)
+
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("commit-and-done status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	answer := commitError(t, rr)
+	if !strings.Contains(answer, git.StashMessageForAutoMerge(task.ID)) {
+		t.Errorf("the answer does not say which stash entry holds the person's work: %q", answer)
+	}
+	if strings.Contains(answer, "internal error") {
+		t.Errorf("the person's own file is reported as a server fault: %q", answer)
+	}
+	if out := testgit.GitOutput(t, proj.Path, "stash", "list"); !strings.Contains(out, git.StashMessageForAutoMerge(task.ID)) {
+		t.Errorf("the parked work is gone from the stack: %q", out)
+	}
+	updated, err := s.GetTask(projID, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status == types.StatusDone {
+		t.Error("the task moved to Done while the person's own work is still stranded in the stash")
+	}
+}
+
 // --- base_ref is a root task's own: nesting a task drops it ---
 // --- base_ref is a root task's own: nesting a task drops it ---
 

@@ -338,11 +338,12 @@ func TestPopStashByHashNamesThePathsItCouldNotRestore(t *testing.T) {
 	}
 }
 
-// TestPopStashByHashLeavesARefusalUnclassified: an apply git refused outright left the tree alone, so
+// TestPopStashByHashTypesARefusalApartFromAConflict: an apply git refused outright left the tree alone, so
 // there is nothing for a person to resolve. Only an unmerged index is a conflict — sniffing git's text
-// would call this one too — and a refusal still keeps the saved state, because dropping what could not
-// be applied turns a recoverable restore into work that no longer exists anywhere.
-func TestPopStashByHashLeavesARefusalUnclassified(t *testing.T) {
+// would call this one too — and each shape gets its own type, because the person is told to resolve files
+// in one case and to look in the stash in the other. A refusal keeps the saved state either way, because
+// dropping what could not be applied turns a recoverable restore into work that no longer exists anywhere.
+func TestPopStashByHashTypesARefusalApartFromAConflict(t *testing.T) {
 	repoDir, _, _, _, _, wm := setupStashTest(t)
 
 	untracked := filepath.Join(repoDir, "new.txt")
@@ -365,6 +366,16 @@ func TestPopStashByHashLeavesARefusalUnclassified(t *testing.T) {
 	var conflict *RestoreConflictError
 	if errors.As(restoreErr, &conflict) {
 		t.Errorf("a refusal that left no conflict is reported as one: %v", restoreErr)
+	}
+	var refused *RestoreRefusedError
+	if !errors.As(restoreErr, &refused) {
+		t.Fatalf("want *RestoreRefusedError, got %T: %v — the caller cannot tell the person where their work is", restoreErr, restoreErr)
+	}
+	if refused.Hash != hash {
+		t.Errorf("Hash = %q, want %q", refused.Hash, hash)
+	}
+	if refused.GitMessage == "" {
+		t.Error("GitMessage is empty: the only thing that says why the apply was refused is gone")
 	}
 
 	if content, rerr := os.ReadFile(untracked); rerr != nil || string(content) != "written again since the push\n" {

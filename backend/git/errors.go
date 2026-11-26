@@ -30,6 +30,31 @@ func (e *RestoreConflictError) Error() string {
 		shortHash(e.Hash), len(e.Paths), strings.Join(e.Paths, ", "), e.GitMessage)
 }
 
+// PushConflictError is a stash push refused because the directory already holds unmerged paths: nothing was
+// parked, so the bracketed work must not run. Use errors.As to classify it.
+type PushConflictError struct {
+	// Paths are the files the index holds unmerged.
+	Paths []string
+}
+
+func (e *PushConflictError) Error() string {
+	return fmt.Sprintf("cannot park the working copy: %d file(s) are already conflicted (%s)",
+		len(e.Paths), strings.Join(e.Paths, ", "))
+}
+
+// RestoreRefusedError is a stash apply git refused without leaving unmerged paths: the entry stays on the
+// stack, so the parked work is neither lost nor back in the tree. Use errors.As to classify it.
+type RestoreRefusedError struct {
+	Hash string
+	// GitMessage is the reason for the refused apply.
+	GitMessage string
+}
+
+func (e *RestoreRefusedError) Error() string {
+	return fmt.Sprintf("stash apply %s was refused; the entry is still on the stack: %s",
+		shortHash(e.Hash), e.GitMessage)
+}
+
 // gitMessage returns git's failure message on one line, falling back to the exit status.
 func gitMessage(out string, err error) string {
 	msg := strings.Join(strings.Fields(strings.TrimSpace(out)), " ")

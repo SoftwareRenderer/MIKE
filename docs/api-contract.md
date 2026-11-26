@@ -1304,6 +1304,11 @@ absolute worktree path, and logs nothing.
   broken repository answers 404 "task not found" about a task that exists.
 - A handler whose callee can refuse with an `errs.Conflict`/`ErrNotFound` sentinel uses `Fail`, not
   `Fault` — `RetryTask` propagates `ErrTaskAlreadyRunning`, so retrying a running task answers 409.
+- A **merge the person's own working copy blocks answers 409, not 500.** The bracket that parks the
+  checkout can be refused by a directory already holding conflict markers. The parked work can also come
+  back refused rather than conflicted. Either sentence names the files, or the stash entry that still holds
+  their work. A merge failure nobody caused is an `Operation` naming the merge. See
+  `docs/commit-and-done.md → Commit and Move to Done`.
 - `httputil.Fail` maps `context.Canceled` to 499 at debug — no fault to report, and an operator's log is
   not a transcript of every closed tab — and everything else to 500 at error.
 - An **admission refusal** is not a server fault and reaches neither `Fail` nor `Fault`: a socket over its
