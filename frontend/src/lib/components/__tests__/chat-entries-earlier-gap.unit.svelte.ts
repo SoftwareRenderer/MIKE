@@ -95,7 +95,7 @@ describe('the gap between the opening page and the window', () => {
 
         const band = notice(container);
         expect(band, 'the reader is looking at a transcript with rows missing and is told nothing').not.toBeNull();
-        expect(band?.textContent).toContain('Loading the earlier messages');
+        expect(band?.textContent).toContain('Loading messages');
 
         const rows = Array.from(container.querySelectorAll<HTMLElement>('.chat-messages .chat-entry[data-entry-id]'));
         expect(rows[0].dataset.entryId, 'the notice pushed the opening page out of the list').toBe('h-1');
