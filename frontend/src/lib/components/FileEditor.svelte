@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onMount, onDestroy } from 'svelte';
     import { t } from '$lib/i18n';
-    import { baseName, sandboxMountFromPath } from '$lib/utils/path';
+    import { baseName, sandboxMountFromPath, taskWorktreeRoot } from '$lib/utils/path';
     import { readFsFile, writeFsFile, imageFileURL, FsReadRefused, isTransientError, statFsPaths } from '$lib/api';
     import { isDisplayableImage } from '$lib/utils/diff-image';
     import { getEditorDraft, setEditorDraft, clearEditorDraft, loadEditorHistory, saveEditorHistory, loadAppSetting, saveAppSetting } from '$lib/storage';
@@ -155,8 +155,22 @@
     /** The states in which this editor holds no text: no CodeMirror, no draft, no save. Bytes the browser
      *  never held cannot be written back, so the save path closes on the same test. */
     const noBuffer = $derived(fileTooLarge || fileNotFound || fileBinary);
+    /**
+     * The host side of the root this editor's tree is listed by, which the language server is rooted at and
+     * from which the file route's name is cut. A diff panel lists the task's own worktree, not the checkout
+     * the project row names — so the language server analyzes the task's working files rather than HEAD, and
+     * the read names the file the way that repository does; the explorer lists the checkout, or the
+     * container's mount for a sandboxed project, which `containerPath` strips instead.
+     */
+    const treeHostRoot = $derived.by(() => {
+        if (mode === 'diff') {
+            const taskRoot = taskWorktreeRoot(workspaceDir || '', projectId, taskId || '');
+            if (taskRoot) return taskRoot;
+        }
+        return projectPath || '';
+    });
     /** What this file's tree calls it: the name the read route takes and a line selection names. */
-    const treeRelative = $derived(toProjectRelative(filePath || '', projectPath || '', containerPath || ''));
+    const treeRelative = $derived(toProjectRelative(filePath || '', treeHostRoot, containerPath || ''));
     /** A refused image still has its bytes: the read route's image kind serves them from disk. */
     const imageSrc = $derived(
         fileBinary && !imageFailed && isDisplayableImage(filePath || '')
@@ -953,7 +967,7 @@
      * something the explorers can open.
      */
     function canJumpTo(target: DefinitionTarget): boolean {
-        return !!lspWorkspaceRoot && isInsideWorkspace(target.path, lspWorkspaceRoot);
+        return !!treeHostRoot && isInsideWorkspace(target.path, treeHostRoot);
     }
 
     /**
@@ -964,7 +978,7 @@
      * re-rooted or the explorer is handed a file it cannot see.
      */
     function explorerPathFor(target: DefinitionTarget): string {
-        const relative = relativeToRoot(target.path, lspWorkspaceRoot);
+        const relative = relativeToRoot(target.path, treeHostRoot);
         if (!relative) return target.path;
         // An editor path this helper does not recognize (a diff editor's worktree
         // path, say) is already in its explorer's space.
@@ -1510,23 +1524,12 @@
         }
     });
 
-    // LSP workspace root and file path.
-    // Explorer mode: point the language server at the project root. Sandbox
-    // container paths (/home/sandbox/<name>/...) are normalized to host project
-    // paths — the LSP sandbox mounts projects at /mnt/<name>, not
-    // /home/sandbox/<name>, so without this gopls sees URIs that don't match its
-    // workspace root and reports "No packages found".
-    // Diff mode: point the language server at the task's worktree so the server
-    // analyzes the task's actual working files (not the project HEAD).
-    let lspWorkspaceRoot = $derived.by(() => {
-        if (mode === 'diff' && workspaceDir && projectId && taskId) {
-            return `${workspaceDir.replace(/\/+$/, '')}/${projectId}/${taskId}`;
-        }
-        return projectPath || '';
-    });
+    // LSP file path. Explorer mode: sandbox container paths (/home/sandbox/<name>/...) are normalized to
+    // host project paths — the LSP sandbox mounts projects at /mnt/<name>, not /home/sandbox/<name>, so
+    // without this gopls sees URIs that don't match its workspace root and reports "No packages found".
     let lspFilePath = $derived.by(() => {
         if (mode === 'diff') {
-            if (lspWorkspaceRoot && displayPath) return `${lspWorkspaceRoot}/${displayPath}`;
+            if (treeHostRoot && displayPath) return `${treeHostRoot}/${displayPath}`;
             if (projectPath && displayPath) return `${projectPath}/${displayPath}`;
             return filePath;
         }
@@ -1602,7 +1605,7 @@
         // Read extension state to track it as a dependency
         const _extCount = extensionManager.state.extensions.length;
         // These are captured so the async work below uses this run's values.
-        const wsRoot = lspWorkspaceRoot;
+        const wsRoot = treeHostRoot;
         // Check availability here, outside the async work, so the effect re-runs when extensions load.
         const availableForFile = isLSPAvailable(filePath);
 
@@ -1690,7 +1693,7 @@
     // With shared connections, reconnection creates a new virtual transport from the manager.
     $effect(() => {
         const client = lspClient;
-        const wsRoot = lspWorkspaceRoot;
+        const wsRoot = treeHostRoot;
         const editorView = view;
 
         if (!client || !editorView || !wsRoot || !lspAvailable) return;
@@ -1905,7 +1908,7 @@
                 {lspServerName}
                 {lspServerVersion}
                 lspMessage={lspMessageLog}
-                lspWorkspace={lspWorkspaceRoot}
+                lspWorkspace={treeHostRoot}
                 lspFile={lspFilePath}
             />
         {/if}

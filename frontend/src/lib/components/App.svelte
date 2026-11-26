@@ -17,7 +17,7 @@
     import { reconnectBanner } from '$lib/services/reconnect-banner.svelte';
     import { sessionBoot } from '$lib/services/session-boot.svelte';
     import { repoNameFromGitUrl } from '$lib/utils/repo-name';
-    import { folderName } from '$lib/utils/path';
+    import { folderName, taskWorktreeRoot } from '$lib/utils/path';
     import { dragCarriesFiles } from '$lib/utils/file-drop';
     import { resolveBoardLandingColumn, resolveClosedTaskColumn, mergeTaskUpdateIntoBoard } from '$lib/utils/task-utils';
     import { resolveLandingProject } from '$lib/utils/project-landing';
@@ -25,7 +25,7 @@
     import { urlRouter } from '$lib/services/url-router.svelte';
     import { reviewNotifier } from '$lib/services/review-notifications.svelte';
     import { explorerRecords } from '$lib/services/explorer-records';
-    import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, loadAppSetting, saveAppSetting, taskWorktreeRoot } from '$lib/storage';
+    import { getBoardCache, getBoardCacheEntry, boardCacheKey, doneStatsCacheKey, setBoardCache, removeBoardCache, loadAppSetting, saveAppSetting } from '$lib/storage';
     import { flushBoardMirror, mirrorBoard } from '$lib/services/board-mirror';
     import { useIsMobile } from '$lib/composables/use-is-mobile.svelte';
     import { useKeyboardShortcuts } from '$lib/composables/use-keyboard-shortcuts.svelte';

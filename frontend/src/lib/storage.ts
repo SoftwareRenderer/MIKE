@@ -29,7 +29,7 @@
 // `boot.ts` would close the loop.
 import { t } from '$lib/i18n';
 import { holdsReplay, type QueueOwner } from '$lib/utils/queue-ownership';
-import { sandboxMountFromPath } from '$lib/utils/path';
+import { sandboxMountFromPath, taskWorktreeRoot } from '$lib/utils/path';
 import type { Project } from '$lib/types';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -589,11 +589,6 @@ export async function saveCollapsedDiffFiles(scope: string, ids: Set<string>): P
 }
 
 // ─── Garbage collection ─────────────────────────────────────────────────────
-
-/** Where a task's worktree lives. The explorer that lists it and the wipe that forgets it both read this. */
-export function taskWorktreeRoot(workspaceDir: string, projectId: string, taskId: string): string {
-    return workspaceDir ? `${workspaceDir}/${projectId}/${taskId}` : '';
-}
 
 /**
  * Every path an editor can key a record by for the projects named: the checkout on the host, the container's

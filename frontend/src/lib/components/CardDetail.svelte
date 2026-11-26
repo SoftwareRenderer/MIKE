@@ -16,7 +16,7 @@
     import { willConsolidateIntoParent } from '$lib/utils/task-utils';
     import { createStatusLabel } from '$lib/utils/subtask-status';
     import { createBulkTaskActions } from '$lib/utils/bulk-task-actions';
-    import { sandboxMountPath } from '$lib/utils/path';
+    import { sandboxMountPath, taskWorktreeRoot } from '$lib/utils/path';
     import { isVimSwapFile } from '$lib/utils/file-suffix';
     import { isAnyModalOpen } from '$lib/utils/modal-state';
     import { clearHighlightCache } from '$lib/utils/highlight-cache';
@@ -227,9 +227,8 @@
             if (!containerPath) return null;
             return `${containerPath}/${relativePath}`;
         }
-        if (!workspaceDir) return null;
-
-        return `${workspaceDir.replace(/\/+$/, '')}/${task.project_id}/${task.id}/${relativePath}`;
+        const root = taskWorktreeRoot(workspaceDir || '', task.project_id, task.id);
+        return root ? `${root}/${relativePath}` : null;
     }
 
     // Consume fs events from the shared queue

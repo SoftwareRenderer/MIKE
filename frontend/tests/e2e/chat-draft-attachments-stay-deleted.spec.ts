@@ -94,6 +94,15 @@ test.describe('Draft images the person removed', () => {
             { message: 'the attached image reaches the attachments store' }).not.toBeNull();
         await removeImage(page);
 
+        // The deletion has to be in the database before a reload can mean anything by it. A write the click
+        // queues is dropped whole when the page is taken away before the renderer's next turn — measured: the
+        // transaction is created, never starts, and reports neither complete nor abort — so a reload issued
+        // in the same breath measures Chromium's scheduling rather than this app's rule. The rule here is the
+        // read: an emptied tray must not be painted back when the composer opens again.
+        await expect.poll(() => storedAttachments(page, taskId), {
+            message: 'the removal reaches the attachments store before the reload is asked of it',
+        }).toBeNull();
+
         await page.reload();
         await expect(page.locator('.task-detail-page')).toBeVisible();
         await expect(page.locator('.chat-form')).toBeVisible();
